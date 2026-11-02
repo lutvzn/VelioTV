@@ -124,6 +124,24 @@
         "prefer-rest-params": "error",
         "prefer-spread": "error"
       }
+    },
+    {
+      "files": ["scripts/**/*.mjs"],
+      "env": {
+        "node": true,
+        "browser": false
+      }
+    },
+    {
+      "files": ["scripts/tv-probe/probes/*.js"],
+      "globals": {
+        "webapis": "readonly",
+        "tizen": "readonly"
+      },
+      "rules": {
+        "no-unused-vars": "off",
+        "unicorn/consistent-function-scoping": "off"
+      }
     }
   ],
   "ignorePatterns": ["dist/**", "node_modules/**", ".claude/**", "workspace/**", "storybook-static/**"]

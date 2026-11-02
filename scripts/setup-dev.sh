@@ -80,7 +80,7 @@ parse_args() {
 install_apt_packages() {
   step "System packages"
 
-  local packages=(aria2 ca-certificates curl git gnome-keyring libsecret-1-0 openjdk-17-jre unzip)
+  local packages=(aria2 ca-certificates curl ffmpeg fonts-dejavu-core git gnome-keyring libsecret-1-0 openjdk-17-jre unzip)
   local missing=()
   local package
 

@@ -12,7 +12,7 @@ TiviMate's site returned only its title, so this list comes from third-party gui
 
 | Feature                                                       | Outlook              | Limit or approach                                                                                                            |
 | ------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| M3U, Xtream and Stalker sources                               | Yes                  | Cross-origin (CORS) behaviour is unconfirmed on both platforms                                                               |
+| M3U, Xtream and Stalker sources                               | Yes                  | Samsung doesn't enforce CORS for the packaged app (tested); LG is unconfirmed                                                |
 | TV guide, XMLTV, channel/group management, favourites, search | Yes                  | Performance on the TV is the main challenge                                                                                  |
 | Movies, series, resume, catch-up                              | Yes                  | Catch-up depends on the provider                                                                                             |
 | Parental PIN, themes, backup/restore                          | Yes                  | Restore via QR code or a file on a URL                                                                                       |
@@ -20,7 +20,7 @@ TiviMate's site returned only its title, so this list comes from third-party gui
 | Reminders                                                     | Partial              | Only while the app is open                                                                                                   |
 | Pause and rewind live TV                                      | Partial              | Limited to the provider's DVR window or catch-up; no Samsung time-shift API turned up                                        |
 | Fast-forward and rewind speeds                                | Partial              | LG lists speeds other than 1.0 as not supported                                                                              |
-| Multi-view                                                    | Unknown              | Samsung has `IN_APP_MULTIVIEW` (Tizen 7+) and `avplaystore`; neither vendor's pages read so far state decoder limits         |
+| Multi-view                                                    | 2 streams on Samsung | Tested: a main stream plus one picture-in-picture via `IN_APP_MULTIVIEW`; a third stops the second. LG is unknown            |
 | Local recording                                               | Samsung only, maybe  | Samsung has USB write APIs, but large-file behaviour is unconfirmed; LG says web apps can't access files a service downloads |
 | Recording with the app closed                                 | No, without a server | Needs a small self-hosted recorder                                                                                           |
 | Auto frame rate, autostart, system-wide picture-in-picture    | Probably not         | Not checked against vendor docs; confirm during Phase 0                                                                      |
@@ -77,6 +77,19 @@ Run these on real TVs, ideally the oldest and newest you plan to support. Simula
 5. **Multi-view:** how many streams can play at once on each TV.
 6. **Large guide files:** gzip decoding, parsing time and memory use on a 100 MB+ XMLTV file.
 7. **Recording:** sustained USB writes on Samsung, and how long a background service stays alive on LG.
+
+### Samsung results so far
+
+Tested on 2026-11-02 on a QN50Q60D (2024, Tizen 9.0), from inside the packaged app. To repeat a test, run the test stream server (`pnpm test-streams`) and a probe (`scripts/tv-probe/run.sh`), both inside the `tv-dev` box.
+
+- **Formats (test 1):** every test stream from `scripts/test-streams/` plays through AVPlay, as both raw MPEG-TS over HTTP and HLS: H.264 1080p and 1080i, HEVC 8-bit and Main10, MPEG-2 1080i, with AAC, MP2, AC-3 5.1 and E-AC-3 5.1 audio. Of 30 channels sampled from a public playlist, the 11 that were online all played; the other 19 also failed a plain `fetch` from the TV, so none was a player problem.
+- **Start time (Phase 3):** with AVPlay's default buffering, the first picture takes about 10 s for raw TS and 2–7.5 s for HLS. Setting `setBufferingParam` to 1–3 s cuts this to about 3.4 s for TS and 0.7 s for HLS. AVPlay reports a stream as prepared before it can show a picture, so measure start time at `onbufferingcomplete`.
+- **CORS (test 3):** not enforced. `fetch` and XHR both read responses from servers without CORS headers, over HTTP and HTTPS, so Samsung needs no proxy.
+- **Custom headers (test 4):** AVPlay sends a custom User-Agent (`setStreamingProperty("USER_AGENT", ...)`). There's no way to send a Referer: AVPlay has no option for it, and the app's `fetch` and XHR silently drop custom Referer and User-Agent headers. Streams that need a Referer will need a proxy.
+- **Large guide file (test 6, partly):** the app downloaded a 64 MB XMLTV file in 3.7 s and held it as text without a crash. Parsing time and memory are still to test.
+- **Video behind the UI (test 2):** works. The app's background cuts a hole where the video plays (`src/videoWindow.ts`), and the UI holds the TV's full 50 fps while scrolling a list over H.264 or HEVC video, in a preview window or full screen, where the app hides its menu. Checked on the TV: the video lines up with its window in both. Two lessons for the UI: a page-sized node with a `border` cost a third of the frame rate, because its shader runs on every pixel, so draw large outlines as thin bars; and any DOM element in the page layout (such as AVPlay's `<object>`) can make the page scroll with the arrow keys, so `index.html` turns page scrolling off. To see it, open `#/dev/video?url=<stream>` (`src/pages/dev/VideoTest.tsx`) or run the `video-ui` probe.
+- **Multi-view (test 5):** two streams at once: a main one, and one using the sub video scaler (`setStreamingProperty("IN_APP_MULTIVIEW", "VIDEO_VIEW_RESOURCE_SUB")`, with its audio off). A third player takes the sub scaler and stops the second. Any mix of H.264 and HEVC works; with two HEVC streams, the main one pauses briefly while the second starts. Without `IN_APP_MULTIVIEW`, a second player stops the first.
+- **Still to test:** guide parsing and USB recording.
 
 ## What you need before starting
 

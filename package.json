@@ -22,7 +22,9 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "check": "oxfmt --check && oxlint --deny-warnings && tsc && vitest run",
-    "deploy:tizen": "./scripts/deploy-tizen.sh"
+    "deploy:tizen": "./scripts/deploy-tizen.sh",
+    "test-streams": "node scripts/test-streams/server.mjs",
+    "tv-probe": "./scripts/tv-probe/run.sh"
   },
   "dependencies": {
     "@lightningtv/vite-hex-transform": "^1.1.0",

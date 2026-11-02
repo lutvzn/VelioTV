@@ -38,6 +38,8 @@ const MenuItem = (props: { label: string; current: boolean }) => {
 
 interface SideMenuProps {
   ref?: ElementNode | ((element: ElementNode) => void);
+  autofocus?: boolean;
+  hidden?: boolean;
   sections: readonly Section[];
   currentPath: string;
   onSelect: (path: string) => void;
@@ -53,13 +55,13 @@ export const SideMenu = (props: SideMenuProps) => {
   );
 
   return (
-    <View width={MENU_WIDTH} height={1080} color="#0b1d33ff">
+    <View width={MENU_WIDTH} height={1080} color="#0b1d33ff" alpha={props.hidden ? 0 : 1}>
       <Text x={40} y={56} fontSize={44}>
         TiviPlayer
       </Text>
       <Column
         ref={props.ref}
-        autofocus
+        autofocus={props.autofocus}
         x={24}
         y={170}
         width={ITEM_WIDTH}
@@ -67,7 +69,11 @@ export const SideMenu = (props: SideMenuProps) => {
         gap={12}
         scroll="none"
         selected={initialIndex}
-        onSelectedChanged={index => props.onSelect(props.sections[index].path)}
+        // Column also reports the selection each time the menu takes focus;
+        // only an actual move opens a section.
+        onSelectedChanged={(index, _menu, _item, lastIndex) => {
+          if (index !== lastIndex) props.onSelect(props.sections[index].path);
+        }}
         onRight={props.onRight}
         onBack={props.onBack}
       >

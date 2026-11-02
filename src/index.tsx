@@ -10,6 +10,7 @@ import Movies from "./pages/Movies";
 import Series from "./pages/Series";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import VideoTest from "./pages/dev/VideoTest";
 import fonts from "./fonts";
 import { merge } from "lodash-es";
 import { config } from "./device";
@@ -48,6 +49,7 @@ render(() => {
       <Route path="/movies" component={Movies} />
       <Route path="/series" component={Series} />
       <Route path="/settings" component={Settings} />
+      <Route path="/dev/video" component={VideoTest} />
       <Route path="/*all" component={NotFound} />
     </HashRouter>
   );
