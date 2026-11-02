@@ -1,0 +1,52 @@
+import { useLocation, useNavigate } from "@solidjs/router";
+import { View, ElementNode } from "@solidtv/solid";
+import { useAnnouncer, useMouse } from "@solidtv/solid/primitives";
+import { device } from "../device";
+
+declare module "@solidtv/solid/primitives" {
+  interface KeyMap {
+    Announcer: string | number | (string | number)[];
+    Menu: string | number | (string | number)[];
+    Text: string | number | (string | number)[];
+    Escape: string | number | (string | number)[];
+    Backspace: string | number | (string | number)[];
+  }
+}
+
+declare global {
+  interface Window {
+    APP: ElementNode;
+  }
+}
+
+const App = props => {
+  useMouse();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const announcer = useAnnouncer();
+
+  // Back goes to the previous page, and leaves the app from the home page.
+  const goBack = () => {
+    if (location.pathname === "/") {
+      device.then(d => d.closeApp()).catch(error => console.error("Couldn't close the app:", error));
+    } else history.back();
+  };
+  announcer.debug = false;
+  announcer.enabled = false;
+
+  return (
+    <View
+      ref={window.APP}
+      onAnnouncer={() => (announcer.enabled = !announcer.enabled)}
+      onLast={() => history.back()}
+      onBack={goBack}
+      onPlayPause={() => navigate("/text")}
+      onMenu={() => navigate("/")}
+    >
+      <View color={0x071423ff} />
+      {props.children}
+    </View>
+  );
+};
+
+export default App;

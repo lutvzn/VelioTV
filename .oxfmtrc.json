@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "arrowParens": "avoid",
+  "printWidth": 110,
+  "singleQuote": false,
+  "trailingComma": "all",
+  "tabWidth": 2,
+  "sortPackageJson": false,
+  "ignorePatterns": ["node_modules", ".DS_store", "dist", ".env"]
+}

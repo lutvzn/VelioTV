@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # Uses the pnpm version from package.json's packageManager field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The tests run in WebKit, the closest desktop engine to the TVs' browsers.
+      - run: pnpm exec playwright install --with-deps webkit
+
+      - name: Format, lint, type check and test
+        run: pnpm check
+
+      # Signing needs the Samsung certificates, so CI only checks that the
+      # Samsung build succeeds.
+      - name: Build for Samsung
+        run: pnpm build
+        env:
+          TARGET_DEVICE: tizen
