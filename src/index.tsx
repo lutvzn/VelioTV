@@ -4,8 +4,11 @@ import { useFocusManager } from "@solidtv/solid/primitives";
 import { HashRouter } from "@solidtv/solid/primitives/router";
 import type { RendererMain } from "@solidtv/renderer";
 import App from "./pages/App";
-import HelloWorld from "./pages/HelloWorld";
-import TextPage from "./pages/Text";
+import LiveTv from "./pages/LiveTv";
+import Guide from "./pages/Guide";
+import Movies from "./pages/Movies";
+import Series from "./pages/Series";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import fonts from "./fonts";
 import { merge } from "lodash-es";
@@ -40,8 +43,11 @@ render(() => {
   useFocusManager(config.keys);
   return (
     <HashRouter root={App}>
-      <Route path="/" component={HelloWorld} />
-      <Route path="/text" component={TextPage} />
+      <Route path="/" component={LiveTv} />
+      <Route path="/guide" component={Guide} />
+      <Route path="/movies" component={Movies} />
+      <Route path="/series" component={Series} />
+      <Route path="/settings" component={Settings} />
       <Route path="/*all" component={NotFound} />
     </HashRouter>
   );

@@ -1,3 +1,7 @@
 {
-  "home.headLine": "Hello World!"
+  "menu.live": "Live TV",
+  "menu.guide": "TV Guide",
+  "menu.movies": "Movies",
+  "menu.series": "Series",
+  "menu.settings": "Settings"
 }

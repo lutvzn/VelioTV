@@ -40,17 +40,16 @@ TiviMate's site returned only its title, so this list comes from third-party gui
 
 ## Fix these starter problems first
 
-These come from reading the code; a build hasn't been run to confirm them.
+All but the git repo are fixed and tested on the Samsung TV.
 
 - **Device builds:** fixed. `vite.config.js` points the `#device` import at `devices/<TARGET_DEVICE>`, and `src/device.ts` loads it and starts the device setup.
 - **Asset paths:** fixed. `devices/deviceConfigPlugin.ts` now uses `./` instead of an absolute base such as `/tizen/`.
 - **Packaging:** Tizen is done: `devices/tizen/config.xml` and `scripts/deploy-tizen.sh <tv-ip>`, which builds, signs, installs and starts the app. It worked on the Samsung TV on 2026-11-02. The webOS `appinfo.json` comes in the LG phase.
 - **Number keys:** fixed on Tizen, which maps them to 48–57 and registers the media and number keys at startup. Back leaves the app from the home page. LG still has `-1`, to fix in Phase 9.
-- **Player:**
-  - The `<video>` element has no z-index, so it may cover the UI.
-  - `seek()` is relative despite its name.
-  - `stop()` creates a new Shaka player without destroying the old one.
-- **Repo setup:** it isn't a git repo yet, and it has both npm and pnpm lockfiles. Keep pnpm, since `package.json` declares it.
+- **Player:** fixed in `devices/common/player.ts`. The `<video>` element sits behind the UI's canvas, `seek()` jumps to a position and a new `skip()` moves relative to it, and `stop()` reuses the Shaka player instead of leaking it.
+- **Repo setup:** it isn't a git repo yet. The npm lockfile is gone, so pnpm is the only package manager.
+- **Tooling:** done. Oxc does formatting (`oxfmt`, replacing Prettier) and linting (`oxlint` with type-aware rules). `pnpm check` runs format, lint, type check and tests, and `.forgejo/workflows/ci.yml` runs it plus a Samsung build on Forgejo.
+- **App shell:** done. A side menu (`src/components/SideMenu.tsx`) opens placeholder pages for Live TV, TV Guide, Movies, Series and Settings.
 
 ## Phases
 
