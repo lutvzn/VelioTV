@@ -7,8 +7,8 @@
 #   ./scripts/tv-probe/run.sh <tv-ip> <probe> [input-json]
 #
 # Probes are in scripts/tv-probe/probes/. Examples:
-#   ./scripts/tv-probe/run.sh 10.0.1.139 avplay '{"index": "http://10.0.0.101:8090/"}'
-#   ./scripts/tv-probe/run.sh 10.0.1.139 fetch '{"urls": ["https://example.com/"]}'
+#   ./scripts/tv-probe/run.sh <tv-ip> avplay '{"index": "http://<dev-ip>:8090/"}'
+#   ./scripts/tv-probe/run.sh <tv-ip> fetch '{"urls": ["https://example.com/"]}'
 #
 # The result is printed as JSON; progress goes to stderr. It restarts the app
 # in debug mode, because the TV only opens its debug port when the app starts.

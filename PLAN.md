@@ -13,7 +13,7 @@ TiviMate's site returned only its title, so this list comes from third-party gui
 | Feature                                                       | Outlook              | Limit or approach                                                                                                            |
 | ------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | M3U, Xtream and Stalker sources                               | Yes                  | Samsung doesn't enforce CORS for the packaged app (tested); LG is unconfirmed                                                |
-| TV guide, XMLTV, channel/group management, favourites, search | Yes                  | Performance on the TV is the main challenge                                                                                  |
+| TV guide, XMLTV, channel/group management, favourites, search | Yes                  | Parsing is fast on the TV (tested); how quickly IndexedDB can store a large guide is the main challenge                      |
 | Movies, series, resume, catch-up                              | Yes                  | Catch-up depends on the provider                                                                                             |
 | Parental PIN, themes, backup/restore                          | Yes                  | Restore via QR code or a file on a URL                                                                                       |
 | Audio and subtitle track selection                            | Mostly               | Samsung has an API for this; webOS needs testing                                                                             |
@@ -40,14 +40,14 @@ TiviMate's site returned only its title, so this list comes from third-party gui
 
 ## Fix these starter problems first
 
-All but the git repo are fixed and tested on the Samsung TV.
+All are fixed and tested on the Samsung TV.
 
 - **Device builds:** fixed. `vite.config.js` points the `#device` import at `devices/<TARGET_DEVICE>`, and `src/device.ts` loads it and starts the device setup.
 - **Asset paths:** fixed. `devices/deviceConfigPlugin.ts` now uses `./` instead of an absolute base such as `/tizen/`.
 - **Packaging:** Tizen is done: `devices/tizen/config.xml` and `scripts/deploy-tizen.sh <tv-ip>`, which builds, signs, installs and starts the app. It worked on the Samsung TV on 2026-11-02. The webOS `appinfo.json` comes in the LG phase.
 - **Number keys:** fixed on Tizen, which maps them to 48–57 and registers the media and number keys at startup. Back leaves the app from the home page. LG still has `-1`, to fix in Phase 9.
 - **Player:** fixed in `devices/common/player.ts`. The `<video>` element sits behind the UI's canvas, `seek()` jumps to a position and a new `skip()` moves relative to it, and `stop()` reuses the Shaka player instead of leaking it.
-- **Repo setup:** it isn't a git repo yet. The npm lockfile is gone, so pnpm is the only package manager.
+- **Repo setup:** done. The repo is on Forgejo (branch `master`), and the npm lockfile is gone, so pnpm is the only package manager.
 - **Tooling:** done. Oxc does formatting (`oxfmt`, replacing Prettier) and linting (`oxlint` with type-aware rules). `pnpm check` runs format, lint, type check and tests, and `.forgejo/workflows/ci.yml` runs it plus a Samsung build on Forgejo.
 - **App shell:** done. A side menu (`src/components/SideMenu.tsx`) opens placeholder pages for Live TV, TV Guide, Movies, Series and Settings.
 
@@ -86,10 +86,34 @@ Tested on 2026-11-02 on a QN50Q60D (2024, Tizen 9.0), from inside the packaged a
 - **Start time (Phase 3):** with AVPlay's default buffering, the first picture takes about 10 s for raw TS and 2–7.5 s for HLS. Setting `setBufferingParam` to 1–3 s cuts this to about 3.4 s for TS and 0.7 s for HLS. AVPlay reports a stream as prepared before it can show a picture, so measure start time at `onbufferingcomplete`.
 - **CORS (test 3):** not enforced. `fetch` and XHR both read responses from servers without CORS headers, over HTTP and HTTPS, so Samsung needs no proxy.
 - **Custom headers (test 4):** AVPlay sends a custom User-Agent (`setStreamingProperty("USER_AGENT", ...)`). There's no way to send a Referer: AVPlay has no option for it, and the app's `fetch` and XHR silently drop custom Referer and User-Agent headers. Streams that need a Referer will need a proxy.
-- **Large guide file (test 6, partly):** the app downloaded a 64 MB XMLTV file in 3.7 s and held it as text without a crash. Parsing time and memory are still to test.
+- **Large guide file (test 6):** parsing is fast, but storing is slow. A Web Worker streams the file through `DecompressionStream("gzip")` and `TextDecoderStream` (the TV supports both) and scans it as text, without building an XML document. Two public guides together (112 MB of XML: 5,908 channels and 220,059 programmes) parsed in 15.3 s, including the download, while the UI kept 60 fps (lowest 57). Kept in memory, the programmes used about 230 MB of the TV's 379 MB free, which is too much. Saved to IndexedDB, one record per programme, the same import (downloaded gzipped, 15 MB) took 217 s, 200 s of it writing: about 1,100 programmes a second. Free memory stayed above 337 MB, and the UI kept 60 fps (lowest 53). At that rate, 7 days for 10k channels would take far too long, so Phase 2 starts by finding a faster storage layout. To repeat the test, run the `guide` probe.
 - **Video behind the UI (test 2):** works. The app's background cuts a hole where the video plays (`src/videoWindow.ts`), and the UI holds the TV's full 50 fps while scrolling a list over H.264 or HEVC video, in a preview window or full screen, where the app hides its menu. Checked on the TV: the video lines up with its window in both. Two lessons for the UI: a page-sized node with a `border` cost a third of the frame rate, because its shader runs on every pixel, so draw large outlines as thin bars; and any DOM element in the page layout (such as AVPlay's `<object>`) can make the page scroll with the arrow keys, so `index.html` turns page scrolling off. To see it, open `#/dev/video?url=<stream>` (`src/pages/dev/VideoTest.tsx`) or run the `video-ui` probe.
 - **Multi-view (test 5):** two streams at once: a main one, and one using the sub video scaler (`setStreamingProperty("IN_APP_MULTIVIEW", "VIDEO_VIEW_RESOURCE_SUB")`, with its audio off). A third player takes the sub scaler and stops the second. Any mix of H.264 and HEVC works; with two HEVC streams, the main one pauses briefly while the second starts. Without `IN_APP_MULTIVIEW`, a second player stops the first.
-- **Still to test:** guide parsing and USB recording.
+- **Not tested yet:** USB recording (test 7). Recording is out of v1, so it moves to Phase 7, where the optional recorder is decided.
+
+## Phase 2 plan: sources and data
+
+Phase 1 is done: the starter fixes, Tizen packaging, CI, deploy, app shell and key mapping above all work on the Samsung TV.
+
+1. **Storage layout:** done. The `storage` probe wrote the same synthetic guide (200 channels, 7 days, 24 programmes a day, with 30-word descriptions) to IndexedDB on the TV in several layouts:
+
+   | Layout                                              | Programmes stored a second | Read a channel's week | Read a guide screen (10 channels × 3 h) |
+   | --------------------------------------------------- | -------------------------- | --------------------- | --------------------------------------- |
+   | One record per programme, indexed                   | 1,270                      | 24 ms                 | 19 ms                                   |
+   | One record per programme, keyed by channel and time | 1,470                      | 16 ms                 | 16 ms                                   |
+   | One record per channel per day                      | 11,650                     | 8 ms                  | 14 ms                                   |
+   | The same, with relaxed durability                   | 27,740                     | 7 ms                  | 12 ms                                   |
+
+   The cost is per record, not per byte: leaving descriptions out barely helped. **The guide is stored as one record per channel per day, written with `durability: "relaxed"`.** At 2,000 channels (336,000 programmes) it still stored 23,000–27,000 programmes a second, so 7 days for 10k channels should take about a minute, and the UI kept 60 fps throughout. Relaxed writes can lose the last few transactions if the TV loses power, which is fine for guide data, as long as an import counts as finished only once its last write completes.
+
+2. **Test data:** done. The test stream server (`pnpm test-streams`, see `scripts/test-streams/server.mjs`) now also serves made-up sources whose channels play the test streams: an M3U playlist, an XMLTV guide (plain, or gzipped and cached), channel logos, a mock Xtream API (`test`/`test`) and a mock Stalker portal (MAC `00:1A:79:00:00:01`). All four describe the same channels, generated from fixed seeds in `catalog.mjs`. They include the awkward cases real sources have: channels with no guide, two channels sharing one guide, missing logos, names with commas, quotes and accents, channels that need a Referer or User-Agent, catch-up channels, and guides in four time zones. Stalker stream links need `create_link`, as on real portals.
+
+   The default source has 10,000 channels in 120 groups, with guides for 9,305 of them. Its guide covers 7 days from yesterday: 1.7 million programmes, 649 MB of XML, or 94 MB gzipped. The server writes the gzipped file in about 30 s the first time it is asked for. This is heavier than most real guides (the 220,000-programme public guide in Phase 0 was 112 MB), so it is a worst case. `?channels=` and `?days=` give smaller sources, and the `small`/`small` account and MAC `00:1A:79:00:00:02` have 50 channels.
+
+3. **Parsers:** M3U and XMLTV parsers in `src/data/`, as plain TypeScript tested with Vitest, run in a Web Worker that streams and stores as it parses.
+4. **Xtream and Stalker clients:** load live channels, groups and the guide from each, using the same storage.
+5. **Sources and refresh:** add, edit and remove sources in Settings, import with progress, and refresh on a schedule and at startup when the data is old.
+6. **Done check:** import the 10k-channel test source with 7 days of guide data on the TV, without a crash, and record the time and memory here.
 
 ## What you need before starting
 

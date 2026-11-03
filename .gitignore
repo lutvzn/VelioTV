@@ -5,3 +5,6 @@ dist/
 *storybook.log
 workspace/
 storybook-static/
+
+# Local details (device addresses, IDs); see AGENTS.md
+PRIVATE.md
