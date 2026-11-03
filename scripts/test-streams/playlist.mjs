@@ -23,7 +23,7 @@ const attribute = value => String(value).replaceAll('"', "'");
 // An extended M3U playlist (#EXTM3U with #EXTINF attributes), as IPTV
 // providers serve it. `url` gives each channel's stream URL.
 export const m3u = ({ base, channels, guideUrl, url = channel => streamUrl(base, channel) }) => {
-  const lines = [`#EXTM3U url-tvg="${guideUrl}" x-tvg-url="${guideUrl}"`];
+  const lines = [guideUrl ? `#EXTM3U url-tvg="${guideUrl}" x-tvg-url="${guideUrl}"` : "#EXTM3U"];
   for (const channel of channels) {
     const attributes = [
       ["tvg-id", channel.guideId ?? ""],

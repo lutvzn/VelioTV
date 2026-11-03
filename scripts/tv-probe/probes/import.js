@@ -7,7 +7,8 @@
 //   { "kind": "xtream", "server": "http://<dev-ip>:8090", "username": "test", "password": "test" }
 // plus:
 //   "keep": true   keep the import afterwards (source "tv-probe"); by default
-//       it is deleted
+//       it is deleted. The app deletes it at its next start, as it isn't one
+//       of its sources.
 //   "fresh": true   delete the app's whole database first. Deleted records
 //       keep their disk space until the database compacts, which can fill
 //       the storage quota during repeated tests.

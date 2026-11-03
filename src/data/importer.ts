@@ -11,6 +11,7 @@ import {
   DAY,
   finished,
   openDb,
+  readImport,
   request,
   sourceRange,
   writeTransaction,
@@ -155,8 +156,22 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     options.onProgress({ ...progress });
   };
 
+  // While importing, and after a failure, the import state keeps the counts
+  // of the data still stored from before.
+  let previous: ImportState | undefined;
+  const shownState = (status: "importing" | "failed", error?: string): ImportState => {
+    const shown: ImportState = { ...(previous ?? state), status, startedAt: started };
+    delete shown.finishedAt;
+    delete shown.error;
+    if (status === "failed") shown.finishedAt = Date.now();
+    if (error !== undefined) shown.error = error;
+    return shown;
+  };
+
   try {
-    await putState(db, state);
+    previous = await readImport(db, source);
+    if (previous?.lastDoneAt) state.lastDoneAt = previous.lastDoneAt;
+    await putState(db, shownState("importing"));
     // The playlist's guide ids, lower-cased, to its own spelling of them.
     const guideIds = new Map<string, string>();
     let guideUrls = input.guideUrls ?? [];
@@ -273,9 +288,11 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     await writer.finish();
     await deleteStale(db, source, state.channels, kept, writer);
 
+    const finishedAt = Date.now();
     Object.assign(state, {
       status: "done",
-      finishedAt: Date.now(),
+      finishedAt,
+      lastDoneAt: finishedAt,
       guideChannels: kept.size,
       programmes: writer.programmes,
       guideBytes: writer.bytes,
@@ -292,10 +309,8 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       seconds: (Date.now() - started) / 1000,
     };
   } catch (error) {
-    state.status = "failed";
-    state.finishedAt = Date.now();
-    state.error = error instanceof Error ? error.message : String(error);
-    await putState(db, state).catch(() => {});
+    const message = error instanceof Error ? error.message || error.name : String(error);
+    await putState(db, shownState("failed", message)).catch(() => {});
     throw error;
   } finally {
     db.close();

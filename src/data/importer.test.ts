@@ -108,12 +108,22 @@ describe("runImport", () => {
     expect((await readGuide(db, "test", guideId, window.start, window.end)).length).toBeGreaterThan(0);
     db.close();
 
-    // A failed refresh leaves the data usable, and says it failed.
+    // A failed refresh leaves the data usable, and says it failed, with the
+    // counts and time of the import that the data is from.
+    db = await openDb(DB);
+    const first = await readImport(db, "test");
+    db.close();
     await expect(
       runImport(request, { dbName: DB, fetch: serve({ ...files, [GUIDE]: undefined }) }),
     ).rejects.toThrow(/HTTP 404/);
     db = await openDb(DB);
-    expect(await readImport(db, "test")).toMatchObject({ status: "failed" });
+    expect(await readImport(db, "test")).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("HTTP 404"),
+      channels: 30,
+      programmes: first?.programmes,
+      lastDoneAt: first?.finishedAt,
+    });
     expect(await readChannels(db, "test")).toHaveLength(30);
     db.close();
 

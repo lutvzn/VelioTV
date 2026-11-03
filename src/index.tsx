@@ -15,6 +15,7 @@ import fonts from "./fonts";
 import { merge } from "lodash-es";
 import { config } from "./device";
 import { installDevHooks } from "./devHooks";
+import { library } from "./library";
 import {
   Rounded,
   RoundedWithShadow,
@@ -40,6 +41,9 @@ shaders.registerShaderType("roundedWithBorderWithShadow", RoundedWithBorderAndSh
 shaders.registerShaderType("radialGradient", RadialGradient);
 shaders.registerShaderType("linearGradient", LinearGradient);
 shaders.registerShaderType("holePunch", HolePunch);
+
+// Imports sources whose data is old or missing, now and on a schedule.
+library.start().catch(error => console.error("Couldn't start the source schedule:", error));
 
 loadFonts(fonts).catch(error => console.error("Fonts failed to load:", error));
 render(() => {

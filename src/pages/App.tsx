@@ -4,8 +4,11 @@ import { useAnnouncer, useMouse } from "@solidtv/solid/primitives";
 import type { JSX } from "solid-js";
 import { MENU_WIDTH, SideMenu } from "../components/SideMenu";
 import { device } from "../device";
+import { library } from "../library";
 import { SECTIONS } from "../sections";
+import { $t } from "../translate";
 import { videoFillsScreen, videoWindow } from "../videoWindow";
+import { progressSummary } from "./settings/status";
 
 declare module "@solidtv/solid/primitives" {
   interface KeyMap {
@@ -28,6 +31,16 @@ const backgroundHole = () => {
   const video = videoWindow();
   if (!video) return { x: 0, y: 0, w: 0, h: 0 };
   return { x: video.x, y: video.y, w: video.width, h: video.height };
+};
+
+// What the menu says while a source imports.
+const importStatus = () => {
+  const running = library.importing();
+  if (!running?.source) return undefined;
+  return $t("menu.updatingProgress", {
+    name: running.source.name,
+    progress: progressSummary(running.progress),
+  });
 };
 
 const closeApp = () => {
@@ -69,6 +82,8 @@ const App = (props: { children?: JSX.Element }) => {
         x={MENU_WIDTH}
         width={1920 - MENU_WIDTH}
         height={1080}
+        // To the page's first node, which passes it on to what should have it.
+        forwardFocus={0}
         onLeft={focusMenu}
         onBack={focusMenu}
       >
@@ -82,6 +97,7 @@ const App = (props: { children?: JSX.Element }) => {
         sections={SECTIONS}
         currentPath={location.pathname}
         onSelect={path => navigate(path, { replace: true })}
+        status={importStatus()}
         onRight={focusContent}
         onBack={closeApp}
       />

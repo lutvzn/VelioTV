@@ -27,7 +27,13 @@ export interface ImportState {
   status: "importing" | "done" | "failed";
   startedAt: number;
   finishedAt?: number;
+  /** When an import of this source last finished without failing. */
+  lastDoneAt?: number;
   error?: string;
+  /**
+   * The counts below describe the data stored. While importing, or after an
+   * import failed, they are the last finished import's.
+   */
   channels: number;
   guideChannels: number;
   /** Programmes stored. */
@@ -107,6 +113,9 @@ export const sourceRange = (source: string) => IDBKeyRange.bound([source], [sour
 
 export const readImport = (db: IDBDatabase, source: string) =>
   request<ImportState | undefined>(db.transaction("imports").objectStore("imports").get(source));
+
+export const readImports = (db: IDBDatabase) =>
+  request<ImportState[]>(db.transaction("imports").objectStore("imports").getAll());
 
 export const readChannels = (db: IDBDatabase, source: string) =>
   request<StoredChannel[]>(db.transaction("channels").objectStore("channels").getAll(sourceRange(source)));

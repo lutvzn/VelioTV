@@ -17,6 +17,7 @@ const [dict] = createResource(locale, fetchDictionary, {
   initialValue: en_dict,
 });
 
-const $t = i18n.translator(dict);
+// Strings can hold {{ name }} for values passed in.
+const $t = i18n.translator(dict, i18n.resolveTemplate);
 
 export { $t, locale, setLocale };

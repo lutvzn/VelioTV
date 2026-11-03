@@ -11,21 +11,42 @@ import ImportWorker from "./import.worker?worker";
 
 export type { ImportProgress, ImportRequest, ImportResult };
 
-export const importSource = (request: ImportRequest, onProgress?: (progress: ImportProgress) => void) =>
+/**
+ * Imports a source in a new worker. Aborting `signal` stops the worker; the
+ * source's import state then still says "importing" until its next import.
+ */
+export const importSource = (
+  request: ImportRequest,
+  onProgress?: (progress: ImportProgress) => void,
+  signal?: AbortSignal,
+) =>
   new Promise<ImportResult>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Import cancelled", "AbortError"));
+      return;
+    }
     const worker = new ImportWorker();
+    const stop = () => {
+      worker.terminate();
+      signal?.removeEventListener("abort", cancel);
+    };
+    const cancel = () => {
+      stop();
+      reject(new DOMException("Import cancelled", "AbortError"));
+    };
+    signal?.addEventListener("abort", cancel);
     worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
       const message = event.data;
       if (message.type === "progress") {
         onProgress?.(message.progress);
         return;
       }
-      worker.terminate();
+      stop();
       if (message.type === "done") resolve(message.result);
       else reject(new Error(message.message));
     });
     worker.addEventListener("error", event => {
-      worker.terminate();
+      stop();
       reject(new Error(`Import worker failed: ${event.message}`));
     });
     worker.postMessage(request);

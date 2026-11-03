@@ -43,6 +43,8 @@ interface SideMenuProps {
   sections: readonly Section[];
   currentPath: string;
   onSelect: (path: string) => void;
+  /** A line at the bottom, such as an import in progress. */
+  status?: string;
   onRight?: KeyHandler;
   onBack?: KeyHandler;
 }
@@ -81,6 +83,17 @@ export const SideMenu = (props: SideMenuProps) => {
           {section => <MenuItem label={section.label} current={section.path === props.currentPath} />}
         </For>
       </Column>
+      <Text
+        x={40}
+        y={1080 - 110}
+        width={MENU_WIDTH - 64}
+        contain="width"
+        maxLines={2}
+        fontSize={22}
+        color="#ffffffb3"
+      >
+        {props.status ?? ""}
+      </Text>
     </View>
   );
 };
