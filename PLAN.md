@@ -10,20 +10,20 @@ Rough estimate: 4–5 months for one full-time developer.
 
 TiviMate's site returned only its title, so this list comes from third-party guides and prior knowledge. Check it against the real app before treating it as final.
 
-| Feature                                                       | Outlook              | Limit or approach                                                                                                            |
-| ------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| M3U, Xtream and Stalker sources                               | Yes                  | Samsung doesn't enforce CORS for the packaged app (tested); LG is unconfirmed                                                |
-| TV guide, XMLTV, channel/group management, favourites, search | Yes                  | Parsing is fast on the TV (tested); how quickly IndexedDB can store a large guide is the main challenge                      |
-| Movies, series, resume, catch-up                              | Yes                  | Catch-up depends on the provider                                                                                             |
-| Parental PIN, themes, backup/restore                          | Yes                  | Restore via QR code or a file on a URL                                                                                       |
-| Audio and subtitle track selection                            | Mostly               | Samsung has an API for this; webOS needs testing                                                                             |
-| Reminders                                                     | Partial              | Only while the app is open                                                                                                   |
-| Pause and rewind live TV                                      | Partial              | Limited to the provider's DVR window or catch-up; no Samsung time-shift API turned up                                        |
-| Fast-forward and rewind speeds                                | Partial              | LG lists speeds other than 1.0 as not supported                                                                              |
-| Multi-view                                                    | 2 streams on Samsung | Tested: a main stream plus one picture-in-picture via `IN_APP_MULTIVIEW`; a third stops the second. LG is unknown            |
-| Local recording                                               | Samsung only, maybe  | Samsung has USB write APIs, but large-file behaviour is unconfirmed; LG says web apps can't access files a service downloads |
-| Recording with the app closed                                 | No, without a server | Needs a small self-hosted recorder                                                                                           |
-| Auto frame rate, autostart, system-wide picture-in-picture    | Probably not         | Not checked against vendor docs; confirm during Phase 0                                                                      |
+| Feature                                                       | Outlook              | Limit or approach                                                                                                                 |
+| ------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| M3U, Xtream and Stalker sources                               | Yes                  | Samsung doesn't enforce CORS for the packaged app (tested); LG is unconfirmed. Stalker needs a cookie the app can't send (tested) |
+| TV guide, XMLTV, channel/group management, favourites, search | Yes                  | Parsing is fast on the TV (tested); how quickly IndexedDB can store a large guide is the main challenge                           |
+| Movies, series, resume, catch-up                              | Yes                  | Catch-up depends on the provider                                                                                                  |
+| Parental PIN, themes, backup/restore                          | Yes                  | Restore via QR code or a file on a URL                                                                                            |
+| Audio and subtitle track selection                            | Mostly               | Samsung has an API for this; webOS needs testing                                                                                  |
+| Reminders                                                     | Partial              | Only while the app is open                                                                                                        |
+| Pause and rewind live TV                                      | Partial              | Limited to the provider's DVR window or catch-up; no Samsung time-shift API turned up                                             |
+| Fast-forward and rewind speeds                                | Partial              | LG lists speeds other than 1.0 as not supported                                                                                   |
+| Multi-view                                                    | 2 streams on Samsung | Tested: a main stream plus one picture-in-picture via `IN_APP_MULTIVIEW`; a third stops the second. LG is unknown                 |
+| Local recording                                               | Samsung only, maybe  | Samsung has USB write APIs, but large-file behaviour is unconfirmed; LG says web apps can't access files a service downloads      |
+| Recording with the app closed                                 | No, without a server | Needs a small self-hosted recorder                                                                                                |
+| Auto frame rate, autostart, system-wide picture-in-picture    | Probably not         | Not checked against vendor docs; confirm during Phase 0                                                                           |
 
 ## Key decisions
 
@@ -53,18 +53,18 @@ All are fixed and tested on the Samsung TV.
 
 ## Phases
 
-| #   | Phase                | Main work                                                                                                                                    | Done when                                                    | Time    |
-| --- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------- |
-| 0   | Device tests         | Test the risks listed below on Samsung                                                                                                       | Parity table is final for Samsung                            | 1 wk    |
-| 1   | Foundation           | Starter fixes, Tizen packaging, CI, deploy to TV, app shell, key mapping                                                                     | The Samsung TV installs the app and responds to the remote   | 1 wk    |
-| 2   | Sources and data     | M3U, Xtream and Stalker parsers, XMLTV worker, storage, scheduled refresh                                                                    | 10k channels and 7 days of guide data import without a crash | 2–3 wks |
-| 3   | Live player          | Playback engines, zapping, info banner, tracks, reconnect, error handling                                                                    | Hours of playback and repeated zapping stay stable           | 2–3 wks |
-| 4   | TV guide and main UI | Guide grid, channel list, mini-preview, search, number entry                                                                                 | Smooth scrolling at the 10k channel load                     | 2–3 wks |
-| 5   | Library management   | Favourites, custom groups, sorting, hiding, multiple playlists, parental PIN, settings, backup                                               | Settings survive a restart and a restore                     | 2 wks   |
-| 6   | Catch-up and VOD     | Catch-up URL formats, movies, series, resume, reminders                                                                                      | Works with at least 3 different providers                    | 2 wks   |
-| 7   | Advanced             | Multi-view and pause-live, depending on Phase 0; optional recorder                                                                           | Each feature ships or gets a documented limit                | 3–4 wks |
-| 8   | Hardening            | Memory soak tests, older-TV tuning, translations, accessibility, store packaging                                                             | 24-hour run on the oldest supported Samsung TV               | 2–3 wks |
-| 9   | LG webOS             | Run the Phase 0 tests on LG, webOS packaging (`appinfo.json`), key mapping, `<video>` and `mpegts.js` engines, LG limits in the parity table | Phases 1–8 "done when" checks pass on an LG TV               | 3–4 wks |
+| #   | Phase                | Main work                                                                                                                                    | Done when                                                           | Time    |
+| --- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------- |
+| 0   | Device tests         | Test the risks listed below on Samsung                                                                                                       | Parity table is final for Samsung                                   | 1 wk    |
+| 1   | Foundation           | Starter fixes, Tizen packaging, CI, deploy to TV, app shell, key mapping                                                                     | The Samsung TV installs the app and responds to the remote          | 1 wk    |
+| 2   | Sources and data     | M3U, Xtream and Stalker parsers, XMLTV worker, storage, scheduled refresh                                                                    | 10k channels import without a crash, with as many guide days as fit | 2–3 wks |
+| 3   | Live player          | Playback engines, zapping, info banner, tracks, reconnect, error handling                                                                    | Hours of playback and repeated zapping stay stable                  | 2–3 wks |
+| 4   | TV guide and main UI | Guide grid, channel list, mini-preview, search, number entry                                                                                 | Smooth scrolling at the 10k channel load                            | 2–3 wks |
+| 5   | Library management   | Favourites, custom groups, sorting, hiding, multiple playlists, parental PIN, settings, backup                                               | Settings survive a restart and a restore                            | 2 wks   |
+| 6   | Catch-up and VOD     | Catch-up URL formats, movies, series, resume, reminders                                                                                      | Works with at least 3 different providers                           | 2 wks   |
+| 7   | Advanced             | Multi-view and pause-live, depending on Phase 0; optional recorder                                                                           | Each feature ships or gets a documented limit                       | 3–4 wks |
+| 8   | Hardening            | Memory soak tests, older-TV tuning, translations, accessibility, store packaging                                                             | 24-hour run on the oldest supported Samsung TV                      | 2–3 wks |
+| 9   | LG webOS             | Run the Phase 0 tests on LG, webOS packaging (`appinfo.json`), key mapping, `<video>` and `mpegts.js` engines, LG limits in the parity table | Phases 1–8 "done when" checks pass on an LG TV                      | 3–4 wks |
 
 ## Phase 0 tests
 
@@ -110,10 +110,39 @@ Phase 1 is done: the starter fixes, Tizen packaging, CI, deploy, app shell and k
 
    The default source has 10,000 channels in 120 groups, with guides for 9,305 of them. Its guide covers 7 days from yesterday: 1.7 million programmes, 649 MB of XML, or 94 MB gzipped. The server writes the gzipped file in about 30 s the first time it is asked for. This is heavier than most real guides (the 220,000-programme public guide in Phase 0 was 112 MB), so it is a worst case. `?channels=` and `?days=` give smaller sources, and the `small`/`small` account and MAC `00:1A:79:00:00:02` have 50 channels.
 
-3. **Parsers:** M3U and XMLTV parsers in `src/data/`, as plain TypeScript tested with Vitest, run in a Web Worker that streams and stores as it parses.
-4. **Xtream and Stalker clients:** load live channels, groups and the guide from each, using the same storage.
+3. **Parsers:** done. M3U and XMLTV parsers in `src/data/`, as plain TypeScript tested with Vitest, run in a Web Worker that streams and stores as it parses (`importer.ts`, started by `importSource()` in `importClient.ts`). The tests run against the test sources. On a desktop the XMLTV parser reads about 170,000 programmes a second. `src/devHooks.ts` exposes the importer to on-TV probes as `window.tiviplayer`.
+
+   On the TV (the `import` probe), a 2,000-channel source (340,471 programmes, 7 days) imported in 41.6 s at 60 fps (lowest 59), with free memory staying above 332 MB. Reading a guide screen back took 17 ms. Writing one batch while parsing the next raised the guide stage from about 10,000 to 12,000 programmes a second.
+
+   **Storage is capped at 80 MB per app.** The `quota` probe stores only 70 MB of incompressible data before `QuotaExceededError`, with or without the `unlimitedstorage` privilege. `navigator.storage.estimate()` also reports an 80 MB quota. Stored as plain records, the guide takes about 240 bytes a programme, so a 4,000-channel import failed after about 600,000 programmes. Deleted records keep their space until the database compacts, and only uninstalling the app reliably frees it. The Tizen filesystem API is no way round this (the `files` probe): it doesn't exist in workers, and on the main thread it wrote 1.3 MB a second at 1 fps.
+
+   Real guides compress well. On the Plex and PlutoTV guides (249,172 programmes), a programme takes 284 bytes as JSON, 66 bytes deflated per channel per day, and 49–54 bytes deflated per channel for the whole guide. Even compressed, 10k channels × 7 days (about 1.7 million programmes) would need about 100 MB, so the guide needs a size budget.
+
+   **Decision: compress, refresh in place, and keep the guide within a budget.**
+   - **Compression:** each channel-day record is packed as JSON field arrays and deflated with fflate (`guideCodec.ts`). fflate is synchronous, which keeps merges simple, and works on TVs without `CompressionStream`. Its streaming gunzip also covers TVs without `DecompressionStream`.
+   - **Refresh in place:** records are keyed by source, and a refresh overwrites them, then deletes what it didn't write. If a refresh fails partway, the source keeps a mix of old and new data, and its import state says "failed".
+   - **Budget:** the guide gets 50 MB of the 80 MB, keeping yesterday plus 7 days by default. When a source is too big, the farthest days go first. The writer predicts the guide's size from the first few hundred records, so it rarely packs days it would later drop. The import state records the days kept and whether the guide was trimmed.
+
+   With that, on the TV:
+
+   | Test                                       | Result                                                                  |
+   | ------------------------------------------ | ----------------------------------------------------------------------- |
+   | 2,000 channels, 8 days                     | 338,656 programmes in 22.7 MB (67 bytes each), 55 s, 60 fps (lowest 59) |
+   | The same source imported twice more, kept  | Storage use 28 MB, then 36 MB: refreshing doesn't double it             |
+   | 2,000 channels with a 10 MB budget         | Kept 3 days (145,363 programmes, 9.7 MB) in 31 s, 60 fps (lowest 59)    |
+   | Reading a guide screen (10 channels × 3 h) | 62 ms, up from 17 ms uncompressed                                       |
+
+   Open points:
+   - **Import speed:** packing is now the slowest part, at about 6,400 programmes a second, so a full 50 MB guide would take about 2 minutes to store. A second worker for packing could help, if it matters.
+   - **Guide reads:** 62 ms on the main thread is too long while scrolling. The guide screen (Phase 3) should keep unpacked days in memory, or unpack them in a worker.
+   - **Older TVs:** the worker isn't run through the legacy build, and uses syntax such as `??` that needs Chromium 80. Tizen 5.5 (Chromium 69) would need a lower build target for workers. Only the Tizen 9 TV has been tested.
+   - The one programme per channel that started before the first kept day (on air at midnight yesterday) is left out.
+
+4. **Xtream and Stalker clients:** Xtream is done; Stalker is on hold.
+   - **Xtream** (`src/data/xtream.ts`): an import with `kind: "xtream"` logs in through `player_api.php`, loads the live categories and channels, and imports the guide from `xmltv.php` through the same parser, storage and budget as M3U. Fields that servers send as either numbers or strings are read loosely. Channels keep their `stream_id` (`providerId`), and archive channels are marked for catch-up (`type: "xtream"`). The account's status, expiry and connection limit are saved with the import. On the TV, a 2,000-channel account imported in 52.9 s: 1.2 s for the channel list, then 50 s for the 124 MB guide, at 60 fps (lowest 58). The tests run against the test server's mock API.
+   - **Stalker is on hold on Samsung.** Portals identify the box by a `Cookie: mac=...` header, and the app can't send one: the `request-headers` probe found `fetch` and XHR silently drop `Cookie`, `Referer` and `User-Agent` (they do send `Authorization` and custom headers such as `X-User-Agent`). Tizen's `websetting` API can change the whole app's User-Agent (`setUserAgentString()`, tested), but nothing can set a cookie for another host. Stalker needs either a way to send that cookie or a small relay on the user's network, which streams that need a Referer would also use. The test server's mock portal stays for when that is decided.
 5. **Sources and refresh:** add, edit and remove sources in Settings, import with progress, and refresh on a schedule and at startup when the data is old.
-6. **Done check:** import the 10k-channel test source with 7 days of guide data on the TV, without a crash, and record the time and memory here.
+6. **Done check:** import the 10k-channel test source with 7 days of guide data on the TV, without a crash, keeping as many guide days as fit in the budget, and record the time, memory and days kept here.
 
 ## What you need before starting
 

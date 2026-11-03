@@ -14,6 +14,7 @@ import VideoTest from "./pages/dev/VideoTest";
 import fonts from "./fonts";
 import { merge } from "lodash-es";
 import { config } from "./device";
+import { installDevHooks } from "./devHooks";
 import {
   Rounded,
   RoundedWithShadow,
@@ -25,6 +26,7 @@ import {
 } from "@solidtv/renderer/shaders";
 
 merge(LightningConfig, config.lightning);
+installDevHooks();
 
 const { render, renderer } = createRenderer();
 

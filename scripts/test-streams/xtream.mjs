@@ -24,7 +24,8 @@ const dateTime = time => {
   );
 };
 const seconds = time => String(Math.floor(time / 1000));
-const base64 = text => Buffer.from(text).toString("base64");
+// btoa() rather than Buffer, so tests can run this in a browser.
+const base64 = text => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
 
 const userInfo = (account, now) => ({
   username: account.username,
@@ -86,7 +87,9 @@ const listing = (channel, p, now) => ({
     channel.archiveDays && p.stop <= now && p.start >= now - channel.archiveDays * 24 * HOUR ? 1 : 0,
 });
 
-const playerApi = (url, ctx) => {
+// The JSON for a player_api.php request, exported for the app's tests.
+// `ctx` has { account, base, host, now, window }.
+export const playerApi = (url, ctx) => {
   const { account, base, now, window } = ctx;
   const { channels, groups } = account.catalog;
   const action = url.searchParams.get("action");

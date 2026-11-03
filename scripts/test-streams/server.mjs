@@ -22,7 +22,8 @@
 //   Stalker (stalker.mjs)        portal http://<host>:<port>/c/, MAC
 //                                00:1A:79:00:00:01, or 00:1A:79:00:00:02
 //                                for 50 channels
-// The index at / lists every URL as JSON.
+// /echo answers with the request's method and headers, to see which headers
+// a TV really sends. The index at / lists every URL as JSON.
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -298,6 +299,9 @@ const handle = (req, res) => {
   console.log(`${req.method} ${url.pathname} (${req.headers["user-agent"] ?? "no user agent"})`);
   if (url.pathname === "/") {
     return send(res, 200, JSON.stringify(index(req.headers.host), null, 2), "application/json");
+  }
+  if (url.pathname === "/echo") {
+    return send(res, 200, JSON.stringify({ method: req.method, headers: req.headers }), "application/json");
   }
   const base = `http://${req.headers.host ?? "localhost"}`;
   if (serveSource(req, res, url, base)) return;

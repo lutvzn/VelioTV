@@ -8,3 +8,6 @@ storybook-static/
 
 # Local details (device addresses, IDs); see AGENTS.md
 PRIVATE.md
+
+# Vitest failure screenshots
+.vitest/
