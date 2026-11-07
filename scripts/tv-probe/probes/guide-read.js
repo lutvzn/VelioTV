@@ -6,6 +6,9 @@
 // It uses the guide of a source the app already has, with channels that
 // aren't read twice, so IndexedDB and the worker's own cache start cold for
 // each pass. Run it with the app on any page; playing video is fine.
+// The worker leaves out subtitles and descriptions, and reads them for one
+// programme at a time, as the guide does when a programme is focused; it
+// times that too (PLAN.md, Phase 8, step 2).
 //
 // Input (all optional):
 //   "rows": 10          channels in a guide screen
@@ -82,11 +85,14 @@ async function probe(input) {
     Promise.all(list.flatMap(c => days.map(d => client.read(c.source, c.guideId, d))));
   const count = lists => lists.reduce((n, list) => n + list.length, 0);
 
-  // Both ways give the same programmes.
+  // Both ways give the same programmes, but for the details.
   const check = take(2);
-  const fromMain = await mainScreen(check);
+  const gridOf = ({ subTitle: _s, description: _d, ...grid }) => grid;
+  const fromMain = (await mainScreen(check)).map(list => list.map(gridOf));
   const fromWorker = await workerScreen(check);
-  const inScreen = list => list.filter(p => p.stop > now && p.start < now + 3 * HOUR);
+  // Near midnight (UTC), a programme over it is in both days.
+  const inScreen = list =>
+    list.filter((p, i) => p.stop > now && p.start < now + 3 * HOUR && list[i - 1]?.start !== p.start);
   const same = check.every(
     (c, i) =>
       JSON.stringify(fromMain[i]) ===
@@ -148,6 +154,20 @@ async function probe(input) {
     log(`scroll ${name}:`, JSON.stringify(scrolling[name]));
   }
 
+  // The details of the programme on now, for channels in turn: the first of
+  // a block unpacks it whole, the next ones in it are kept.
+  const details = [];
+  for (const channel of take(10)) {
+    const programme = (await client.read(channel.source, channel.guideId, today)).find(
+      p => p.start <= now && p.stop > now,
+    );
+    if (!programme) continue;
+    const started = performance.now();
+    const found = await client.details(channel.source, channel.guideId, programme.start);
+    details.push({ ms: Math.round(performance.now() - started), description: Boolean(found.description) });
+  }
+  log("details:", JSON.stringify(details));
+
   running = false;
   client.close();
   db.close();
@@ -164,6 +184,8 @@ async function probe(input) {
     same,
     screens: { main: summary(screens.main), worker: summary(screens.worker) },
     scrolling,
+    detailsMs: details.map(d => d.ms),
+    withDescription: details.filter(d => d.description).length,
     freeMemoryMb: Math.round(tizen.systeminfo.getAvailableMemory() / 1048576),
   };
 }

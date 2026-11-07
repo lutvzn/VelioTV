@@ -14,8 +14,12 @@
 // titles, times and episodes. A refresh brings each day's details as it
 // comes near.
 //
+// The past: each channel's programmes are kept from a time of its own
+// (`keepFrom`), as far back as its catch-up reaches, which for most
+// channels is only today (importer.ts).
+//
 // Generations: the writer writes a new generation beside the last import's.
-// commit() switches the source's guide index to it and deletes the others;
+// commit() switches the guide's index to it and deletes the others;
 // abandon() deletes it instead. If the browser reports its quota is full,
 // `makeRoom` deletes the last generation early, and the batch is written
 // again; if that fails too, storing stops.
@@ -46,8 +50,17 @@ import {
   writeTransaction,
   type GuideBlock,
   type GuideIndex,
+  type GuideMeta,
 } from "./db";
-import { BlockEncoder, decodeBlock, encodeBlock, tidy, type Unfinished } from "./guideCodec";
+import {
+  BlockEncoder,
+  decodeBlock,
+  encodeBlock,
+  tidy,
+  type PackedBlock,
+  type StoredProgramme,
+  type Unfinished,
+} from "./guideCodec";
 import type { Programme } from "./types";
 
 /** Programmes in closed blocks held before writing them. */
@@ -74,10 +87,9 @@ interface OpenBlock {
   current?: { channel: string; programmes: Unfinished[] };
 }
 
-interface Closed {
+interface Closed extends PackedBlock {
   day: number;
   block: number;
-  data: Uint8Array;
   channels: number;
   count: number;
 }
@@ -98,7 +110,8 @@ interface Stored {
 }
 
 export interface GuideWriterOptions {
-  source: string;
+  /** The guide's key (db.ts). */
+  guide: string;
   /** The generation to write; see the top of this file. */
   generation: number;
   /** Days since 1970 (UTC). */
@@ -107,16 +120,23 @@ export interface GuideWriterOptions {
   firstDay: number;
   lastDay: number;
   budgetBytes: number;
+  /**
+   * The time a channel's programmes are kept from: those that end by then
+   * are left out. All are kept without it.
+   */
+  keepFrom?: (channel: string) => number | undefined;
   /** Deletes the last import's guide to make room; resolves whether it deleted anything. */
   makeRoom?: () => Promise<boolean>;
 }
 
 const keyOf = (day: number, block: number) => `${day}\n${block}`;
 
+const packedBytes = (block: PackedBlock) => block.data.length + (block.details?.length ?? 0);
+
 const sizeOf = (block: Closed): Stored => ({
   day: block.day,
   block: block.block,
-  bytes: block.data.length + RECORD_OVERHEAD,
+  bytes: packedBytes(block) + RECORD_OVERHEAD,
   count: block.count,
   channels: block.channels,
 });
@@ -199,7 +219,7 @@ export class GuideWriter {
   add(programme: Programme) {
     this.added++;
     const day = Math.floor(programme.start / DAY);
-    if (this.stopped || day < this.firstDay || day > this.lastDay) {
+    if (this.stopped || day < this.firstDay || day > this.lastDay || this.tooOld(programme)) {
       this.skipped++;
       return;
     }
@@ -266,12 +286,13 @@ export class GuideWriter {
     await this.settle();
   }
 
-  /** Makes what was written the source's guide, deleting the last import's. */
-  async commit() {
+  /** Makes what was written the guide, with its record, deleting the last import's. */
+  async commit(meta: GuideMeta) {
     const run = async () => {
-      const transaction = writeTransaction(this.db, ["guide", "guideIndex"]);
+      const transaction = writeTransaction(this.db, ["guide", "guideIndex", "guides"]);
       transaction.objectStore("guideIndex").put(this.index());
-      deleteOtherGenerations(transaction.objectStore("guide"), this.options.source, this.options.generation);
+      transaction.objectStore("guides").put(meta);
+      deleteOtherGenerations(transaction.objectStore("guide"), this.options.guide, this.options.generation);
       await finished(transaction);
     };
     await this.retryWhenFull(run);
@@ -281,7 +302,7 @@ export class GuideWriter {
   async abandon() {
     await this.writing.catch(() => {});
     const transaction = writeTransaction(this.db, "guide");
-    transaction.objectStore("guide").delete(generationRange(this.options.source, this.options.generation));
+    transaction.objectStore("guide").delete(generationRange(this.options.guide, this.options.generation));
     await finished(transaction);
   }
 
@@ -292,7 +313,7 @@ export class GuideWriter {
       if (day >= this.firstDay && day <= this.lastDay && starts.length > 0) days[day] = starts;
     }
     return {
-      source: this.options.source,
+      guide: this.options.guide,
       generation: this.options.generation,
       channels: this.order,
       days,
@@ -301,6 +322,21 @@ export class GuideWriter {
 
   private details(day: number) {
     return Math.abs(day - this.options.today) <= DETAIL_DAYS;
+  }
+
+  // Whether a programme ends before its channel's programmes are kept from.
+  // One with no stop time is judged once tidy() has given it one.
+  private tooOld(programme: Programme) {
+    const from = this.options.keepFrom?.(programme.channel);
+    if (from === undefined) return false;
+    return (programme.stop ?? programme.start + DAY) <= from;
+  }
+
+  // A channel's day, tidied, without what ends before it is kept from.
+  private kept(channel: string, programmes: Unfinished[]): StoredProgramme[] {
+    const list = tidy(programmes);
+    const from = this.options.keepFrom?.(channel);
+    return from === undefined ? list : list.filter(p => p.stop > from);
   }
 
   private addLate(day: number, block: number, channel: string, programme: Unfinished) {
@@ -315,7 +351,10 @@ export class GuideWriter {
 
   private packCurrent(open: OpenBlock) {
     if (!open.current) return;
-    open.encoder.add(open.current.channel, tidy(open.current.programmes));
+    const { channel, programmes } = open.current;
+    const list = this.kept(channel, programmes);
+    this.skipped += programmes.length - list.length;
+    if (list.length > 0) open.encoder.add(channel, list);
     open.current = undefined;
   }
 
@@ -325,11 +364,10 @@ export class GuideWriter {
     this.packCurrent(open);
     this.open.delete(day);
     const { encoder } = open;
-    const data = encoder.finish();
     this.closed.push({
       day,
       block: open.block,
-      data,
+      ...encoder.finish(),
       channels: open.channels.size,
       count: encoder.programmes,
     });
@@ -337,14 +375,22 @@ export class GuideWriter {
   }
 
   // Merges programmes into a packed block.
-  private merge(day: number, data: Uint8Array | undefined, extra: Map<string, Unfinished[]>) {
-    const channels = data ? decodeBlock(day, data) : new Map();
+  private merge(day: number, packed: PackedBlock | undefined, extra: Map<string, Unfinished[]>) {
+    const channels = packed
+      ? decodeBlock(day, packed.data, packed.details)
+      : new Map<string, StoredProgramme[]>();
     for (const [channel, programmes] of extra) {
-      channels.set(channel, tidy([...(channels.get(channel) ?? []), ...programmes]));
+      const list = this.kept(channel, [...(channels.get(channel) ?? []), ...programmes]);
+      if (list.length > 0) channels.set(channel, list);
     }
     let count = 0;
     for (const programmes of channels.values()) count += programmes.length;
-    return { data: encodeBlock(day, channels, this.details(day)), channels: channels.size, count };
+    const merged: PackedBlock & { channels: number; count: number } = {
+      ...encodeBlock(day, channels, this.details(day)),
+      channels: channels.size,
+      count,
+    };
+    return merged;
   }
 
   private write() {
@@ -361,7 +407,7 @@ export class GuideWriter {
     const toMerge: Late[] = [];
     for (const extra of late) {
       const block = inBatch.get(keyOf(extra.day, extra.block));
-      if (block) Object.assign(block, this.merge(block.day, block.data, extra.programmes));
+      if (block) Object.assign(block, this.merge(block.day, block, extra.programmes));
       else toMerge.push(extra);
     }
     // A merge's size is known only in the transaction; until then, count
@@ -410,25 +456,26 @@ export class GuideWriter {
     const dropped = this.dropped;
     this.dropped = [];
 
-    const { source, generation } = this.options;
+    const { guide, generation } = this.options;
     const run = async () => {
       const transaction = writeTransaction(this.db, "guide");
       const store = transaction.objectStore("guide");
-      for (const { day, block } of dropped) store.delete([source, generation, day, block]);
+      for (const { day, block } of dropped) store.delete([guide, generation, day, block]);
       for (const block of closed) {
         if (!kept(block.day, keyOf(block.day, block.block))) continue;
-        const value: GuideBlock = { source, generation, ...block };
+        const value: GuideBlock = { guide, generation, ...block };
         store.put(value);
       }
       for (const extra of fits ? [] : toMerge) {
         const { day, block } = extra;
         if (!kept(day, keyOf(day, block))) continue;
-        const request = store.get([source, generation, day, block]);
+        const request = store.get([guide, generation, day, block]);
         request.addEventListener("success", () => {
           const old: GuideBlock | undefined = request.result;
-          const { data, channels, count } = this.merge(day, old?.data, extra.programmes);
-          this.account({ day, block, bytes: data.length + RECORD_OVERHEAD, channels, count });
-          const value: GuideBlock = { source, generation, day, block, data, channels, count };
+          const merged = this.merge(day, old, extra.programmes);
+          const { channels, count } = merged;
+          this.account({ day, block, bytes: packedBytes(merged) + RECORD_OVERHEAD, channels, count });
+          const value: GuideBlock = { guide, generation, day, block, ...merged };
           store.put(value);
         });
       }

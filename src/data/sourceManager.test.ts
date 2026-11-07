@@ -109,6 +109,33 @@ describe("the source manager", () => {
     });
   });
 
+  it("counts a guide two sources share once, and passes the hidden channels", async () => {
+    const storage = memoryStorage();
+    saveSources(storage, [
+      { id: "a", ...draft("A", `${BASE}/a.m3u`) },
+      { id: "a2", ...draft("A2", `${BASE}/a.m3u`) },
+    ]);
+    const { importer, requests } = recording();
+    const total = 1_000_000;
+    const filter = { hiddenChannels: ["a/x"], hiddenGroups: [], movedChannels: {} };
+    manager = createSourceManager({
+      dbName: DB,
+      storage,
+      importer,
+      guideBudgetBytes: total,
+      guideFilter: () => filter,
+    });
+    const stop = await manager.start();
+    await manager.whenIdle();
+    stop();
+    expect(requests[0].guideFilter).toEqual(filter);
+    // a2 used a's copy, and once it is known to, a's guide doesn't count against it.
+    expect(manager.statusOf("a2").state?.guide).toBe(manager.statusOf("a").state?.guide);
+    manager.refresh("a2");
+    await manager.whenIdle();
+    expect(requests[requests.length - 1]).toMatchObject({ source: "a2", guideBudgetBytes: total });
+  });
+
   it("at startup, imports only the sources that are due", async () => {
     const storage = memoryStorage();
     const fresh: Source = { id: "fresh", ...draft("Fresh", `${BASE}/a.m3u`) };

@@ -3,7 +3,9 @@
 // the progress every 5 s and how it ended; then deletes what it stored. The
 // source itself is turned off first, so its own import doesn't run beside
 // this one ("enable": true turns it on again, and does nothing else).
-// About 2 minutes for the 10,000-channel test source.
+// About 2 minutes for the 10,000-channel test source. Its guide addresses
+// get "probe=1" added, so the probe's copy of the guide is its own and not
+// the one the source shares (src/data/db.ts).
 //
 // Input:
 //   "source": "Test 10k"   the source's name
@@ -44,7 +46,8 @@ async function probe(input) {
         r.addEventListener("success", () => {
           const cursor = r.result;
           if (!cursor) return resolve();
-          const owner = Array.isArray(cursor.key) ? cursor.key[0] : cursor.key;
+          // A source, or for the guide stores, a guide's addresses.
+          const owner = String(Array.isArray(cursor.key) ? cursor.key[0] : cursor.key).slice(0, 80);
           const row = ((out[name] ??= {})[owner] ??= { records: 0, mb: 0 });
           row.records++;
           row.mb += sizeOf(cursor.value) / 1e6;
@@ -60,10 +63,19 @@ async function probe(input) {
   };
 
   const id = "probe-budget";
+  const opened = await data.openDb();
+  const sourceGuide = (await data.readImport(opened, source.id))?.guide;
+  opened.close();
+  if (sourceGuide === undefined) return { error: "The source has no guide yet" };
+  const guideUrls = sourceGuide
+    .split("\n")
+    .filter(url => !url.startsWith("@"))
+    .map(url => `${url}${url.includes("?") ? "&" : "?"}probe=1`);
   const request = {
     source: id,
     kind: "m3u",
     playlistUrl: source.url,
+    guideUrls,
     guideDays: input.days ?? 2,
     guideBudgetBytes: (input.budgetMb ?? 10) * 1_048_576,
   };
@@ -103,7 +115,8 @@ async function probe(input) {
   log(`${seconds()} s: import ended`, { status: result.status, error: result.error });
   await sleep(2000);
   const db = await data.openDb();
-  const measured = await data.measureGuide(db, id);
+  const guideKey = (await data.readImport(db, id))?.guide;
+  const measured = guideKey === undefined ? {} : await data.measureGuide(db, guideKey);
   if (input.sizes) result.sizes = await sizes(db);
   log(`${seconds()} s: guide measured`, measured);
   await data.deleteSource(db, id);

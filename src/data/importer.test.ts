@@ -4,6 +4,8 @@ import { m3u, xmltv } from "../../scripts/test-streams/playlist.mjs";
 import {
   DAY,
   deleteDb,
+  deleteSource,
+  guideKey,
   measureGuide,
   openDb,
   readChannels,
@@ -12,6 +14,7 @@ import {
   request as idbRequest,
   sourceRange,
 } from "./db";
+import { localDayStart } from "./guideWanted";
 import { importSource } from "./importClient";
 import { runImport, type ImportProgress } from "./importer";
 import type { GuideBlock } from "./db";
@@ -21,6 +24,7 @@ const HOUR = 3_600_000;
 const DB = "tiviplayer-test";
 const PLAYLIST = `${BASE}/playlist.m3u`;
 const GUIDE = `${BASE}/guide.xml.gz`;
+const GUIDE_KEY = guideKey([GUIDE]) ?? "";
 
 type Files = Record<string, string | Uint8Array<ArrayBuffer> | undefined>;
 
@@ -70,11 +74,11 @@ afterEach(async () => {
   await deleteDb(DB);
 });
 
-// Every block of a source's guide, of any generation.
-const allBlocks = async (id: string) => {
+// Every block of a guide, of any generation.
+const allBlocks = async (guide = GUIDE_KEY) => {
   const db = await openDb(DB);
   const blocks = await idbRequest<GuideBlock[]>(
-    db.transaction("guide").objectStore("guide").getAll(sourceRange(id)),
+    db.transaction("guide").objectStore("guide").getAll(sourceRange(guide)),
   );
   db.close();
   return blocks;
@@ -116,9 +120,8 @@ describe("runImport", () => {
       unmatchedProgrammes: 0,
     });
     expect(result.guideUrls).toEqual([GUIDE]);
-    // Only programmes starting before the first day kept are left out: at
-    // most one per channel, the one on air at midnight.
-    expect(result.skippedProgrammes).toBeLessThanOrEqual(result.guideChannels);
+    // Only programmes before the times kept from are left out.
+    expect(result.skippedProgrammes).toBeGreaterThan(0);
     expect(result.programmes + result.skippedProgrammes).toBe(result.programmesRead);
     expect(progress[progress.length - 1]).toMatchObject({
       stage: "guide",
@@ -131,7 +134,7 @@ describe("runImport", () => {
     expect(result.guideChannels).toBe(new Set(channels.map(c => c.guideId).filter(Boolean)).size);
 
     // Each channel's guide reads back as generated, across midnight too.
-    const from = window.start + 30 * HOUR;
+    const from = window.start + 46 * HOUR;
     const to = from + 6 * HOUR;
     for (const channel of channels.filter(c => c.guideId).slice(0, 20)) {
       const list = await readGuide(db, "test", channel.guideId, from, to);
@@ -185,7 +188,7 @@ describe("runImport", () => {
     expect((await readGuide(db, "test", guideId, window.start, window.end)).length).toBeGreaterThan(0);
     db.close();
     // Nothing of the failed refresh's guide is left.
-    const blocks = await allBlocks("test");
+    const blocks = await allBlocks();
     expect(new Set(blocks.map(block => block.generation)).size).toBe(1);
 
     // A refresh with fewer channels deletes the ones that went.
@@ -197,13 +200,13 @@ describe("runImport", () => {
     expect(await readGuide(db, "test", guideId, window.start, window.end)).toEqual([]);
     db.close();
     // Only the last refresh's guide is left.
-    expect(new Set((await allBlocks("test")).map(block => block.generation)).size).toBe(1);
+    expect(new Set((await allBlocks()).map(block => block.generation)).size).toBe(1);
   });
 
   it("stores the guide in blocks over 64 KB, but for each day's last", async () => {
     const { files } = await source(600);
     await runImport({ source: "test", playlistUrl: PLAYLIST }, { dbName: DB, fetch: serve(files) });
-    const blocks = await allBlocks("test");
+    const blocks = await allBlocks();
     const days = new Map<number, GuideBlock[]>();
     for (const block of blocks) days.set(block.day, [...(days.get(block.day) ?? []), block]);
     let checked = 0;
@@ -211,7 +214,7 @@ describe("runImport", () => {
       const last = Math.max(...list.map(block => block.block));
       for (const block of list) {
         if (block.block === last) continue;
-        expect(block.data.length).toBeGreaterThan(65_536);
+        expect(block.data.length + (block.details?.length ?? 0)).toBeGreaterThan(65_536);
         checked++;
       }
     }
@@ -311,6 +314,147 @@ describe("runImport", () => {
   });
 });
 
+// A time on the guide's second day (today) that is past local midnight anywhere.
+const from = (window: { start: number }) => window.start + 46 * HOUR;
+
+describe("what the guide keeps", () => {
+  it("keeps a channel's past only as far back as its catch-up reaches", async () => {
+    const { channels, window, files } = await source(40);
+    // Noon on the guide's third day.
+    const now = window.start + 2 * DAY + 12 * HOUR;
+    await runImport({ source: "test", playlistUrl: PLAYLIST }, { dbName: DB, fetch: serve(files), now });
+    const db = await openDb(DB);
+    const shares = (guideId: string) => channels.filter(c => c.guideId === guideId).length > 1;
+    const plain = channels.find(c => c.guideId && !c.archiveDays && !shares(c.guideId));
+    const catchup = channels.find(c => c.guideId && c.archiveDays === 3);
+    const plainList = await readGuide(db, "test", plain.guideId, window.start, now);
+    expect(plainList.length).toBeGreaterThan(0);
+    expect(plainList.every(p => p.stop > localDayStart(now))).toBe(true);
+    // Its catch-up reaches back 3 days, to before the guide starts.
+    const catchupList = await readGuide(db, "test", catchup.guideId, window.start, now);
+    expect(catchupList[0].start).toBeLessThanOrEqual(window.start);
+    db.close();
+  });
+
+  it("leaves out the guides of hidden channels and groups", async () => {
+    const { window, files } = await source(60);
+    const request = { source: "test", playlistUrl: PLAYLIST };
+    const whole = await runImport(request, { dbName: DB, fetch: serve(files) });
+    let db = await openDb(DB);
+    const stored = await readChannels(db, "test");
+    db.close();
+    const alone = stored.filter(c => c.guideId && stored.filter(o => o.guideId === c.guideId).length === 1);
+    const hidden = alone[0];
+    // A group with two channels of their own guide: one is moved out of it.
+    const group = alone.find(
+      c => c.group !== hidden.group && alone.some(o => o !== c && o.group === c.group),
+    );
+    const inGroup = alone.filter(c => c.group === group?.group);
+    const [gone, moved] = inGroup;
+    const result = await runImport(
+      {
+        ...request,
+        guideFilter: {
+          hiddenChannels: [hidden.id],
+          hiddenGroups: [group?.group ?? ""],
+          movedChannels: { [moved.id]: "Elsewhere" },
+        },
+      },
+      { dbName: DB, fetch: serve(files) },
+    );
+    expect(result.guideChannels).toBe(whole.guideChannels - inGroup.length - 1 + 1);
+    db = await openDb(DB);
+    const read = (id = "") => readGuide(db, "test", id, from(window), from(window) + 6 * HOUR);
+    expect(await read(hidden.guideId)).toEqual([]);
+    expect(await read(gone.guideId)).toEqual([]);
+    expect((await read(moved.guideId)).length).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it("stores a guide once for the sources that use it, with what each wants", async () => {
+    const { channels, window, files } = await source(60);
+    const OTHER = `${BASE}/other.m3u`;
+    files[PLAYLIST] = m3u({ base: BASE, channels: channels.slice(0, 30), guideUrl: GUIDE });
+    files[OTHER] = m3u({ base: BASE, channels: channels.slice(30), guideUrl: GUIDE });
+    const ids = (list: typeof channels): Set<string> =>
+      new Set(list.map(c => c.guideId).filter((id): id is string => typeof id === "string"));
+    const onlyA = Array.from(ids(channels.slice(0, 30))).find(id => !ids(channels.slice(30)).has(id));
+    const onlyB = Array.from(ids(channels.slice(30))).find(id => !ids(channels.slice(0, 30)).has(id));
+    const a = await runImport({ source: "a", playlistUrl: PLAYLIST }, { dbName: DB, fetch: serve(files) });
+    // b wants channels a's copy didn't keep, so it is imported again, for both.
+    const b = await runImport({ source: "b", playlistUrl: OTHER }, { dbName: DB, fetch: serve(files) });
+    expect(b.guideSkipped).toBeUndefined();
+    expect(b.programmes).toBeGreaterThan(a.programmes);
+    const db = await openDb(DB);
+    const read = (owner: string, id = "") => readGuide(db, owner, id, from(window), from(window) + 6 * HOUR);
+    expect((await read("a", onlyA)).length).toBeGreaterThan(0);
+    expect((await read("b", onlyB)).length).toBeGreaterThan(0);
+    expect(new Set((await allBlocks()).map(block => block.generation))).toEqual(new Set([2]));
+
+    // a, refreshed within the hour of b's import, uses the copy as it is.
+    const again = await runImport(
+      { source: "a", playlistUrl: PLAYLIST },
+      { dbName: DB, fetch: serve(files) },
+    );
+    expect(again).toMatchObject({ guideSkipped: "shared", programmes: b.programmes });
+    expect(again.guideChannels).toBe(a.guideChannels);
+
+    // Removing one source keeps the guide for the other; removing both deletes it.
+    await deleteSource(db, "a");
+    expect((await read("b", onlyB)).length).toBeGreaterThan(0);
+    await deleteSource(db, "b");
+    db.close();
+    expect(await allBlocks()).toEqual([]);
+  });
+
+  it("deletes the guide a source no longer uses", async () => {
+    const { files } = await source(20);
+    const OTHER_GUIDE = `${BASE}/other.xml.gz`;
+    files[OTHER_GUIDE] = files[GUIDE];
+    const request = { source: "test", playlistUrl: PLAYLIST };
+    await runImport(request, { dbName: DB, fetch: serve(files) });
+    expect((await allBlocks()).length).toBeGreaterThan(0);
+    await runImport({ ...request, guideUrls: [OTHER_GUIDE] }, { dbName: DB, fetch: serve(files) });
+    expect(await allBlocks()).toEqual([]);
+    expect((await allBlocks(guideKey([OTHER_GUIDE]))).length).toBeGreaterThan(0);
+  });
+
+  it("doesn't download a guide again that hasn't changed since today's import", async () => {
+    const { files } = await source(20);
+    let version = 1;
+    let downloads = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      if (input !== GUIDE) return serve(files)(input);
+      const etag = `"${version}"`;
+      if (new Headers(init?.headers).get("If-None-Match") === etag)
+        return new Response(null, { status: 304 });
+      downloads++;
+      return new Response(files[GUIDE], { headers: { ETag: etag } });
+    };
+    const request = { source: "test", playlistUrl: PLAYLIST };
+    const first = await runImport(request, { dbName: DB, fetch: fetcher });
+    const second = await runImport(request, { dbName: DB, fetch: fetcher });
+    expect(second).toMatchObject({
+      guideSkipped: "unchanged",
+      programmes: first.programmes,
+      guideChannels: first.guideChannels,
+    });
+    expect(downloads).toBe(1);
+
+    // Changed: the answer to the question is the download.
+    version = 2;
+    const third = await runImport(request, { dbName: DB, fetch: fetcher });
+    expect(third.guideSkipped).toBeUndefined();
+    expect(third.programmes).toBe(first.programmes);
+    expect(downloads).toBe(2);
+
+    // The next day, the days that keep details have moved: imported again.
+    const later = await runImport(request, { dbName: DB, fetch: fetcher, now: Date.now() + DAY });
+    expect(later.guideSkipped).toBeUndefined();
+    expect(downloads).toBe(3);
+  });
+});
+
 // Enough channels for a few batches of blocks.
 const big = () => source(1500);
 
@@ -325,7 +469,7 @@ describe("full storage", () => {
     const result = await runImport(request, { dbName: DB, fetch: serveInChunks(files) });
     vi.restoreAllMocks();
     expect(result).toMatchObject({ status: "done", guideTrimmed: false, programmes: first.programmes });
-    const blocks = await allBlocks("test");
+    const blocks = await allBlocks();
     expect(new Set(blocks.map(block => block.generation))).toEqual(new Set([2]));
     const db = await openDb(DB);
     const last = channels.findLast(channel => channel.guideId);
@@ -345,7 +489,7 @@ describe("full storage", () => {
     expect(result).toMatchObject({ status: "done", channels: 1500, guideTrimmed: true });
     expect(result.guideChannels).toBe(first.guideChannels);
     const db = await openDb(DB);
-    const after = await measureGuide(db, "test");
+    const after = await measureGuide(db, GUIDE_KEY);
     expect(result.programmes).toBe(after.programmes);
     expect(after.programmes).toBeGreaterThan(0);
     expect(after.programmes).toBeLessThan(first.programmes);
@@ -355,7 +499,7 @@ describe("full storage", () => {
       (await readGuide(db, "test", firstChannel.guideId, window.start, window.end)).length,
     ).toBeGreaterThan(0);
     db.close();
-    expect(new Set((await allBlocks("test")).map(block => block.generation))).toEqual(new Set([2]));
+    expect(new Set((await allBlocks()).map(block => block.generation))).toEqual(new Set([2]));
   });
 });
 

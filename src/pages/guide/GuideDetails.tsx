@@ -1,5 +1,6 @@
 import { Text, View } from "@solidtv/solid";
 import { Show } from "solid-js";
+import type { ProgrammeDetails } from "../../data/guideCodec";
 import type { Channel } from "../../data/lineup";
 import type { Cell } from "../../guide/timeline";
 import { progress, timeRange } from "../../live/format";
@@ -12,6 +13,8 @@ export interface GuideDetailsProps {
   channel?: Channel;
   number?: number;
   cell?: Cell;
+  /** The programme's subtitle and description, once read. */
+  details?: ProgrammeDetails;
   /** "Today", "Tomorrow" or a date, for the cell's day. */
   day: string;
   now: number;
@@ -35,7 +38,7 @@ export const GuideDetails = (props: GuideDetailsProps) => {
   };
   const extra = () => {
     const shown = programme();
-    return [shown?.episode, shown?.subTitle].filter(Boolean).join("  ·  ");
+    return [shown?.episode, props.details?.subTitle].filter(Boolean).join("  ·  ");
   };
 
   return (
@@ -100,7 +103,7 @@ export const GuideDetails = (props: GuideDetailsProps) => {
               fontSize={26}
               color="#ffffffb3"
             >
-              {shown().description ?? ""}
+              {props.details?.description ?? ""}
             </Text>
           </>
         )}

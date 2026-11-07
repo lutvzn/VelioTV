@@ -3,17 +3,21 @@
 // storage, and on a real guide this takes a programme from about 284 bytes
 // of XMLTV to about 30 (with details) or 7 (without).
 //
-// A block is a JSON array with a row per channel, deflated with fflate:
-//   [channel, starts, lengths, titles, episodes, subTitles, descriptions]
+// A block has two parts, each a JSON array deflated with fflate:
+//   grid     a row per channel: [channel, starts, lengths, titles, episodes]
+//   details  a row for each grid row: [subTitles, descriptions]
 // Times are seconds: the first start from the start of the day, each one
-// after from the end of the programme before (so mostly 0). The last three
-// columns are 0 when no programme has them. fflate is synchronous and works
-// on TVs without CompressionStream; BlockEncoder packs a block as its rows
-// come, so the import holds no more than a channel's day of programmes.
+// after from the end of the programme before (so mostly 0). A column is 0
+// when no programme has it. The guide grid unpacks only the first part,
+// about a fifth of the bytes, and the details unpack when a programme is
+// focused; on a real guide the two parts together came out 2% smaller than
+// one (PLAN.md, Phase 8, step 2). Blocks of days far from today have no
+// details part (guideWriter.ts).
 //
-// Only what the app shows is kept: not the programmes' icons, categories or
-// "new" flags. Blocks of days far from today leave out the subtitles and
-// descriptions (guideWriter.ts).
+// fflate is synchronous and works on TVs without CompressionStream;
+// BlockEncoder packs a block as its rows come, so the import holds no more
+// than a channel's day of programmes. Only what the app shows is kept: not
+// the programmes' icons, categories or "new" flags.
 
 import { Deflate, inflateSync, strFromU8, strToU8 } from "fflate";
 import type { Programme } from "./types";
@@ -30,8 +34,18 @@ export type StoredProgramme = Pick<Programme, "start" | "title" | "episode" | "s
 /** A programme as read, before tidy() fills in its stop time. */
 export type Unfinished = Omit<StoredProgramme, "stop"> & { stop?: number };
 
+/** What a programme's details part holds. */
+export type ProgrammeDetails = Pick<Programme, "subTitle" | "description">;
+
+/** A block as packed: the grid, and the details if the day keeps them. */
+export interface PackedBlock {
+  data: Uint8Array;
+  details?: Uint8Array;
+}
+
 type Column = (string | null)[] | 0;
-type Row = [string, number[], number[], string[], Column, Column, Column];
+type GridRow = [string, number[], number[], string[], Column];
+type DetailsRow = [Column, Column];
 
 /**
  * Sorts a channel's day of programmes, drops repeats of the same start time
@@ -56,8 +70,8 @@ export const tidy = (programmes: Unfinished[]): StoredProgramme[] => {
 const column = (programmes: StoredProgramme[], field: "episode" | "subTitle" | "description"): Column =>
   programmes.some(p => p[field] !== undefined) ? programmes.map(p => p[field] ?? null) : 0;
 
-/** A channel's day of programmes (tidied, in start order) as a block's row. */
-const rowOf = (day: number, channel: string, programmes: StoredProgramme[], details: boolean): Row => {
+/** A channel's day of programmes (tidied, in start order) as a grid row. */
+const gridRow = (day: number, channel: string, programmes: StoredProgramme[]): GridRow => {
   const starts: number[] = [];
   const lengths: number[] = [];
   let previous = day * DAY;
@@ -66,42 +80,23 @@ const rowOf = (day: number, channel: string, programmes: StoredProgramme[], deta
     lengths.push(Math.round((p.stop - p.start) / 1000));
     previous = p.stop;
   }
-  return [
-    channel,
-    starts,
-    lengths,
-    programmes.map(p => p.title),
-    column(programmes, "episode"),
-    details ? column(programmes, "subTitle") : 0,
-    details ? column(programmes, "description") : 0,
-  ];
+  return [channel, starts, lengths, programmes.map(p => p.title), column(programmes, "episode")];
 };
 
-/** Packs a block as its rows come. */
-export class BlockEncoder {
-  /** Compressed bytes so far; the last row's may not be counted yet. */
+/** One part of a block, packed as its rows come. */
+class Part {
   bytes = 0;
-  rows = 0;
-  programmes = 0;
+  private rows = 0;
   private chunks: Uint8Array[] = [];
   private deflate = new Deflate({ level: LEVEL }, chunk => {
     this.chunks.push(chunk);
     this.bytes += chunk.length;
   });
-  private day: number;
-  private details: boolean;
 
-  constructor(day: number, details: boolean) {
-    this.day = day;
-    this.details = details;
-  }
-
-  /** Adds a channel's day; a channel added twice is merged when read. */
-  add(channel: string, programmes: StoredProgramme[]) {
-    const row = JSON.stringify(rowOf(this.day, channel, programmes, this.details));
-    this.deflate.push(strToU8(this.rows === 0 ? `[${row}` : `,${row}`));
+  add(row: unknown) {
+    const text = JSON.stringify(row);
+    this.deflate.push(strToU8(this.rows === 0 ? `[${text}` : `,${text}`));
     this.rows++;
-    this.programmes += programmes.length;
   }
 
   finish(): Uint8Array {
@@ -117,25 +112,71 @@ export class BlockEncoder {
   }
 }
 
+/** Packs a block as its rows come. */
+export class BlockEncoder {
+  rows = 0;
+  programmes = 0;
+  private grid = new Part();
+  private details: Part | undefined;
+  private day: number;
+
+  /** With `details`, the block keeps subtitles and descriptions. */
+  constructor(day: number, details: boolean) {
+    this.day = day;
+    if (details) this.details = new Part();
+  }
+
+  /** Compressed bytes so far; the last row's may not be counted yet. */
+  get bytes() {
+    return this.grid.bytes + (this.details?.bytes ?? 0);
+  }
+
+  /** Adds a channel's day; a channel added twice is merged when read. */
+  add(channel: string, programmes: StoredProgramme[]) {
+    this.grid.add(gridRow(this.day, channel, programmes));
+    this.details?.add([column(programmes, "subTitle"), column(programmes, "description")]);
+    this.rows++;
+    this.programmes += programmes.length;
+  }
+
+  finish(): PackedBlock {
+    const packed: PackedBlock = { data: this.grid.finish() };
+    if (this.details) packed.details = this.details.finish();
+    return packed;
+  }
+}
+
 /** Packs a whole block at once. */
 export const encodeBlock = (
   day: number,
   channels: Iterable<[string, StoredProgramme[]]>,
   details: boolean,
-): Uint8Array => {
+): PackedBlock => {
   const encoder = new BlockEncoder(day, details);
   for (const [channel, programmes] of channels) encoder.add(channel, programmes);
   return encoder.finish();
 };
 
-/** A block's programmes by channel, in start order. */
-export const decodeBlock = (day: number, data: Uint8Array): Map<string, StoredProgramme[]> => {
-  // The block was written by BlockEncoder.
+// The parts were written by BlockEncoder.
+const unpack = <T>(data: Uint8Array): T[] =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-  const rows = JSON.parse(strFromU8(inflateSync(data))) as Row[];
+  JSON.parse(strFromU8(inflateSync(data))) as T[];
+
+/**
+ * A block's programmes by channel, in start order: with subtitles and
+ * descriptions if `details` (the block's second part) is given.
+ */
+export const decodeBlock = (
+  day: number,
+  data: Uint8Array,
+  details?: Uint8Array,
+): Map<string, StoredProgramme[]> => {
+  const rows = unpack<GridRow>(data);
+  const extra = details ? unpack<DetailsRow>(details) : [];
   const channels = new Map<string, StoredProgramme[]>();
   const merge = new Set<string>();
-  for (const [channel, starts, lengths, titles, episodes, subTitles, descriptions] of rows) {
+  rows.forEach(([channel, starts, lengths, titles, episodes], row) => {
+    const [subTitles, descriptions] = extra[row] ?? [0, 0];
     const programmes: StoredProgramme[] = [];
     let previous = day * DAY;
     for (let i = 0; i < starts.length; i++) {
@@ -155,7 +196,7 @@ export const decodeBlock = (day: number, data: Uint8Array): Map<string, StoredPr
       earlier.push(...programmes);
       merge.add(channel);
     } else channels.set(channel, programmes);
-  }
+  });
   // A channel whose day came in parts.
   for (const channel of merge) channels.set(channel, tidy(channels.get(channel) ?? []));
   return channels;

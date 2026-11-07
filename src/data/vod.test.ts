@@ -188,44 +188,55 @@ describe("films and series", () => {
     expect(await prepareDb(DB)).toBe("opened");
   });
 
-  it("replace a version 4 database's guide, and import every source again", async () => {
-    const old = await request<IDBDatabase>(
-      (() => {
-        const opening = indexedDB.open(DB, 4);
-        opening.addEventListener("upgradeneeded", () => {
-          const db = opening.result;
-          db.createObjectStore("imports", { keyPath: "source" }).put({
-            source: "kept",
-            status: "done",
-            programmes: 10,
-            guideBytes: 100,
-            lastDoneAt: 5,
+  // Version 4 kept a record per channel per day, and version 5 blocks keyed by source.
+  it.each([
+    [4, ["source", "channel", "day"], undefined],
+    [5, ["source", "generation", "day", "block"], "source"],
+  ])(
+    "replace a version %i database's guide, and import every source again",
+    async (version, keyPath, index) => {
+      const old = await request<IDBDatabase>(
+        (() => {
+          const opening = indexedDB.open(DB, version);
+          opening.addEventListener("upgradeneeded", () => {
+            const db = opening.result;
+            db.createObjectStore("imports", { keyPath: "source" }).put({
+              source: "kept",
+              status: "done",
+              programmes: 10,
+              guideBytes: 100,
+              lastDoneAt: 5,
+            });
+            db.createObjectStore("channelLists", { keyPath: "source" });
+            if (index) db.createObjectStore("guideIndex", { keyPath: index });
+            else db.createObjectStore("guideChannels", { keyPath: ["source", "id"] });
+            db.createObjectStore("guide", { keyPath }).put({
+              source: "kept",
+              channel: "one",
+              generation: 1,
+              block: 0,
+              day: 1,
+            });
+            db.createObjectStore("vod", { keyPath: "source" });
           });
-          db.createObjectStore("channelLists", { keyPath: "source" });
-          db.createObjectStore("guideChannels", { keyPath: ["source", "id"] });
-          db.createObjectStore("guide", { keyPath: ["source", "channel", "day"] }).put({
-            source: "kept",
-            channel: "one",
-            day: 1,
-          });
-          db.createObjectStore("vod", { keyPath: "source" });
-        });
-        return opening;
-      })(),
-    );
-    old.close();
-    const db = await openDb(DB);
-    expect(await readImport(db, "kept")).toMatchObject({
-      status: "done",
-      programmes: 0,
-      guideBytes: 0,
-      lastDoneAt: 0,
-    });
-    const guide = db.transaction("guide").objectStore("guide");
-    expect(guide.keyPath).toEqual(["source", "generation", "day", "block"]);
-    expect(await request(guide.count())).toBe(0);
-    expect(db.objectStoreNames.contains("guideIndex")).toBe(true);
-    expect(db.objectStoreNames.contains("guideChannels")).toBe(false);
-    db.close();
-  });
+          return opening;
+        })(),
+      );
+      old.close();
+      const db = await openDb(DB);
+      expect(await readImport(db, "kept")).toMatchObject({
+        status: "done",
+        programmes: 0,
+        guideBytes: 0,
+        lastDoneAt: 0,
+      });
+      const guide = db.transaction("guide").objectStore("guide");
+      expect(guide.keyPath).toEqual(["guide", "generation", "day", "block"]);
+      expect(await request(guide.count())).toBe(0);
+      expect(db.transaction("guideIndex").objectStore("guideIndex").keyPath).toBe("guide");
+      expect(db.objectStoreNames.contains("guides")).toBe(true);
+      expect(db.objectStoreNames.contains("guideChannels")).toBe(false);
+      db.close();
+    },
+  );
 });

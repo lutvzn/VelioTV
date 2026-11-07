@@ -39,7 +39,8 @@ async function probe(input) {
     const state = await data.readImport(db, source.id);
     const channels = await data.readChannels(db, source.id);
     const guideRecords = await new Promise((resolve, reject) => {
-      const r = db.transaction("guide").objectStore("guide").count(data.sourceRange(source.id));
+      if (state?.guide === undefined) return resolve(0);
+      const r = db.transaction("guide").objectStore("guide").count(data.sourceRange(state.guide));
       r.addEventListener("success", () => resolve(r.result));
       r.addEventListener("error", () => reject(r.error));
     });

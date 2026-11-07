@@ -7,12 +7,13 @@
 // films were left (src/data/watched.ts) and the reminders
 // (src/data/reminders.ts).
 
-import { createEffect, createMemo, createRoot } from "solid-js";
+import { createEffect, createMemo, createRoot, on } from "solid-js";
 import { createAppSettings } from "./data/appSettings";
 import { fetchBackup, makeBackup, sendBackup, type Backup } from "./data/backup";
 import { createChannelEdits } from "./data/channelEdits";
 import { createGuideCache } from "./data/guideCache";
 import { createGuideClient } from "./data/guideClient";
+import { shownBy } from "./data/guideWanted";
 import { importSource } from "./data/importClient";
 import { createLineup, type Channel } from "./data/lineup";
 import { createReminders } from "./data/reminders";
@@ -25,11 +26,18 @@ import { channelNumbers } from "./live/zapper";
 import { createSourceManager } from "./data/sourceManager";
 import { appStorage, settingsCopy } from "./data/settingsCopy";
 
+export const edits = createChannelEdits({ storage: appStorage });
+
 export const library = createSourceManager({
   importer: importSource,
   storage: appStorage,
   // The copy agreed with localStorage at this start, or put it back.
   listConfirmed: () => ["same", "restored"].includes(settingsCopy.lastRestore()?.action ?? ""),
+  // Imports leave out hidden channels' guides (src/data/guideWanted.ts).
+  guideFilter: () => {
+    const { hiddenChannels, hiddenGroups, movedChannels } = edits.all();
+    return { hiddenChannels, hiddenGroups, movedChannels };
+  },
 });
 
 export const lineup = createLineup({
@@ -43,8 +51,6 @@ export const vod = createVodLibrary({
   sources: () => library.sources().filter(source => !source.disabled),
   stateOf: id => library.statusOf(id).state,
 });
-
-export const edits = createChannelEdits({ storage: appStorage });
 
 export const settings = createAppSettings({ storage: appStorage });
 export const watched = createWatched({ storage: appStorage });
@@ -105,7 +111,30 @@ export const restoreFrom = async (url: string) => {
 };
 
 export const guideReader = createGuideClient();
-export const guide = createGuideCache({ read: guideReader.read });
+export const guide = createGuideCache({ read: guideReader.read, details: guideReader.details });
+
+// Hidden channels' guides aren't imported, so a channel shown again imports
+// its source again, for its guide (src/data/guideWanted.ts).
+createRoot(() =>
+  createEffect(
+    on(
+      edits.all,
+      (next, before) => {
+        if (!before) return;
+        const wasShown = shownBy(before);
+        const isShown = shownBy(next);
+        const due = new Set<string>();
+        for (const channel of lineup.channels()) {
+          if (channel.guideId && !due.has(channel.source) && isShown(channel) && !wasShown(channel)) {
+            due.add(channel.source);
+          }
+        }
+        for (const id of due) library.refresh(id, true);
+      },
+      { defer: true },
+    ),
+  ),
+);
 
 // The lineup reloads a source's channels when an import of it finishes,
 // which has also replaced its guide.

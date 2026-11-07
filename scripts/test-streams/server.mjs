@@ -27,7 +27,8 @@
 // guide, starting yesterday; ?channels= and ?days= change them per request:
 //   /playlist.m3u                M3U playlist
 //   /guide.xml                   XMLTV guide, generated as it is sent
-//   /guide.xml.gz                the same, gzipped, cached and with a length
+//   /guide.xml.gz                the same, gzipped, cached, with a length,
+//                                and an ETag and Last-Modified (304s)
 //   /logo/<channels>/<number>.svg  channel logos
 //   Xtream (xtream.mjs)          username and password test/test, or
 //                                small/small for 50 channels
@@ -652,7 +653,9 @@ const gzippedGuide = (base, { count, days }) => {
   return gzipJobs.get(name);
 };
 
-const sendGzippedGuide = async (res, base, settings) => {
+// With an ETag and Last-Modified, answering 304 when they match, as static
+// file servers do.
+const sendGzippedGuide = async (req, res, base, settings) => {
   let file;
   try {
     file = await gzippedGuide(base, settings);
@@ -660,10 +663,26 @@ const sendGzippedGuide = async (res, base, settings) => {
     send(res, 500, `${error.message}\n`);
     return;
   }
+  const { size, mtime } = statSync(file);
+  const etag = `"${path.basename(file, ".xml.gz")}"`;
+  const lastModified = mtime.toUTCString();
+  const cors = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Expose-Headers": "ETag, Last-Modified",
+  };
+  const since = Date.parse(req.headers["if-modified-since"] ?? "");
+  const match = req.headers["if-none-match"];
+  if (match === etag || (match === undefined && since >= Math.floor(mtime.getTime() / 1000) * 1000)) {
+    res.writeHead(304, { ETag: etag, "Last-Modified": lastModified, ...cors });
+    res.end();
+    return;
+  }
   res.writeHead(200, {
     "Content-Type": "application/gzip",
-    "Content-Length": statSync(file).size,
-    "Access-Control-Allow-Origin": "*",
+    "Content-Length": size,
+    ETag: etag,
+    "Last-Modified": lastModified,
+    ...cors,
   });
   await pipeline(createReadStream(file), res).catch(() => {});
 };
@@ -701,7 +720,16 @@ const serveSource = (req, res, url, base) => {
     return sendChunks(res, xmltv({ base, channels, window: guideWindow(settings.days) }), "application/xml");
   }
   if (url.pathname === "/guide.xml.gz") {
-    void sendGzippedGuide(res, base, settings);
+    if (req.method === "OPTIONS") {
+      // A browser asks first before sending If-None-Match.
+      res.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "If-None-Match, If-Modified-Since",
+      });
+      res.end();
+      return true;
+    }
+    void sendGzippedGuide(req, res, base, settings);
     return true;
   }
   const logo = url.pathname.match(/^\/logo\/(\d+)\/(\d+)\.svg$/);

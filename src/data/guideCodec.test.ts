@@ -29,18 +29,28 @@ describe("guide blocks", () => {
       ],
       true,
     );
-    expect(decodeBlock(day, packed)).toEqual(
+    expect(decodeBlock(day, packed.data, packed.details)).toEqual(
       new Map([
         ["one", programmes],
         ["two", other],
       ]),
     );
-    expect(packed.length).toBeLessThan(JSON.stringify(programmes).length);
+    expect(packed.data.length + (packed.details?.length ?? 0)).toBeLessThan(
+      JSON.stringify(programmes).length,
+    );
+  });
+
+  it("unpacks the grid alone, without subtitles and descriptions", () => {
+    const packed = encodeBlock(day, [["one", programmes]], true);
+    expect(decodeBlock(day, packed.data).get("one")).toEqual(
+      programmes.map(({ subTitle: _s, description: _d, ...grid }) => grid),
+    );
   });
 
   it("leaves out subtitles and descriptions when asked, keeping episodes", () => {
     const packed = encodeBlock(day, [["one", programmes]], false);
-    expect(decodeBlock(day, packed).get("one")?.[1]).toEqual({
+    expect(packed.details).toBeUndefined();
+    expect(decodeBlock(day, packed.data).get("one")?.[1]).toEqual({
       start: start + 1_800_000,
       stop: start + 5_400_000,
       title: "Film",
@@ -53,14 +63,16 @@ describe("guide blocks", () => {
     encoder.add("one", programmes.slice(1));
     encoder.add("two", programmes.slice(0, 1));
     encoder.add("one", programmes.slice(0, 1));
-    const unpacked = decodeBlock(day, encoder.finish());
+    const { data, details } = encoder.finish();
+    const unpacked = decodeBlock(day, data, details);
     expect(unpacked.get("one")).toEqual(programmes);
     expect(unpacked.get("two")).toEqual(programmes.slice(0, 1));
     expect(encoder.programmes).toBe(4);
   });
 
   it("packs an empty block", () => {
-    expect(decodeBlock(day, new BlockEncoder(day, true).finish())).toEqual(new Map());
+    const { data, details } = new BlockEncoder(day, true).finish();
+    expect(decodeBlock(day, data, details)).toEqual(new Map());
   });
 });
 

@@ -8,6 +8,7 @@
 
 import { createSignal } from "solid-js";
 import { deleteSource, openDb, readImport, readImports, type ImportState } from "./db";
+import type { GuideFilter } from "./guideWanted";
 import { GUIDE_BUDGET_BYTES, type ImportProgress, type ImportRequest, type ImportResult } from "./importer";
 import {
   changesData,
@@ -62,6 +63,8 @@ export interface SourceManagerOptions {
    * Only then is the data of sources missing from it deleted.
    */
   listConfirmed?: () => boolean;
+  /** The user's hidden channels and groups, whose guides imports leave out. */
+  guideFilter?: () => GuideFilter;
 }
 
 export const createSourceManager = (options: SourceManagerOptions) => {
@@ -103,21 +106,31 @@ export const createSourceManager = (options: SourceManagerOptions) => {
     }
   };
 
+  // Sources that share a guide (db.ts) count it once, and one that shares
+  // this source's guide doesn't count.
   const budgetFor = (id: string) => {
-    const others = sources().filter(source => source.id !== id && !source.disabled);
-    const othersBytes = others.reduce((sum, source) => sum + (states()[source.id]?.guideBytes ?? 0), 0);
-    return guideBudget(totalBudget, others.length + 1, othersBytes);
+    const own = states()[id]?.guide;
+    const guides = new Map<string, number>();
+    for (const source of sources()) {
+      if (source.id === id || source.disabled) continue;
+      const state = states()[source.id];
+      const key = state?.guide ?? `\u0000${source.id}`;
+      if (key === own) continue;
+      guides.set(key, Math.max(guides.get(key) ?? 0, state?.guideBytes ?? 0));
+    }
+    let othersBytes = 0;
+    for (const bytes of guides.values()) othersBytes += bytes;
+    return guideBudget(totalBudget, guides.size + 1, othersBytes);
   };
 
   const run = async (source: Source) => {
     controller = new AbortController();
     setCurrent({ id: source.id });
     try {
-      await options.importer(
-        importRequest(source, budgetFor(source.id)),
-        progress => setCurrent({ id: source.id, progress }),
-        controller.signal,
-      );
+      const request = importRequest(source, budgetFor(source.id));
+      const filter = options.guideFilter?.();
+      if (filter) request.guideFilter = filter;
+      await options.importer(request, progress => setCurrent({ id: source.id, progress }), controller.signal);
     } catch (error) {
       // The import state records the failure; the UI shows it from there.
       if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -330,8 +343,11 @@ export const createSourceManager = (options: SourceManagerOptions) => {
       return next;
     },
 
-    /** Imports a source now, or after the import running now. */
-    refresh: (id: string) => enqueue(id),
+    /**
+     * Imports a source now, or after the import running now; with `again`,
+     * once more after it if it is importing now.
+     */
+    refresh: (id: string, again = false) => enqueue(id, again),
 
     /** Resolves when no import is running or waiting. */
     whenIdle: settled,

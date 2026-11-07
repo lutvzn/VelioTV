@@ -5,6 +5,7 @@ import {
   finished,
   type GuideBlock,
   type GuideIndex,
+  type ImportState,
   openDb,
   readGuide,
   writeTransaction,
@@ -31,27 +32,42 @@ const second = [
 ];
 
 const block = (d: number, programmes: StoredProgramme[]): GuideBlock => ({
-  source: "s",
+  guide: "g",
   generation: 1,
   day: d,
   block: 0,
   channels: 1,
   count: programmes.length,
-  data: encodeBlock(d, [["one", programmes]], true),
+  ...encodeBlock(d, [["one", programmes]], true),
 });
 
+// Source "s" uses guide "g".
 const store = async () => {
   const db = await openDb(DB);
-  const transaction = writeTransaction(db, ["guide", "guideIndex"]);
+  const transaction = writeTransaction(db, ["guide", "guideIndex", "imports"]);
   for (const record of [block(day, first), block(day + 1, second)])
     transaction.objectStore("guide").put(record);
   const index: GuideIndex = {
-    source: "s",
+    guide: "g",
     generation: 1,
     channels: ["one"],
     days: { [day]: [0], [day + 1]: [0] },
   };
   transaction.objectStore("guideIndex").put(index);
+  const state: ImportState = {
+    source: "s",
+    status: "done",
+    startedAt: 0,
+    channels: 1,
+    guideChannels: 1,
+    programmes: 5,
+    guideBytes: 0,
+    guideFirstDay: day,
+    guideLastDay: day + 1,
+    guideTrimmed: false,
+    guide: "g",
+  };
+  transaction.objectStore("imports").put(state);
   await finished(transaction);
   return db;
 };
@@ -77,15 +93,20 @@ describe("the guide client", () => {
     ]);
     expect(today.map(p => p.title)).toEqual(["Evening", "Overnight"]);
     expect(tomorrow.map(p => p.title)).toEqual(["Overnight", "Morning", "Noon", "Film"]);
-    expect(tomorrow[3].description).toBe("A film.");
     expect(after).toEqual([]);
     expect(none).toEqual([]);
     // Asked for together, so one message, and each record unpacked once.
     expect(client.stats.messages).toBe(1);
     expect(client.stats.decoded).toBe(2);
 
-    // The same as the main thread's reader.
-    expect(tomorrow).toEqual(await readGuide(opened, "s", "one", (day + 1) * DAY, (day + 2) * DAY));
+    // The same as the main thread's reader, but for the details, read apart.
+    const whole = await readGuide(opened, "s", "ONE", (day + 1) * DAY, (day + 2) * DAY);
+    expect(tomorrow).toEqual(whole.map(({ description: _, ...grid }) => grid));
+    expect(whole[3].description).toBe("A film.");
+    expect(tomorrow[3].description).toBeUndefined();
+    expect(await client.details("s", "One", tomorrow[3].start)).toEqual({ description: "A film." });
+    expect(await client.details("s", "one", tomorrow[2].start)).toEqual({});
+    expect(await client.details("s", "two", tomorrow[2].start)).toEqual({});
   });
 
   it("keeps unpacked days until cleared", async () => {

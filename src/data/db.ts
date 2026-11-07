@@ -12,12 +12,19 @@
 // (guideCodec.ts) to over 64 KB. Chromium keeps values over 64 KB as files of
 // their own and gives their space back as soon as they are deleted; smaller
 // ones keep theirs until the database compacts, which the TV didn't do
-// (PLAN.md, Phase 8, step 2). A source's guide index says where each
-// channel's block is. Each import writes a new generation of blocks beside
-// the last one, and switches the index to it at the end, deleting the last
-// one in the same transaction: the guide reads whole until then, and an
-// import that fails leaves it as it was. If storage fills up first, the
-// last generation goes early, to make room (guideWriter.ts).
+// (PLAN.md, Phase 8, step 2). A guide's index says where each channel's
+// block is. Each import writes a new generation of blocks beside the last
+// one, and switches the index to it at the end, deleting the last one in the
+// same transaction: the guide reads whole until then, and an import that
+// fails leaves it as it was. If storage fills up first, the last generation
+// goes early, to make room (guideWriter.ts).
+//
+// Guides are keyed by their addresses (guideKey), so sources that use the
+// same guide, such as two lines from one provider, store it once
+// (PLAN.md, Phase 8, step 2). A source's import state names the guide it
+// uses; a guide no source names is deleted. Its record in "guides" says what
+// the last import kept, so that another import can tell whether it must
+// download it again (importer.ts).
 //
 // Writes use relaxed durability, which was about 20 times faster on the TV.
 //
@@ -32,8 +39,8 @@ import type { XtreamAccount } from "./xtream";
 export { DAY, type StoredChannel, type StoredProgramme };
 
 export const DB_NAME = "tiviplayer";
-const VERSION = 5;
-const STORES = ["imports", "channelLists", "guide", "guideIndex", "vod"];
+const VERSION = 6;
+const STORES = ["imports", "channelLists", "guide", "guideIndex", "guides", "vod"];
 
 /** How a source's last import went. */
 export interface ImportState {
@@ -64,6 +71,8 @@ export interface ImportState {
   /** Films and series stored, from imports since Phase 6. */
   films?: number;
   series?: number;
+  /** The key of the guide it uses (guideKey), if it has one. */
+  guide?: string;
 }
 
 export interface StoredChannelList {
@@ -72,7 +81,8 @@ export interface StoredChannelList {
 }
 
 export interface GuideBlock {
-  source: string;
+  /** The guide's key (guideKey). */
+  guide: string;
   /** The import that wrote it; see the top of this file. */
   generation: number;
   /** Days since 1970, UTC, of the programmes' start times. */
@@ -83,16 +93,18 @@ export interface GuideBlock {
   channels: number;
   /** Programmes in it. */
   count: number;
-  /** The programmes, packed by guideCodec.ts. */
+  /** The programmes' grid, packed by guideCodec.ts. */
   data: Uint8Array;
+  /** Their subtitles and descriptions, for days that keep them. */
+  details?: Uint8Array;
 }
 
-/** Where a source's guide channels are in its blocks. */
+/** Where a guide's channels are in its blocks. */
 export interface GuideIndex {
-  source: string;
+  guide: string;
   /** The generation of blocks it describes. */
   generation: number;
-  /** Guide channel ids, in the guide's order. */
+  /** Guide channel ids, lower-cased, in the guide's order. */
   channels: string[];
   /**
    * For each day, the place in `channels` where each block starts. A block
@@ -101,7 +113,40 @@ export interface GuideIndex {
   days: Record<number, number[]>;
 }
 
-export type BlockKey = [source: string, generation: number, day: number, block: number];
+/** What a guide's last import kept, and how to ask whether the guide changed since (importer.ts). */
+export interface GuideMeta {
+  guide: string;
+  urls: string[];
+  /** When it was imported, and for which source. */
+  importedAt: number;
+  importedBy: string;
+  /** The UTC day it was imported on, which sets the days with details (guideWriter.ts). */
+  today: number;
+  /** The last day it was asked for, and the budget. */
+  lastDay: number;
+  budgetBytes: number;
+  /**
+   * The channels kept, as lower-cased guide ids, each with the time its
+   * programmes were kept from (those ending later). With `all`, every
+   * channel was kept from then.
+   */
+  wanted: { ids: string[]; from: number[]; all?: number };
+  /** Each address's ETag and Last-Modified, when the server sent them. */
+  validators: Record<string, { etag?: string; lastModified?: string }>;
+  /** What is stored, for the state of a source that uses it as it is. */
+  stored: Pick<
+    ImportState,
+    "guideChannels" | "programmes" | "guideBytes" | "guideFirstDay" | "guideLastDay" | "guideTrimmed"
+  >;
+}
+
+/** The key of the guide made from these addresses. */
+export const guideKey = (urls: readonly string[], offsetMinutes?: number) =>
+  urls.length === 0
+    ? undefined
+    : urls.join("\n") + (offsetMinutes === undefined ? "" : `\n@${offsetMinutes}`);
+
+export type BlockKey = [guide: string, generation: number, day: number, block: number];
 
 /** The block of `starts` (a GuideIndex day) that holds a channel's place. */
 export const blockAt = (starts: readonly number[], position: number) => {
@@ -119,13 +164,14 @@ export const blockAt = (starts: readonly number[], position: number) => {
 export const createLookup = (index: GuideIndex) => {
   const positions = new Map(index.channels.map((channel, i) => [channel, i]));
   return {
+    guide: index.guide,
     generation: index.generation,
     /** The key of the block with a channel's day, if the guide has that day. */
     blockKey: (channel: string, day: number): BlockKey | undefined => {
-      const position = positions.get(channel);
+      const position = positions.get(channel.toLowerCase());
       const starts = index.days[day];
       if (position === undefined || !starts?.length) return undefined;
-      return [index.source, index.generation, day, blockAt(starts, position)];
+      return [index.guide, index.generation, day, blockAt(starts, position)];
     },
   };
 };
@@ -170,16 +216,18 @@ export const openDb = (name = DB_NAME): Promise<IDBDatabase> => {
     // Version 4 adds films and series, keeping what version 3 holds; they
     // come with each source's next import.
     if (!db.objectStoreNames.contains("vod")) db.createObjectStore("vod", { keyPath: "source" });
-    if (event.oldVersion < 5) {
-      // Version 5 stores the guide in blocks. Version 3's records (one per
-      // channel per day) go, and every source is due to import again, so its
-      // guide comes back at the app's next check. The guide channels' names
-      // go too: the app never showed them.
-      for (const store of ["guide", "guideChannels"]) {
+    if (event.oldVersion < 6) {
+      // Version 5 stored the guide in blocks, and version 6 in blocks of two
+      // parts, keyed by the guide rather than the source. The guide from
+      // before goes (version 3's was a record per channel per day), and
+      // every source is due to import again, so its guide comes back at the
+      // app's next check.
+      for (const store of ["guide", "guideChannels", "guideIndex", "guides"]) {
         if (db.objectStoreNames.contains(store)) db.deleteObjectStore(store);
       }
-      db.createObjectStore("guide", { keyPath: ["source", "generation", "day", "block"] });
-      db.createObjectStore("guideIndex", { keyPath: "source" });
+      db.createObjectStore("guide", { keyPath: ["guide", "generation", "day", "block"] });
+      db.createObjectStore("guideIndex", { keyPath: "guide" });
+      db.createObjectStore("guides", { keyPath: "guide" });
       const imports = r.transaction?.objectStore("imports").openCursor();
       imports?.addEventListener("success", () => {
         const cursor = imports.result;
@@ -225,10 +273,15 @@ export const readImport = (db: IDBDatabase, source: string) =>
 export const readImports = (db: IDBDatabase) =>
   request<ImportState[]>(db.transaction("imports").objectStore("imports").getAll());
 
-/** Replaces a source's channel list. */
-export const writeChannels = async (db: IDBDatabase, source: string, channels: PlaylistChannel[]) => {
+/** Replaces a source's channel list; `keys` are the channels' keys, if already worked out. */
+export const writeChannels = async (
+  db: IDBDatabase,
+  source: string,
+  channels: PlaylistChannel[],
+  keys?: string[],
+) => {
   const transaction = writeTransaction(db, "channelLists");
-  const list: StoredChannelList = { source, columns: toColumns(channels) };
+  const list: StoredChannelList = { source, columns: toColumns(channels, keys) };
   transaction.objectStore("channelLists").put(list);
   await finished(transaction);
 };
@@ -253,17 +306,65 @@ export const readChannels = async (db: IDBDatabase, source: string): Promise<Sto
   return list ? fromColumns(list.columns, source) : [];
 };
 
-export const readGuideIndex = (db: IDBDatabase, source: string) =>
-  request<GuideIndex | undefined>(db.transaction("guideIndex").objectStore("guideIndex").get(source));
+export const readGuideIndex = (db: IDBDatabase, guide: string) =>
+  request<GuideIndex | undefined>(db.transaction("guideIndex").objectStore("guideIndex").get(guide));
 
-/** A source's blocks of one generation. */
-export const generationRange = (source: string, generation: number) =>
-  IDBKeyRange.bound([source, generation], [source, generation, []]);
+export const readGuideMeta = (db: IDBDatabase, guide: string) =>
+  request<GuideMeta | undefined>(db.transaction("guides").objectStore("guides").get(guide));
 
-/** Deletes a source's blocks of every generation but `keep`. */
-export const deleteOtherGenerations = (store: IDBObjectStore, source: string, keep: number) => {
-  store.delete(IDBKeyRange.bound([source], [source, keep], false, true));
-  store.delete(IDBKeyRange.bound([source, keep + 1], [source, []]));
+/** The key of the guide a source uses, if it has one. */
+export const guideOf = async (db: IDBDatabase, source: string) => (await readImport(db, source))?.guide;
+
+/** A guide's blocks of one generation. */
+export const generationRange = (guide: string, generation: number) =>
+  IDBKeyRange.bound([guide, generation], [guide, generation, []]);
+
+/** Deletes a guide's blocks of every generation but `keep`. */
+export const deleteOtherGenerations = (store: IDBObjectStore, guide: string, keep: number) => {
+  store.delete(IDBKeyRange.bound([guide], [guide, keep], false, true));
+  store.delete(IDBKeyRange.bound([guide, keep + 1], [guide, []]));
+};
+
+/** Deletes a guide: its blocks, index and record, in a transaction on those stores. */
+const deleteGuide = (transaction: IDBTransaction, guide: string) => {
+  transaction.objectStore("guide").delete(sourceRange(guide));
+  transaction.objectStore("guideIndex").delete(guide);
+  transaction.objectStore("guides").delete(guide);
+};
+
+const GUIDE_STORES = ["imports", "guide", "guideIndex", "guides"];
+
+/**
+ * Deletes every guide no source's import state names, including blocks an
+ * import cut short left behind. Imports run one at a time, and this runs at
+ * the end of one, so no other import is writing.
+ */
+export const deleteUnusedGuides = async (db: IDBDatabase) => {
+  const transaction = writeTransaction(db, GUIDE_STORES);
+  const states = await request<ImportState[]>(transaction.objectStore("imports").getAll());
+  const used = new Set(states.map(state => state.guide).filter(guide => guide !== undefined));
+  const unused = new Set<string>();
+  for (const store of ["guideIndex", "guides"]) {
+    const keys = await request<IDBValidKey[]>(transaction.objectStore(store).getAllKeys());
+    for (const key of keys) if (typeof key === "string" && !used.has(key)) unused.add(key);
+  }
+  // The blocks' guides, one key each: the cursor jumps past each guide's blocks.
+  await new Promise<void>((resolve, reject) => {
+    const r = transaction.objectStore("guide").openKeyCursor();
+    r.addEventListener("success", () => {
+      const cursor = r.result;
+      if (!cursor) return resolve();
+      // The store's keys are BlockKeys.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      const [guide] = cursor.key as BlockKey;
+      if (!used.has(guide)) unused.add(guide);
+      cursor.continue([guide, []]);
+    });
+    r.addEventListener("error", () => reject(r.error ?? new Error("Couldn't list the guides")));
+  });
+  for (const guide of unused) deleteGuide(transaction, guide);
+  await finished(transaction);
+  return [...unused];
 };
 
 /**
@@ -279,7 +380,8 @@ export const readGuide = async (
   from: number,
   to: number,
 ): Promise<StoredProgramme[]> => {
-  const index = await readGuideIndex(db, source);
+  const guide = await guideOf(db, source);
+  const index = guide === undefined ? undefined : await readGuideIndex(db, guide);
   if (!index) return [];
   const lookup = createLookup(index);
   const keys: BlockKey[] = [];
@@ -291,14 +393,16 @@ export const readGuide = async (
   const blocks = await Promise.all(keys.map(key => request<GuideBlock | undefined>(store.get(key))));
   return blocks.flatMap(block =>
     block
-      ? (decodeBlock(block.day, block.data).get(channel) ?? []).filter(p => p.stop > from && p.start < to)
+      ? (decodeBlock(block.day, block.data, block.details).get(channel.toLowerCase()) ?? []).filter(
+          p => p.stop > from && p.start < to,
+        )
       : [],
   );
 };
 
-/** A source's stored guide: its programmes, bytes, blocks and last day. */
-export const measureGuide = async (db: IDBDatabase, source: string) => {
-  const index = await readGuideIndex(db, source);
+/** A guide as stored (or one generation of it): its programmes, bytes, blocks and last day. */
+export const measureGuide = async (db: IDBDatabase, guide: string, generation?: number) => {
+  const index = generation === undefined ? await readGuideIndex(db, guide) : { generation };
   const transaction = db.transaction("guide");
   let programmes = 0;
   let bytes = 0;
@@ -306,13 +410,13 @@ export const measureGuide = async (db: IDBDatabase, source: string) => {
   let lastDay: number | undefined;
   await new Promise<void>((resolve, reject) => {
     if (!index) return resolve();
-    const r = transaction.objectStore("guide").openCursor(generationRange(source, index.generation));
+    const r = transaction.objectStore("guide").openCursor(generationRange(guide, index.generation));
     r.addEventListener("success", () => {
       const cursor = r.result;
       if (!cursor) return resolve();
       const value: GuideBlock = cursor.value;
       programmes += value.count;
-      bytes += value.data.byteLength;
+      bytes += value.data.byteLength + (value.details?.byteLength ?? 0);
       records++;
       lastDay = Math.max(lastDay ?? value.day, value.day);
       cursor.continue();
@@ -322,13 +426,17 @@ export const measureGuide = async (db: IDBDatabase, source: string) => {
   return { programmes, bytes, records, lastDay };
 };
 
-/** Deletes a source's data and import state. */
+/** Deletes a source's data and import state, and its guide unless another source uses it. */
 export const deleteSource = async (db: IDBDatabase, source: string) => {
   const transaction = writeTransaction(db, STORES);
-  transaction.objectStore("guideIndex").delete(source);
-  transaction.objectStore("guide").delete(sourceRange(source));
+  const imports = transaction.objectStore("imports");
+  const states = await request<ImportState[]>(imports.getAll());
+  const guide = states.find(state => state.source === source)?.guide;
+  if (guide !== undefined && !states.some(state => state.source !== source && state.guide === guide)) {
+    deleteGuide(transaction, guide);
+  }
   transaction.objectStore("channelLists").delete(source);
   transaction.objectStore("vod").delete(source);
-  transaction.objectStore("imports").delete(source);
+  imports.delete(source);
   await finished(transaction);
 };

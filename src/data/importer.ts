@@ -3,27 +3,43 @@
 // flat. It runs in a Web Worker (see
 // import.worker.ts), but works on any thread.
 //
-// Only guide channels the playlist uses are kept, matched by tvg-id (ignoring
-// case). Without a playlist, the whole guide is kept. The guide is kept
-// within a storage budget; see guideWriter.ts.
+// Which guide channels are kept, and from when, is in guideWanted.ts: only
+// those the playlist uses and shows, and only their past that catch-up can
+// play. The guide is kept within a storage budget; see guideWriter.ts.
+//
+// Sources that use the same guide addresses share one copy (db.ts), which
+// keeps what any of them wants. An import doesn't download a guide again
+// when the copy stored today already holds what the source wants and either
+// another source imported it within the hour (two lines from one provider
+// refresh together), or the server says the files haven't changed (ETag
+// and Last-Modified). A copy made on another day is imported again even if
+// the files are the same, as the days that keep details have moved.
 //
 // Films and series are kept too (vod.ts): an Xtream account's lists, or a
 // playlist's entries that aren't channels. An Xtream server that won't list
 // them keeps those from before.
 
+import { channelKeys } from "./channelKey";
 import {
   DAY,
   deleteOtherGenerations,
+  deleteUnusedGuides,
   finished,
+  guideKey,
   measureGuide,
   openDb,
+  readChannels,
   readGuideIndex,
+  readGuideMeta,
   readImport,
+  readImports,
   writeChannels,
   writeTransaction,
   writeVod,
+  type GuideMeta,
   type ImportState,
 } from "./db";
+import { type GuideFilter, wantAll, wantChannels, Wanted, type WantOptions } from "./guideWanted";
 import { GuideWriter, RECORD_OVERHEAD } from "./guideWriter";
 import { M3uParser } from "./m3u";
 import { readText } from "./stream";
@@ -56,8 +72,8 @@ const YIELD_EVERY_MS = 100;
  * (PLAN.md, Phase 8, step 2).
  */
 export const GUIDE_BUDGET_BYTES = 40 * MB;
-/** The most days of guide kept before today, for catch-up. */
-const MAX_PAST_DAYS = 7;
+/** How recently another source's import of a shared guide makes downloading it again needless. */
+export const SHARED_FRESH_MS = 60 * 60_000;
 
 interface ImportCommon {
   /** The source being imported. Its earlier data is replaced. */
@@ -72,11 +88,13 @@ interface ImportCommon {
   /** Days of guide to keep from today, 7 by default. */
   guideDays?: number;
   /**
-   * Days of guide to keep before today, for catch-up: by default as many as
-   * the channels' catch-up reaches, from 1 to 7.
+   * Days of guide to keep before today for every channel. By default each
+   * channel keeps as many as its catch-up reaches (guideWanted.ts).
    */
   guidePastDays?: number;
   guideBudgetBytes?: number;
+  /** The user's hidden channels and groups, whose guides are left out. */
+  guideFilter?: GuideFilter;
 }
 
 export type ImportRequest = ImportCommon &
@@ -102,8 +120,10 @@ export interface ImportResult extends ImportState {
   programmesRead: number;
   /** Guide programmes for channels the playlist doesn't have. */
   unmatchedProgrammes: number;
-  /** Guide programmes left out for their day, or after storing stopped. */
+  /** Guide programmes left out for their time, or after storing stopped. */
   skippedProgrammes: number;
+  /** Why the guide wasn't downloaded, if it wasn't; see the top of this file. */
+  guideSkipped?: "shared" | "unchanged";
   seconds: number;
 }
 
@@ -115,12 +135,56 @@ export interface ImportOptions {
   now?: number;
 }
 
-const download = async (fetcher: typeof fetch, url: string) => {
-  const response = await fetcher(url);
+const download = async (fetcher: typeof fetch, url: string, fetched?: Response) => {
+  const response = fetched ?? (await fetcher(url));
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
   if (!response.body) throw new Error(`${url}: empty response`);
   const length = Number(response.headers.get("Content-Length"));
-  return { body: response.body, totalBytes: length > 0 ? length : undefined };
+  return { response, body: response.body, totalBytes: length > 0 ? length : undefined };
+};
+
+type Validators = GuideMeta["validators"][string];
+
+const validatorsOf = (response: Response): Validators | undefined => {
+  const etag = response.headers.get("ETag") ?? undefined;
+  const lastModified = response.headers.get("Last-Modified") ?? undefined;
+  if (!etag && !lastModified) return undefined;
+  const validators: Validators = {};
+  if (etag) validators.etag = etag;
+  if (lastModified) validators.lastModified = lastModified;
+  return validators;
+};
+
+/**
+ * Asks whether each guide file changed since it was imported. Resolves true
+ * if none did; otherwise the first changed file's response is kept in
+ * `fetched`, to read it from. Those headers make a browser ask the server
+ * first whether it may send them (CORS), which most servers don't answer:
+ * then the guide downloads as usual.
+ */
+const unchanged = async (
+  fetcher: typeof fetch,
+  urls: readonly string[],
+  validators: GuideMeta["validators"],
+  fetched: Map<string, Response>,
+) => {
+  for (const url of urls) {
+    const known = validators[url];
+    const headers: Record<string, string> = {};
+    if (known.etag) headers["If-None-Match"] = known.etag;
+    if (known.lastModified) headers["If-Modified-Since"] = known.lastModified;
+    let response: Response;
+    try {
+      response = await fetcher(url, { headers });
+    } catch (error) {
+      console.warn("Couldn't ask whether the guide changed:", error);
+      return false;
+    }
+    if (response.status === 304) continue;
+    fetched.set(url, response);
+    return false;
+  }
+  return true;
 };
 
 // Lets the thread handle events if parsing has held it for a while.
@@ -140,17 +204,18 @@ const putState = async (db: IDBDatabase, state: ImportState) => {
 };
 
 // The guide generation an import writes, after deleting any that an import
-// cut short left behind (db.ts). Its makeRoom deletes the source's guide.
-const startGeneration = async (db: IDBDatabase, source: string) => {
-  const current = (await readGuideIndex(db, source))?.generation ?? 0;
+// cut short left behind (db.ts). Its makeRoom deletes the guide stored.
+const startGeneration = async (db: IDBDatabase, guide: string) => {
+  const current = (await readGuideIndex(db, guide))?.generation ?? 0;
   const transaction = writeTransaction(db, "guide");
-  deleteOtherGenerations(transaction.objectStore("guide"), source, current);
+  deleteOtherGenerations(transaction.objectStore("guide"), guide, current);
   await finished(transaction);
   const makeRoom = async () => {
     if (current === 0) return false;
-    const deleting = writeTransaction(db, ["guide", "guideIndex"]);
-    deleting.objectStore("guideIndex").delete(source);
-    deleteOtherGenerations(deleting.objectStore("guide"), source, current + 1);
+    const deleting = writeTransaction(db, ["guide", "guideIndex", "guides"]);
+    deleting.objectStore("guideIndex").delete(guide);
+    deleting.objectStore("guides").delete(guide);
+    deleteOtherGenerations(deleting.objectStore("guide"), guide, current + 1);
     await finished(deleting);
     console.warn("Storage is full: deleted the old guide to make room for the new one.");
     return true;
@@ -203,24 +268,181 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
   // and parse errors name their file).
   let storing: string | undefined;
   let abandonGuide: (() => Promise<void>) | undefined;
+  const budgetBytes = input.guideBudgetBytes ?? GUIDE_BUDGET_BYTES;
+  const wantOptions: WantOptions = {
+    now: options.now ?? started,
+    pastDays: input.guidePastDays,
+    filter: input.guideFilter,
+  };
+
+  // Imports the guide `key` names, unless the copy stored will do; see the
+  // top of this file. `own` is what this source wants of it.
+  const importGuide = async (key: string, urls: string[], own: Wanted) => {
+    const counts = { read: 0, unmatched: 0, skipped: 0 };
+    const meta = await readGuideMeta(db, key);
+    const index = meta && (await readGuideIndex(db, key));
+    const usable =
+      meta !== undefined &&
+      index !== undefined &&
+      meta.today === today &&
+      meta.lastDay >= state.guideLastDay &&
+      own.coveredBy(meta.wanted) &&
+      meta.stored.guideBytes <= budgetBytes &&
+      (!meta.stored.guideTrimmed || budgetBytes <= meta.budgetBytes);
+    const fetched = new Map<string, Response>();
+    let skipped: ImportResult["guideSkipped"];
+    if (usable) {
+      if (meta.importedBy !== source && started - meta.importedAt < SHARED_FRESH_MS) skipped = "shared";
+      else if (urls.every(url => meta.validators[url])) {
+        progress = { ...progress, stage: "guide", url: urls[0], bytes: 0 };
+        report(true);
+        if (await unchanged(fetcher, urls, meta.validators, fetched)) skipped = "unchanged";
+      }
+    }
+    if (skipped && index) {
+      Object.assign(state, meta?.stored, {
+        guideChannels: index.channels.filter(id => own.from(id) !== undefined).length,
+      });
+      return { ...counts, skipped: 0, guideSkipped: skipped };
+    }
+
+    // What every source that uses this guide wants of it.
+    const wanted = new Wanted();
+    wanted.merge(own);
+    for (const other of await readImports(db)) {
+      if (other.source === source || other.guide !== key) continue;
+      const list = await readChannels(db, other.source);
+      if (list.length === 0) wantAll(wanted, wantOptions);
+      else wantChannels(wanted, list, wantOptions);
+    }
+    const earliest = wanted.earliest();
+    state.guideFirstDay = earliest === undefined ? today : Math.floor(earliest / DAY);
+
+    storing = "deleting the old guide";
+    const { generation, makeRoom } = await startGeneration(db, key);
+    const writer = new GuideWriter(db, {
+      guide: key,
+      generation,
+      today,
+      firstDay: state.guideFirstDay,
+      lastDay: state.guideLastDay,
+      budgetBytes,
+      keepFrom: id => wanted.from(id),
+      makeRoom,
+    });
+    abandonGuide = () => writer.abandon();
+    // The guide channels kept. Only their programmes are stored: the app
+    // names channels from the playlist.
+    const kept = new Set<string>();
+    // Programmes come a channel at a time, so the last answer mostly does.
+    let lastId: string | undefined;
+    let lastKept: string | undefined;
+    const keep = (id: string) => {
+      if (id !== lastId) {
+        lastId = id;
+        lastKept = wanted.from(id) === undefined ? undefined : id.toLowerCase();
+      }
+      return lastKept;
+    };
+    const validators: GuideMeta["validators"] = {};
+
+    for (const url of urls) {
+      if (writer.stopped) break;
+      storing = undefined;
+      const { response, body, totalBytes } = await download(fetcher, url, fetched.get(url));
+      const known = validatorsOf(response);
+      if (known) validators[url] = known;
+      progress = { ...progress, stage: "guide", url, bytes: 0, totalBytes };
+      const parser = new XmltvParser({
+        defaultOffsetMinutes: input.guideOffsetMinutes,
+        onChannel: (channel: GuideChannel) => {
+          const id = keep(channel.id);
+          if (id) kept.add(id);
+        },
+        onProgramme: programme => {
+          counts.read++;
+          const channel = keep(programme.channel);
+          if (!channel) {
+            counts.unmatched++;
+            return;
+          }
+          programme.channel = channel;
+          writer.add(programme);
+        },
+      });
+      for await (const text of readText(body, bytes => (progress.bytes += bytes))) {
+        parser.push(text);
+        if (writer.full) {
+          writer.expectedChannels = kept.size;
+          storing = "storing the guide";
+          await writer.flush();
+          storing = undefined;
+        }
+        progress.programmes = counts.read;
+        progress.guide = {
+          bytes: writer.bytes,
+          lastDay: writer.lastDay,
+          stopped: writer.stopped,
+          write: writer.writeState,
+        };
+        report();
+        await letEventsRun();
+        // Reading on would only skip everything; stop the download.
+        if (writer.stopped) break;
+      }
+      storing = "storing the guide";
+      await writer.finish();
+      report(true);
+    }
+    storing = "storing the guide";
+    await writer.finish();
+    // When storage filled up, a batch may not have been stored: what is.
+    const stored =
+      writer.stopped === "quota"
+        ? await measureGuide(db, key, generation)
+        : {
+            programmes: writer.programmes,
+            bytes: writer.bytes,
+            records: 0,
+            lastDay: writer.storedDays?.last,
+          };
+    const counted: GuideMeta["stored"] = {
+      guideChannels: kept.size,
+      programmes: stored.programmes,
+      guideBytes: stored.bytes + stored.records * RECORD_OVERHEAD,
+      guideFirstDay: writer.firstDay,
+      // The guide's own last day, which may be before the last day kept.
+      guideLastDay: stored.lastDay ?? writer.lastDay,
+      guideTrimmed: writer.trimmed,
+    };
+    await writer.commit({
+      guide: key,
+      urls,
+      importedAt: Date.now(),
+      importedBy: source,
+      today,
+      lastDay: state.guideLastDay,
+      budgetBytes,
+      wanted: wanted.toMeta(),
+      validators,
+      stored: counted,
+    });
+    abandonGuide = undefined;
+    let ownKept = 0;
+    for (const id of kept) if (own.from(id) !== undefined) ownKept++;
+    Object.assign(state, counted, { guideChannels: ownKept });
+    return { ...counts, skipped: writer.skipped, guideSkipped: undefined };
+  };
+
   try {
     previous = await readImport(db, source);
     if (previous?.lastDoneAt) state.lastDoneAt = previous.lastDoneAt;
     await putState(db, shownState("importing"));
-    // The playlist's guide ids, lower-cased, to its own spelling of them.
-    const guideIds = new Map<string, string>();
     let guideUrls = input.guideUrls ?? [];
 
     // Kept until the channel stage ends, then stored as one record.
     let channels: PlaylistChannel[] = [];
-    let catchupDays = 0;
-    const addChannel = (channel: PlaylistChannel) => {
-      channels.push(channel);
-      if (channel.catchup) catchupDays = Math.max(catchupDays, channel.catchup.days ?? 1);
-      if (channel.guideId && !guideIds.has(channel.guideId.toLowerCase())) {
-        guideIds.set(channel.guideId.toLowerCase(), channel.guideId);
-      }
-    };
+    const addChannel = (channel: PlaylistChannel) => channels.push(channel);
     const countBytes = (bytes: number) => {
       progress.bytes += bytes;
       report();
@@ -262,8 +484,25 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
 
     // Written even when empty (a guide-only import), replacing the last list.
     storing = "storing the channels";
-    await writeChannels(db, source, channels);
+    const keys = channelKeys(channels);
+    await writeChannels(db, source, channels, keys);
     state.channels = channels.length;
+    // Without a channel list, keep the whole guide.
+    const keepAll = input.kind !== "xtream" && !input.playlistUrl;
+    const own = new Wanted();
+    if (keepAll) wantAll(own, wantOptions);
+    else {
+      wantChannels(
+        own,
+        channels.map((channel, i) => ({
+          id: `${source}/${keys[i]}`,
+          guideId: channel.guideId,
+          group: channel.group,
+          catchup: channel.catchup,
+        })),
+        wantOptions,
+      );
+    }
     channels = [];
     if (vod) {
       storing = "storing the films and series";
@@ -274,115 +513,32 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       state.films = previous.films;
       state.series = previous.series;
     }
-    if (input.guidePastDays === undefined) {
-      state.guideFirstDay = today - Math.max(1, Math.min(MAX_PAST_DAYS, Math.ceil(catchupDays)));
-    }
 
-    // Without a channel list, keep the whole guide.
-    const keepAll = input.kind !== "xtream" && !input.playlistUrl;
-    storing = "deleting the old guide";
-    const { generation, makeRoom } = await startGeneration(db, source);
-    const writer = new GuideWriter(db, {
-      source,
-      generation,
-      today,
-      firstDay: state.guideFirstDay,
-      lastDay: state.guideLastDay,
-      budgetBytes: input.guideBudgetBytes ?? GUIDE_BUDGET_BYTES,
-      makeRoom,
-    });
-    abandonGuide = () => writer.abandon();
-    // The guide channels kept. Only their programmes are stored: the app
-    // names channels from the playlist.
-    const kept = new Set<string>();
-    let unmatched = 0;
-    let read = 0;
-    const keep = (id: string) => (keepAll ? id : guideIds.get(id.toLowerCase()));
-
-    for (const url of guideUrls) {
-      if (writer.stopped) break;
-      storing = undefined;
-      const { body, totalBytes } = await download(fetcher, url);
-      progress = { ...progress, stage: "guide", url, bytes: 0, totalBytes };
-      const parser = new XmltvParser({
-        defaultOffsetMinutes: input.guideOffsetMinutes,
-        onChannel: (channel: GuideChannel) => {
-          const id = keep(channel.id);
-          if (id) kept.add(id);
-        },
-        onProgramme: programme => {
-          read++;
-          const channel = keep(programme.channel);
-          if (!channel) {
-            unmatched++;
-            return;
-          }
-          programme.channel = channel;
-          writer.add(programme);
-        },
-      });
-      for await (const text of readText(body, bytes => (progress.bytes += bytes))) {
-        parser.push(text);
-        if (writer.full) {
-          writer.expectedChannels = kept.size;
-          storing = "storing the guide";
-          await writer.flush();
-          storing = undefined;
-        }
-        progress.programmes = read;
-        progress.guide = {
-          bytes: writer.bytes,
-          lastDay: writer.lastDay,
-          stopped: writer.stopped,
-          write: writer.writeState,
-        };
-        report();
-        await letEventsRun();
-        // Reading on would only skip everything; stop the download.
-        if (writer.stopped) break;
-      }
-      storing = "storing the guide";
-      await writer.finish();
-      report(true);
-    }
-    storing = "storing the guide";
-    await writer.finish();
-    await writer.commit();
-    abandonGuide = undefined;
-    // When storage filled up, a batch may not have been stored: what is.
-    const guide =
-      writer.stopped === "quota"
-        ? await measureGuide(db, source)
-        : {
-            programmes: writer.programmes,
-            bytes: writer.bytes,
-            records: 0,
-            lastDay: writer.storedDays?.last,
-          };
+    const key = guideKey(guideUrls, input.guideOffsetMinutes);
+    const guide = key === undefined ? undefined : await importGuide(key, guideUrls, own);
+    if (key === undefined) {
+      delete state.guide;
+      Object.assign(state, { guideChannels: 0, programmes: 0, guideBytes: 0, guideTrimmed: false });
+    } else state.guide = key;
 
     const finishedAt = Date.now();
-    Object.assign(state, {
-      status: "done",
-      finishedAt,
-      lastDoneAt: finishedAt,
-      guideChannels: kept.size,
-      programmes: guide.programmes,
-      guideBytes: guide.bytes + guide.records * RECORD_OVERHEAD,
-      guideFirstDay: writer.firstDay,
-      // The guide's own last day, which may be before the last day kept.
-      guideLastDay: guide.lastDay ?? writer.lastDay,
-      guideTrimmed: writer.trimmed,
-    });
+    Object.assign(state, { status: "done", finishedAt, lastDoneAt: finishedAt });
     storing = "saving the import";
     await putState(db, state);
-    return {
+    // The guide this source used before, if no source uses it now.
+    await deleteUnusedGuides(db).catch((error: unknown) => {
+      console.error("Couldn't delete the guides no source uses:", error);
+    });
+    const result: ImportResult = {
       ...state,
       guideUrls,
-      programmesRead: read,
-      unmatchedProgrammes: unmatched,
-      skippedProgrammes: writer.skipped,
+      programmesRead: guide?.read ?? 0,
+      unmatchedProgrammes: guide?.unmatched ?? 0,
+      skippedProgrammes: guide?.skipped ?? 0,
       seconds: (Date.now() - started) / 1000,
     };
+    if (guide?.guideSkipped) result.guideSkipped = guide.guideSkipped;
+    return result;
   } catch (error) {
     const reason = error instanceof Error ? error.message || error.name : String(error);
     const message = storing ? `${reason} (while ${storing})` : reason;

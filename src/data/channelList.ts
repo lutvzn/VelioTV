@@ -42,7 +42,7 @@ export interface ChannelColumns {
 }
 
 /** Channels in playlist order, so that a channel's index is its position. */
-export const toColumns = (channels: PlaylistChannel[]): ChannelColumns => {
+export const toColumns = (channels: PlaylistChannel[], keys = channelKeys(channels)): ChannelColumns => {
   const column = <K extends keyof ChannelColumns["optional"]>(field: K): Column<K> | undefined =>
     channels.some(channel => channel[field] !== undefined)
       ? channels.map(channel => channel[field] ?? null)
@@ -61,7 +61,7 @@ export const toColumns = (channels: PlaylistChannel[]): ChannelColumns => {
     count: channels.length,
     name: channels.map(channel => channel.name),
     url: channels.map(channel => channel.url),
-    key: channelKeys(channels),
+    key: keys,
     optional,
   };
 };

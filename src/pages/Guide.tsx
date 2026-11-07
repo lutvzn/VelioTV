@@ -16,7 +16,7 @@ import {
 import { MENU_WIDTH } from "../components/SideMenu";
 import { catchupDays, inArchive } from "../data/catchup";
 import { appStorage } from "../data/settingsCopy";
-import { DAY, type StoredProgramme } from "../data/guideCodec";
+import { DAY, type ProgrammeDetails, type StoredProgramme } from "../data/guideCodec";
 import type { Channel, ChannelGroup } from "../data/lineup";
 import { exposeToProbes } from "../devHooks";
 import { createGuideDays } from "../guide/guideDays";
@@ -268,6 +268,33 @@ export default () => {
     const row = currentRow();
     return row ? cellAt(row.cells, anchorAt()) : undefined;
   });
+
+  // The focused programme's subtitle and description, read once it is
+  // focused (src/data/guideCache.ts).
+  const detailsWanted = createMemo(() => {
+    const channel = cursorChannel();
+    const programme = focusedCell()?.programme;
+    if (!channel?.guideId || !programme) return undefined;
+    return `${channel.source}\n${channel.guideId}\n${programme.start}`;
+  });
+  const [readDetails, setReadDetails] = createSignal<{ key: string; details: ProgrammeDetails }>();
+  createEffect(
+    on(detailsWanted, key => {
+      if (!key) return;
+      const [source, guideId, start] = key.split("\n");
+      guide
+        .details(source, guideId, Number(start))
+        .then(details => {
+          if (detailsWanted() === key) setReadDetails({ key, details });
+          return details;
+        })
+        .catch((error: unknown) => console.error("Couldn't read the programme's details:", error));
+    }),
+  );
+  const focusedDetails = () => {
+    const read = readDetails();
+    return read && read.key === detailsWanted() ? read.details : undefined;
+  };
 
   // Reads the rows a page above and below, ahead of the scroll.
   createEffect(() => {
@@ -630,6 +657,7 @@ export default () => {
           channel={cursorChannel()}
           number={cursorNumber()}
           cell={focusedCell()}
+          details={focusedDetails()}
           day={dayLabel(focusedDay(), now(), dayWords())}
           now={now()}
           note={detailsNote()}

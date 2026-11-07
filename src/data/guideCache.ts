@@ -1,15 +1,22 @@
 // A channel's programmes for a day, read from the guide store once and kept
 // in memory, so coming back to a channel costs nothing. The app reads them
-// through the guide worker (guideClient.ts).
+// through the guide worker (guideClient.ts). Days come without subtitles
+// and descriptions, which are read for a programme when it is focused, and
+// kept too.
 
-import { DAY, type StoredProgramme } from "./guideCodec";
+import { DAY, type ProgrammeDetails, type StoredProgramme } from "./guideCodec";
 
 export interface GuideCacheOptions {
   /** A guide channel's programmes that overlap a UTC day (days since 1970). */
   read: (source: string, guideId: string, day: number) => Promise<StoredProgramme[]>;
+  /** A programme's subtitle and description. */
+  details?: (source: string, guideId: string, start: number) => Promise<ProgrammeDetails>;
   /** How many channel-days to keep. */
   size?: number;
 }
+
+/** Programmes' details kept. */
+const DETAILS_KEPT = 50;
 
 export interface NowAndNext {
   now?: StoredProgramme;
@@ -30,6 +37,7 @@ export const createGuideCache = (options: GuideCacheOptions) => {
   // In order of use, oldest first, so the first key is the one to drop.
   const days = new Map<string, Promise<StoredProgramme[]>>();
   const settled = new Map<string, StoredProgramme[]>();
+  const details = new Map<string, Promise<ProgrammeDetails>>();
 
   /** The programmes that overlap a UTC day, in start order. */
   const day = (source: string, guideId: string, dayNumber: number) => {
@@ -76,10 +84,30 @@ export const createGuideCache = (options: GuideCacheOptions) => {
       const tomorrow = nowAndNext(await day(source, guideId, today + 1), at);
       return { now: found.now ?? tomorrow.now, next: tomorrow.next };
     },
+    /** A programme's subtitle and description; empty if the guide has none. */
+    details: (source: string, guideId: string, start: number) => {
+      const key = keyOf(source, guideId, start);
+      let found = details.get(key);
+      if (found) details.delete(key);
+      else {
+        found = (options.details?.(source, guideId, start) ?? Promise.resolve({})).catch((error: unknown) => {
+          if (details.get(key) === found) details.delete(key);
+          throw error;
+        });
+      }
+      details.set(key, found);
+      while (details.size > DETAILS_KEPT) {
+        const oldest = details.keys().next().value;
+        if (oldest === undefined) break;
+        details.delete(oldest);
+      }
+      return found;
+    },
     /** Forgets everything, such as after an import replaced the guide. */
     clear: () => {
       days.clear();
       settled.clear();
+      details.clear();
     },
   };
 };
