@@ -188,6 +188,31 @@ export const readGuide = async (
   return days.flatMap(day => decodeDay(day.day, day.data).filter(p => p.stop > from && p.start < to));
 };
 
+/** A source's stored guide: its programmes, bytes, last day and guide channels. */
+export const measureGuide = async (db: IDBDatabase, source: string) => {
+  const transaction = db.transaction(["guide", "guideChannels"]);
+  const guideChannels = request<number>(transaction.objectStore("guideChannels").count(sourceRange(source)));
+  let programmes = 0;
+  let bytes = 0;
+  let records = 0;
+  let lastDay: number | undefined;
+  await new Promise<void>((resolve, reject) => {
+    const r = transaction.objectStore("guide").openCursor(sourceRange(source));
+    r.addEventListener("success", () => {
+      const cursor = r.result;
+      if (!cursor) return resolve();
+      const value: GuideDay = cursor.value;
+      programmes += value.count;
+      bytes += value.data.byteLength;
+      records++;
+      lastDay = Math.max(lastDay ?? value.day, value.day);
+      cursor.continue();
+    });
+    r.addEventListener("error", () => reject(r.error ?? new Error("Couldn't read the guide")));
+  });
+  return { programmes, bytes, records, lastDay, guideChannels: await guideChannels };
+};
+
 /** Deletes a source's data and import state. */
 export const deleteSource = async (db: IDBDatabase, source: string) => {
   const transaction = writeTransaction(db, STORES);

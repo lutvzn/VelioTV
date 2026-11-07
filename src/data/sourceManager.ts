@@ -25,10 +25,11 @@ import {
 const CHECK_EVERY_MS = 15 * 60_000;
 /**
  * Sources removed whose data may not be deleted yet, as the app can close
- * mid-delete. Only these are deleted at the next start: data of a source
- * missing from the list is kept, as on the TV the list once read as empty at
- * a start (PLAN.md, Phase 5, step 8), and deleting what it didn't name
- * wiped every source's data.
+ * mid-delete. These are deleted at the next start. Data of a source missing
+ * from the list is kept unless the settings' copy confirms the list
+ * (listConfirmed), as on the TV the list once read as empty at a start
+ * (PLAN.md, Phase 5, step 8), and deleting what it didn't name wiped every
+ * source's data.
  */
 const REMOVED_KEY = "tiviplayer.removedSources";
 
@@ -55,6 +56,12 @@ export interface SourceManagerOptions {
   now?: () => number;
   /** The guide's storage budget for all sources together. */
   guideBudgetBytes?: number;
+  /**
+   * Whether the list read at this start is known to be right: the settings'
+   * copy in IndexedDB agreed with it, or put it back (src/data/settingsCopy.ts).
+   * Only then is the data of sources missing from it deleted.
+   */
+  listConfirmed?: () => boolean;
 }
 
 export const createSourceManager = (options: SourceManagerOptions) => {
@@ -230,9 +237,18 @@ export const createSourceManager = (options: SourceManagerOptions) => {
         setState(id, undefined);
         void deleteData(id);
       }
-      // Data of any other source not in the list is kept, unshown.
+      // Data of any other source not in the list is kept, unshown, unless the
+      // settings' copy confirmed the list (PLAN.md, Phase 8, step 2).
       const unknown = Object.keys(states()).filter(id => !find(id));
-      if (unknown.length > 0) console.warn("Keeping the data of sources not in the list:", unknown);
+      if (unknown.length > 0 && options.listConfirmed?.()) {
+        console.warn("Deleting the data of sources not in the list:", unknown);
+        for (const id of unknown) {
+          setState(id, undefined);
+          void deleteData(id);
+        }
+      } else if (unknown.length > 0) {
+        console.warn("Keeping the data of sources not in the list:", unknown);
+      }
       check();
       const timer = setInterval(check, CHECK_EVERY_MS);
       const onVisible = () => {

@@ -48,8 +48,9 @@ eval "$(fnm env --shell bash)"
 timeout 15 "$sdb" -s "$target" shell 0 was_kill TiviPlayer >/dev/null || true
 # A start right after the kill has sometimes read the app's localStorage as
 # empty or old, and lost what was written then (PLAN.md, Phase 6), so the
-# killed app gets a moment to let go of it.
-sleep 3
+# killed app gets a moment to let go of it. KILL_WAIT (seconds) changes it,
+# for testing that (the `storage-kill` probe).
+sleep "${KILL_WAIT:-3}"
 launch="$(timeout 40 "$sdb" -s "$target" shell 0 debug TiviPlayer.TiviPlayer 2>&1)"
 debug_port="$(grep -o 'port: [0-9]*' <<<"$launch" | grep -o '[0-9]*' || true)"
 [[ -n "$debug_port" ]] || {

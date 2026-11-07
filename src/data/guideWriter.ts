@@ -9,7 +9,8 @@
 // The budget: the TV allows each app only 80 MB. When the guide grows past
 // the budget, the farthest day goes (from what is stored and from what comes
 // next), so the nearest days are always kept. If even one day doesn't fit,
-// or the browser reports its quota is full, the writer stops storing.
+// it keeps as much of it as fits and stops storing; it stops too if the
+// browser reports its quota is full.
 //
 // Guides give each channel's days together, so by the time the budget runs
 // out, the first channels' later days would already be packed and stored
@@ -29,7 +30,7 @@ const HOUR = 3_600_000;
 /** Programmes held before writing a batch. */
 const BATCH = 20_000;
 /** Roughly what each record costs besides its data: keys and bookkeeping. */
-const RECORD_OVERHEAD = 64;
+export const RECORD_OVERHEAD = 64;
 /** A guess at a programme's packed size, until a merged record is packed. */
 const PROGRAMME_GUESS = 64;
 /** Records stored before predicting the guide's size from them. */
@@ -84,6 +85,8 @@ export class GuideWriter {
   trimmed = false;
   /** Set when storing has stopped; see the top of this file. */
   stopped: "budget" | "quota" | undefined;
+  /** The last batch's write, for probes. */
+  writeState = "none";
   /** How many guide channels the guide lists, for predicting its size. */
   expectedChannels = 0;
 
@@ -117,6 +120,11 @@ export class GuideWriter {
     let total = 0;
     for (const record of this.stored.values()) total += record.count;
     return total;
+  }
+
+  /** The last day with programmes stored, which may be before lastDay. */
+  get lastStoredDay() {
+    return this.guideDays().last;
   }
 
   /** Whether a record for this channel and day is stored. */
@@ -158,20 +166,33 @@ export class GuideWriter {
       const programmes = tidy(record.programmes);
       return { key, record, programmes, data: encodeDay(record.day, programmes) };
     });
-    for (const { key, record, programmes, data } of items) {
+    // A merge's size is known only in the transaction; until then, count
+    // the old record plus a guess for the new programmes.
+    const sizeOf = ({ key, record, programmes, data }: (typeof items)[number]): Stored => {
       const old = this.stored.get(key);
-      // A merge's size is known only in the transaction; until then, count
-      // the old record plus a guess for the new programmes.
       const bytes = data ? data.length : (old?.bytes ?? 0) + record.programmes.length * PROGRAMME_GUESS;
       const count = programmes ? programmes.length : (old?.count ?? 0) + record.programmes.length;
-      this.account(key, { channel: record.channel, day: record.day, bytes: bytes + RECORD_OVERHEAD, count });
-    }
+      return { channel: record.channel, day: record.day, bytes: bytes + RECORD_OVERHEAD, count };
+    };
+    for (const item of items) this.account(item.key, sizeOf(item));
     let dropped = [...this.predict(), ...this.trim()];
+    // With storing stopped, only the records of this batch that still fit.
+    let fits: Set<string> | undefined;
     if (this.stopped) {
-      // This batch doesn't fit even with one day kept: leave it out.
+      // Not even one day fits: keep as much of it as the budget holds, in
+      // the guide's order, and no more.
       this.stored = before.stored;
       this.bytesByDay = before.bytesByDay;
       dropped = this.dropAfter(this.lastDay);
+      fits = new Set();
+      for (const item of items) {
+        if (item.record.day > this.lastDay) continue;
+        const size = sizeOf(item);
+        const old = this.stored.get(item.key)?.bytes ?? 0;
+        if (this.bytes - old + size.bytes > this.options.budgetBytes) break;
+        this.account(item.key, size);
+        fits.add(item.key);
+      }
     }
 
     const { source } = this.options;
@@ -180,7 +201,7 @@ export class GuideWriter {
     for (const { channel, day } of dropped) store.delete([source, channel, day]);
     for (const { key, record, programmes, data } of items) {
       const { channel, day } = record;
-      if (day > this.lastDay || this.stopped) continue;
+      if (day > this.lastDay || (fits && !fits.has(key))) continue;
       if (data && programmes) {
         const value: GuideDay = { source, channel, day, count: programmes.length, data };
         store.put(value);
@@ -196,7 +217,16 @@ export class GuideWriter {
         store.put(value);
       });
     }
-    this.writing = finished(transaction);
+    this.writeState = "pending";
+    this.writing = (async () => {
+      try {
+        await finished(transaction);
+        this.writeState = "done";
+      } catch (error) {
+        this.writeState = `failed: ${error instanceof Error ? error.name : String(error)}`;
+        throw error;
+      }
+    })();
     // Caught here so a failure isn't reported as unhandled; the next flush()
     // or finish() still sees it.
     this.writing.catch(() => {});
@@ -208,7 +238,7 @@ export class GuideWriter {
     await this.settle();
   }
 
-  // Waits for the batch being written. A full quota stops storing; any other
+  // Waits for the batch being written. Full storage stops storing; any other
   // error ends the import.
   private async settle() {
     try {
@@ -228,17 +258,34 @@ export class GuideWriter {
     this.bytesByDay.set(record.day, (this.bytesByDay.get(record.day) ?? 0) + record.bytes);
   }
 
+  // The days with programmes stored, within those kept. Guides give each
+  // channel's days together, so after the first batch these are the guide's
+  // own days. The days kept can reach further: catch-up keeps days before
+  // today that a guide may not have, and counting those, the guide's own
+  // days were dropped to fit the budget (PLAN.md, Phase 8, step 3).
+  private guideDays() {
+    let first = Infinity;
+    let last = -Infinity;
+    for (const day of this.bytesByDay.keys()) {
+      first = Math.min(first, day);
+      last = Math.max(last, day);
+    }
+    if (first === Infinity) return { first: this.options.firstDay, last: this.lastDay };
+    return { first: Math.max(this.options.firstDay, first), last: Math.min(this.lastDay, last) };
+  }
+
   // Drops days that the guide, predicted from what is stored so far, won't
   // have room for. Returns the stored records to delete.
   private predict() {
     const dropped: Stored[] = [];
     if (this.expectedChannels === 0 || this.stored.size < PREDICT_AFTER) return dropped;
     const perRecord = this.bytes / this.stored.size;
-    const { firstDay, budgetBytes } = this.options;
-    const predicted = () => perRecord * this.expectedChannels * (this.lastDay - firstDay + 1);
+    const { budgetBytes } = this.options;
+    const { first, last } = this.guideDays();
+    const predicted = () => perRecord * this.expectedChannels * (Math.min(this.lastDay, last) - first + 1);
     // No margin: if the prediction is low, trim() still keeps the budget.
-    while (predicted() > budgetBytes && this.lastDay > firstDay) {
-      this.lastDay--;
+    while (predicted() > budgetBytes && this.lastDay > first) {
+      this.lastDay = Math.min(this.lastDay, last) - 1;
       this.trimmed = true;
       dropped.push(...this.dropAfter(this.lastDay));
     }
@@ -250,12 +297,12 @@ export class GuideWriter {
   private trim() {
     const dropped: Stored[] = [];
     while (this.bytes > this.options.budgetBytes) {
-      if (this.lastDay <= this.options.firstDay) {
-        // Not even the first day fits: keep what is stored and stop.
+      if (this.lastDay <= this.guideDays().first) {
+        // Not even the first day fits: flush() keeps what fits, and stops.
         this.stop("budget");
         break;
       }
-      this.lastDay--;
+      this.lastDay = Math.min(this.lastDay, this.guideDays().last) - 1;
       this.trimmed = true;
       dropped.push(...this.dropAfter(this.lastDay));
     }

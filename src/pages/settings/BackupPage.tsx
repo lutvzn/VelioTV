@@ -1,6 +1,7 @@
 import { Row } from "@solidtv/solid/primitives";
 import { createSignal } from "solid-js";
 import { BUTTON_HEIGHT, FIELD_WIDTH, FormButton, TextField } from "../../components/Form";
+import { appStorage } from "../../data/settingsCopy";
 import { exposeToProbes } from "../../devHooks";
 import { backUpTo, restoreFrom, settings } from "../../library";
 import { askPin } from "../../pin";
@@ -11,7 +12,7 @@ const URL_KEY = "tiviplayer.backupUrl";
 
 const savedUrl = () => {
   try {
-    return localStorage.getItem(URL_KEY) ?? "";
+    return appStorage.getItem(URL_KEY) ?? "";
   } catch {
     return "";
   }
@@ -42,7 +43,7 @@ export const BackupPage = (props: { onClose: () => void }) => {
     setUrl(value);
     setConfirmRestore(false);
     try {
-      localStorage.setItem(URL_KEY, value);
+      appStorage.setItem(URL_KEY, value);
     } catch {
       // Only the address is lost.
     }

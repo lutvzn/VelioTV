@@ -14,6 +14,7 @@
 import {
   DAY,
   finished,
+  measureGuide,
   openDb,
   readImport,
   request,
@@ -24,7 +25,7 @@ import {
   type ImportState,
   type StoredGuideChannel,
 } from "./db";
-import { GuideWriter } from "./guideWriter";
+import { GuideWriter, RECORD_OVERHEAD } from "./guideWriter";
 import { M3uParser } from "./m3u";
 import { readText } from "./stream";
 import type { GuideChannel, PlaylistChannel } from "./types";
@@ -42,6 +43,14 @@ const MB = 1_048_576;
 // Guide channels per write.
 const GUIDE_CHANNEL_BATCH = 2000;
 const PROGRESS_EVERY_MS = 250;
+/**
+ * How long parsing runs before letting the thread handle events. A download
+ * that comes faster than it parses never gives the thread back, as each read
+ * resolves at once; IndexedDB then can't deliver a write's events, and on the
+ * TV the browser aborts the write after a minute ("Transaction timed out due
+ * to inactivity"; PLAN.md, Phase 8, step 3).
+ */
+const YIELD_EVERY_MS = 100;
 /**
  * The guide's share of the TV's 80 MB. The rest leaves room for channel
  * lists, other data, and space deleted records hold until the database
@@ -84,6 +93,8 @@ export interface ImportProgress {
   channels: number;
   /** Guide programmes read. */
   programmes: number;
+  /** The guide stored so far: its size, the last day kept, and why storing stopped. */
+  guide?: { bytes: number; lastDay: number; stopped?: "budget" | "quota"; write: string };
 }
 
 export interface ImportResult extends ImportState {
@@ -113,19 +124,33 @@ const download = async (fetcher: typeof fetch, url: string) => {
   return { body: response.body, totalBytes: length > 0 ? length : undefined };
 };
 
+// Lets the thread handle events if parsing has held it for a while.
+const eventBreaks = () => {
+  let last = Date.now();
+  return async () => {
+    if (Date.now() - last < YIELD_EVERY_MS) return;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    last = Date.now();
+  };
+};
+
 const putState = async (db: IDBDatabase, state: ImportState) => {
   const transaction = writeTransaction(db, "imports");
   transaction.objectStore("imports").put(state);
   await finished(transaction);
 };
 
-// Deletes what an import left from before: records it didn't write.
+// Deletes what an import left from before: records it didn't write. When
+// storage filled up, the guide stopped partway, and the old records for the
+// channels it didn't reach are still good, so only days no longer kept go.
 const deleteStale = async (
   db: IDBDatabase,
   source: string,
   guideChannels: Set<string>,
   writer: GuideWriter,
+  firstDay: number,
 ) => {
+  const full = writer.stopped === "quota";
   const transaction = writeTransaction(db, ["guideChannels", "guide"]);
   const guideChannelStore = transaction.objectStore("guideChannels");
   const guideStore = transaction.objectStore("guide");
@@ -133,8 +158,13 @@ const deleteStale = async (
     request<[string, string][]>(guideChannelStore.getAllKeys(sourceRange(source))),
     request<[string, string, number][]>(guideStore.getAllKeys(sourceRange(source))),
   ]);
-  for (const key of guideChannelKeys) if (!guideChannels.has(key[1])) guideChannelStore.delete(key);
-  for (const key of guideKeys) if (!writer.has(key[1], key[2])) guideStore.delete(key);
+  for (const key of guideChannelKeys) {
+    if (!full && !guideChannels.has(key[1])) guideChannelStore.delete(key);
+  }
+  for (const [, channel, day] of guideKeys) {
+    const stale = full ? day < firstDay || day > writer.lastDay : !writer.has(channel, day);
+    if (stale) guideStore.delete([source, channel, day]);
+  }
   await finished(transaction);
 };
 
@@ -157,6 +187,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     guideTrimmed: false,
   };
 
+  const letEventsRun = eventBreaks();
   let progress: ImportProgress = { stage: "channels", url: "", bytes: 0, channels: 0, programmes: 0 };
   let reported = 0;
   const report = (force = false) => {
@@ -178,6 +209,9 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     return shown;
   };
 
+  // What the import was storing, for the message if a write fails (network
+  // and parse errors name their file).
+  let storing: string | undefined;
   try {
     previous = await readImport(db, source);
     if (previous?.lastDoneAt) state.lastDoneAt = previous.lastDoneAt;
@@ -226,6 +260,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
         parser.push(text);
         progress.channels = channels.length;
         report();
+        await letEventsRun();
       }
       parser.end();
       progress.channels = channels.length;
@@ -235,10 +270,12 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     }
 
     // Written even when empty (a guide-only import), replacing the last list.
+    storing = "storing the channels";
     await writeChannels(db, source, channels);
     state.channels = channels.length;
     channels = [];
     if (vod) {
+      storing = "storing the films and series";
       await writeVod(db, { source, ...vod });
       state.films = vod.films.length;
       state.series = vod.series.length;
@@ -273,6 +310,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
 
     for (const url of guideUrls) {
       if (writer.stopped) break;
+      storing = undefined;
       const { body, totalBytes } = await download(fetcher, url);
       progress = { ...progress, stage: "guide", url, bytes: 0, totalBytes };
       const parser = new XmltvParser({
@@ -298,32 +336,62 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
         parser.push(text);
         if (writer.full) {
           writer.expectedChannels = kept.size;
+          storing = "storing the guide";
           await writer.flush();
+          storing = undefined;
         }
-        if (guideChannels.length >= GUIDE_CHANNEL_BATCH) await writeGuideChannels();
+        if (guideChannels.length >= GUIDE_CHANNEL_BATCH) {
+          storing = "storing the guide's channels";
+          await writeGuideChannels();
+          storing = undefined;
+        }
         progress.programmes = read;
+        progress.guide = {
+          bytes: writer.bytes,
+          lastDay: writer.lastDay,
+          stopped: writer.stopped,
+          write: writer.writeState,
+        };
         report();
+        await letEventsRun();
         // Reading on would only skip everything; stop the download.
         if (writer.stopped) break;
       }
+      storing = "storing the guide";
       await writer.finish();
+      storing = "storing the guide's channels";
       await writeGuideChannels();
       report(true);
     }
+    storing = "storing the guide";
     await writer.finish();
-    await deleteStale(db, source, kept, writer);
+    storing = "deleting the old guide";
+    await deleteStale(db, source, kept, writer, state.guideFirstDay);
+    // What's stored now, old records included, when storage filled up.
+    const guide =
+      writer.stopped === "quota"
+        ? await measureGuide(db, source)
+        : {
+            programmes: writer.programmes,
+            bytes: writer.bytes,
+            records: 0,
+            lastDay: writer.lastStoredDay,
+            guideChannels: kept.size,
+          };
 
     const finishedAt = Date.now();
     Object.assign(state, {
       status: "done",
       finishedAt,
       lastDoneAt: finishedAt,
-      guideChannels: kept.size,
-      programmes: writer.programmes,
-      guideBytes: writer.bytes,
-      guideLastDay: writer.lastDay,
+      guideChannels: guide.guideChannels,
+      programmes: guide.programmes,
+      guideBytes: guide.bytes + guide.records * RECORD_OVERHEAD,
+      // The guide's own last day, which may be before the last day kept.
+      guideLastDay: guide.lastDay ?? writer.lastDay,
       guideTrimmed: writer.trimmed,
     });
+    storing = "saving the import";
     await putState(db, state);
     return {
       ...state,
@@ -334,7 +402,8 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       seconds: (Date.now() - started) / 1000,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message || error.name : String(error);
+    const reason = error instanceof Error ? error.message || error.name : String(error);
+    const message = storing ? `${reason} (while ${storing})` : reason;
     await putState(db, shownState("failed", message)).catch(() => {});
     throw error;
   } finally {

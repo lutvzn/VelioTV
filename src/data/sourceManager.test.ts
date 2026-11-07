@@ -134,6 +134,28 @@ describe("the source manager", () => {
     db.close();
   });
 
+  it("deletes the data of sources not in the list once the list is confirmed", async () => {
+    const storage = memoryStorage();
+    const kept: Source = { id: "kept", ...draft("Kept", `${BASE}/b.m3u`) };
+    saveSources(storage, [kept]);
+    await runImport({ source: "kept", playlistUrl: `${BASE}/b.m3u` }, { dbName: DB, fetch: serve });
+    await runImport({ source: "unnamed", playlistUrl: `${BASE}/b.m3u` }, { dbName: DB, fetch: serve });
+
+    const { importer } = recording();
+    manager = createSourceManager({ dbName: DB, storage, importer, listConfirmed: () => true });
+    const stop = await manager.start();
+    await manager.whenIdle();
+    stop();
+    expect(manager.statusOf("unnamed").state).toBeUndefined();
+
+    await manager.close();
+    const db = await openDb(DB);
+    expect(await readImport(db, "unnamed")).toBeUndefined();
+    expect(await readChannels(db, "unnamed")).toEqual([]);
+    expect(await readImport(db, "kept")).toMatchObject({ status: "done" });
+    db.close();
+  });
+
   it("imports again after an edit that changes the data, and not after one that doesn't", async () => {
     const { importer, requests } = recording();
     manager = createSourceManager({ dbName: DB, storage: memoryStorage(), importer });

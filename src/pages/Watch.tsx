@@ -6,6 +6,7 @@ import { MENU_WIDTH } from "../components/SideMenu";
 import { exposeToProbes } from "../devHooks";
 import type { Channel } from "../data/lineup";
 import { inArchive } from "../data/catchup";
+import { appStorage } from "../data/settingsCopy";
 import { duration } from "../live/format";
 import { channelStream, handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../live/handoff";
 import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow";
@@ -102,7 +103,7 @@ export default () => {
       setLockedChannel(undefined);
       playChannel(channel, { keep });
     },
-    storage: localStorage,
+    storage: appStorage,
   });
   // Plays it once the PIN is entered, or the lock comes off.
   createEffect(() => {

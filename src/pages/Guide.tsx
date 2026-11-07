@@ -15,6 +15,7 @@ import {
 } from "solid-js";
 import { MENU_WIDTH } from "../components/SideMenu";
 import { catchupDays, inArchive } from "../data/catchup";
+import { appStorage } from "../data/settingsCopy";
 import { DAY, type StoredProgramme } from "../data/guideCodec";
 import type { Channel, ChannelGroup } from "../data/lineup";
 import { exposeToProbes } from "../devHooks";
@@ -190,7 +191,7 @@ export default () => {
   // the cursor stays on its channel if it can.
   const [cursor, setCursor] = createSignal(0);
   const [top, setTop] = createSignal(0);
-  let cursorId = handoff?.channelId ?? rememberedChannel(localStorage);
+  let cursorId = handoff?.channelId ?? rememberedChannel(appStorage);
   const placeCursor = (index: number) => {
     setCursor(index);
     setTop(centredTop(index, GUIDE_ROWS, list().length));

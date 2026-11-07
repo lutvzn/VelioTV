@@ -23,8 +23,14 @@ import { groupLabel } from "./live/groups";
 import { buildLiveView } from "./live/liveView";
 import { channelNumbers } from "./live/zapper";
 import { createSourceManager } from "./data/sourceManager";
+import { appStorage, settingsCopy } from "./data/settingsCopy";
 
-export const library = createSourceManager({ importer: importSource, storage: localStorage });
+export const library = createSourceManager({
+  importer: importSource,
+  storage: appStorage,
+  // The copy agreed with localStorage at this start, or put it back.
+  listConfirmed: () => ["same", "restored"].includes(settingsCopy.lastRestore()?.action ?? ""),
+});
 
 export const lineup = createLineup({
   // Sources turned off keep their data, but show no channels.
@@ -38,11 +44,11 @@ export const vod = createVodLibrary({
   stateOf: id => library.statusOf(id).state,
 });
 
-export const edits = createChannelEdits({ storage: localStorage });
+export const edits = createChannelEdits({ storage: appStorage });
 
-export const settings = createAppSettings({ storage: localStorage });
-export const watched = createWatched({ storage: localStorage });
-export const reminders = createReminders({ storage: localStorage });
+export const settings = createAppSettings({ storage: appStorage });
+export const watched = createWatched({ storage: appStorage });
+export const reminders = createReminders({ storage: appStorage });
 createRoot(() => createEffect(() => setTwelveHour(settings.clock() === "12h")));
 
 /** What Live TV shows, with the user's edits applied (src/live/liveView.ts). */

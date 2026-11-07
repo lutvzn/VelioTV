@@ -24,6 +24,7 @@ import {
   vod,
   watched,
 } from "./library";
+import { settingsCopy } from "./data/settingsCopy";
 import { handPlay } from "./play/session";
 import { player, secondPlayer } from "./player";
 import { smallVideoWindow, videoWindow } from "./videoWindow";
@@ -35,6 +36,7 @@ const hooks: Record<string, unknown> = {
   lineup,
   player,
   secondPlayer,
+  settingsCopy,
   videoWindow,
   smallVideoWindow,
   isBlocked,

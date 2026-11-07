@@ -59,6 +59,14 @@ ws.addEventListener("open", async () => {
   process.exit(0);
 });
 
+// The page closing (the app quit or was killed) ends the probe.
+const started = Date.now();
+ws.addEventListener("close", event => {
+  const seconds = Math.round((Date.now() - started) / 1000);
+  console.error(`The app's page closed the connection after ${seconds} s (code ${event.code}).`);
+  process.exit(1);
+});
+
 setTimeout(
   () => {
     console.error(`The probe didn't finish within ${timeoutSeconds} s.`);

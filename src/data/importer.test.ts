@@ -1,7 +1,16 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalog, guideWindow, programmesBetween } from "../../scripts/test-streams/catalog.mjs";
 import { m3u, xmltv } from "../../scripts/test-streams/playlist.mjs";
-import { DAY, deleteDb, openDb, readChannels, readGuide, readGuideChannels, readImport } from "./db";
+import {
+  DAY,
+  deleteDb,
+  measureGuide,
+  openDb,
+  readChannels,
+  readGuide,
+  readGuideChannels,
+  readImport,
+} from "./db";
 import { importSource } from "./importClient";
 import { runImport, type ImportProgress } from "./importer";
 
@@ -38,11 +47,46 @@ const source = async (count: number, playlistCount = count) => {
   return { channels, window, files };
 };
 
+// The same, in small pieces, as a download comes.
+const serveInChunks =
+  (files: Files): typeof fetch =>
+  async input => {
+    const bytes = new Uint8Array(await (await serve(files)(input)).arrayBuffer());
+    const body = new ReadableStream<Uint8Array>({
+      start: controller => {
+        for (let at = 0; at < bytes.length; at += 4096) controller.enqueue(bytes.slice(at, at + 4096));
+        controller.close();
+      },
+    });
+    return new Response(body);
+  };
+
 const blobUrl = (body: Files[string]) => URL.createObjectURL(new Blob([body ?? ""]));
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await deleteDb(DB);
 });
+
+// From the `after`th guide write on, writes fail as they do when storage is full.
+const fillStorageAfter = (after: number) => {
+  // Called with the database as `this` below.
+  // oxlint-disable-next-line typescript/unbound-method
+  const transaction = IDBDatabase.prototype.transaction;
+  let writes = 0;
+  vi.spyOn(IDBDatabase.prototype, "transaction").mockImplementation(function (
+    this: IDBDatabase,
+    ...args: Parameters<IDBDatabase["transaction"]>
+  ) {
+    const opened = transaction.apply(this, args);
+    if (args[0] === "guide" && args[1] === "readwrite" && ++writes >= after) {
+      const full = new DOMException("Storage is full", "QuotaExceededError");
+      Object.defineProperty(opened, "error", { get: () => full });
+      queueMicrotask(() => opened.abort());
+    }
+    return opened;
+  });
+};
 
 describe("runImport", () => {
   it("imports a playlist and its gzipped guide", async () => {
@@ -147,6 +191,37 @@ describe("runImport", () => {
     expect(result.guideFirstDay).toBe(Math.floor(window.start / DAY) + 2 - 3);
   });
 
+  it("doesn't count catch-up days the guide doesn't have against the budget", async () => {
+    // Catch-up keeps 3 days before today; the guide starts the day before.
+    // Enough channels, coming in pieces, that the size is predicted midway.
+    const { window, files } = await source(300);
+    const now = window.start + 2 * DAY;
+    const request = { source: "test", playlistUrl: PLAYLIST };
+    const whole = await runImport(request, { dbName: DB, fetch: serveInChunks(files), now });
+    expect(whole.guideFirstDay).toBeLessThan(Math.floor(window.start / DAY));
+    const result = await runImport(
+      { ...request, guideBudgetBytes: Math.round(whole.guideBytes * 1.25) },
+      { dbName: DB, fetch: serveInChunks(files), now },
+    );
+    expect(result).toMatchObject({ guideTrimmed: false, programmes: whole.programmes });
+    expect(result.guideLastDay).toBe(whole.guideLastDay);
+  });
+
+  it("stops storing when not even one day fits the budget", async () => {
+    const { files } = await source(300);
+    const request = { source: "test", playlistUrl: PLAYLIST, guideDays: 2, guidePastDays: 1 };
+    const whole = await runImport(request, { dbName: DB, fetch: serveInChunks(files) });
+    const days = whole.guideLastDay - whole.guideFirstDay + 1;
+    const budget = Math.round((whole.guideBytes / days) * 0.4);
+    const result = await runImport(
+      { ...request, source: "small", guideBudgetBytes: budget },
+      { dbName: DB, fetch: serveInChunks(files) },
+    );
+    expect(result).toMatchObject({ status: "done", guideTrimmed: true });
+    expect(result.guideBytes).toBeLessThanOrEqual(budget);
+    expect(result.programmes).toBeGreaterThan(0);
+  });
+
   it("drops the farthest days to stay within the budget", async () => {
     const { channels, window, files } = await source(60);
     const budget = 120_000;
@@ -174,6 +249,34 @@ describe("runImport", () => {
     );
     const later = await readGuide(db, "test", channel.guideId, kept + DAY, window.end);
     expect(later.filter(p => p.start >= kept + DAY)).toEqual([]);
+    db.close();
+  });
+});
+
+describe("full storage", () => {
+  it("keeps the old guide of the channels a refresh didn't reach", async () => {
+    const { channels, window, files } = await source(300);
+    const request = { source: "test", playlistUrl: PLAYLIST };
+    const first = await runImport(request, { dbName: DB, fetch: serve(files) });
+    let db = await openDb(DB);
+    const before = await measureGuide(db, "test");
+    db.close();
+
+    // The refresh stores its first guide batch, and then storage is full.
+    fillStorageAfter(2);
+    const result = await runImport(request, { dbName: DB, fetch: serveInChunks(files) });
+    vi.restoreAllMocks();
+    expect(result).toMatchObject({ status: "done", channels: 300, guideTrimmed: true });
+    expect(result.guideChannels).toBe(first.guideChannels);
+    db = await openDb(DB);
+    const after = await measureGuide(db, "test");
+    expect(after.records).toBe(before.records);
+    expect(result.programmes).toBe(after.programmes);
+    // Only the channel's day split across the two batches lost the part the
+    // second one had.
+    expect(after.programmes).toBeGreaterThan(before.programmes - 50);
+    const last = channels.findLast(channel => channel.guideId);
+    expect((await readGuide(db, "test", last.guideId, window.start, window.end)).length).toBeGreaterThan(0);
     db.close();
   });
 });

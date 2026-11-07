@@ -37,6 +37,7 @@ import {
   type TrackKind,
 } from "#devices/common/player";
 import { sameLanguage } from "./language";
+import { appStorage } from "../data/settingsCopy";
 import { FULL_SCREEN, type Rect, setVideoWindow } from "../videoWindow";
 
 export type { Stream, Track, TrackKind };
@@ -109,11 +110,11 @@ export interface PlayerOptions {
 
 const PREFERENCES_KEY = "tiviplayer.tracks";
 
-/** The chosen languages, in localStorage. */
+/** The chosen languages, in localStorage (and its copy). */
 export const storedPreferences: PreferenceStore = {
   load: () => {
     try {
-      const value: unknown = JSON.parse(localStorage.getItem(PREFERENCES_KEY) ?? "{}");
+      const value: unknown = JSON.parse(appStorage.getItem(PREFERENCES_KEY) ?? "{}");
       if (typeof value !== "object" || value === null) return {};
       const field = (name: string) => {
         const one: unknown = Reflect.get(value, name);
@@ -126,7 +127,7 @@ export const storedPreferences: PreferenceStore = {
   },
   save: preferences => {
     try {
-      localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+      appStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
     } catch {
       // Full or unavailable: the choice lasts until the next channel.
     }
