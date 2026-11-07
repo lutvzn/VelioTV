@@ -1,5 +1,6 @@
 import { useNavigate } from "@solidjs/router";
 import { type ElementNode, Text, View } from "@solidtv/solid";
+import { useHold } from "@solidtv/solid/primitives";
 import {
   batch,
   createEffect,
@@ -38,6 +39,7 @@ import { editText } from "../textEntry";
 import { $t } from "../translate";
 import type { Rect } from "../videoWindow";
 import { GuideDetails } from "./guide/GuideDetails";
+import { ChannelOptions, HOLD_MS, OPTIONS_WIDTH } from "./live/ChannelOptions";
 import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
 
 // Live TV: the TV guide (PLAN.md, Phase 4). Channels run down and time
@@ -50,7 +52,8 @@ import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
 // Back there comes back here; the Guide key in full screen opens the guide,
 // and Back returns to full screen. Number keys jump to a channel. Up from the first row
 // reaches the group line, where Left and Right change group and OK searches
-// channel names with the TV's keyboard.
+// channel names with the TV's keyboard. Holding OK on a channel, or the
+// Tools key, opens its options (Phase 5, step 1).
 //
 // Like the Live TV channel list, it draws a fixed number of rows and fills
 // them as it scrolls, so 10,000 channels cost the same as 8.
@@ -286,7 +289,33 @@ export default () => {
     entry.dispose();
   });
 
+  // The highlighted channel's options, from holding OK or the Tools key.
+  const [optionsFor, setOptionsFor] = createSignal<Channel>();
+  const openOptions = () => {
+    const channel = cursorChannel();
+    if (area() !== "grid" || entry.active() || !channel) return false;
+    setOptionsFor(channel);
+    return true;
+  };
+  const closeOptions = () => {
+    setOptionsFor(undefined);
+    root?.setFocus();
+  };
+  const pressEnter = () => {
+    if (entry.digits()) entry.enter();
+    else if (area() === "filters") search();
+    else watch();
+  };
+  const [holdEnter, releaseEnter] = useHold({
+    onEnter: pressEnter,
+    onHold: () => {
+      if (!openOptions()) pressEnter();
+    },
+    holdThreshold: HOLD_MS,
+  });
+
   exposeToProbes("guidePage", {
+    optionsFor,
     cursor,
     top,
     from,
@@ -361,10 +390,10 @@ export default () => {
         if (next !== undefined) moveTo(next);
         return true;
       }}
-      onEnter={() => {
-        if (entry.digits()) entry.enter();
-        else if (area() === "filters") search();
-        else watch();
+      onEnter={holdEnter}
+      onEnterRelease={releaseEnter}
+      onTools={() => {
+        openOptions();
         return true;
       }}
       onBack={() => {
@@ -556,6 +585,12 @@ export default () => {
             {entry.digits() || $t("live.noNumber", { number: entry.missing() ?? "" })}
           </Text>
         </View>
+      </Show>
+
+      <Show when={optionsFor()}>
+        {channel => (
+          <ChannelOptions channel={channel()} x={PAGE_WIDTH - OPTIONS_WIDTH} onClose={closeOptions} />
+        )}
       </Show>
     </View>
   );

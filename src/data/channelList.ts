@@ -3,12 +3,16 @@
 // in about 50-100 ms this way, against 730 ms as one record each, because
 // there are far fewer objects to rebuild (PLAN.md, Phase 3, step 2).
 
+import { channelKeys } from "./channelKey";
 import type { PlaylistChannel } from "./types";
 
 /** A channel as the app holds it. */
 export interface StoredChannel extends PlaylistChannel {
   source: string;
-  /** Unique across sources: "<source>/<index>". */
+  /**
+   * Unique across sources, and the same after the source imports again:
+   * "<source>/<key>" (src/data/channelKey.ts).
+   */
   id: string;
 }
 
@@ -18,6 +22,12 @@ export interface ChannelColumns {
   count: number;
   name: string[];
   url: string[];
+  /**
+   * Each channel's key (src/data/channelKey.ts), worked out at import, in the
+   * worker: it takes 60-80 ms for 10,000 channels on the TV. Lists stored
+   * before Phase 5 lack it, and get keys as they're read.
+   */
+  key?: string[];
   /** Fields channels may lack: null where a channel has none, no column when none has it. */
   optional: {
     guideId?: Column<"guideId">;
@@ -51,6 +61,7 @@ export const toColumns = (channels: PlaylistChannel[]): ChannelColumns => {
     count: channels.length,
     name: channels.map(channel => channel.name),
     url: channels.map(channel => channel.url),
+    key: channelKeys(channels),
     optional,
   };
 };
@@ -67,7 +78,7 @@ export const fromColumns = (columns: ChannelColumns, source: string): StoredChan
   for (let index = 0; index < columns.count; index++) {
     channels[index] = {
       source,
-      id: `${source}/${index}`,
+      id: "",
       index,
       name: name[index] ?? "",
       url: url[index] ?? "",
@@ -81,5 +92,7 @@ export const fromColumns = (columns: ChannelColumns, source: string): StoredChan
       providerId: providerId?.[index] ?? undefined,
     };
   }
+  const keys = columns.key ?? channelKeys(channels);
+  for (let index = 0; index < channels.length; index++) channels[index].id = `${source}/${keys[index]}`;
   return channels;
 };

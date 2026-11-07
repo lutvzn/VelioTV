@@ -22,6 +22,7 @@ declare module "@solidtv/solid/primitives" {
     Info: string | number | (string | number)[];
     ChannelList: string | number | (string | number)[];
     Guide: string | number | (string | number)[];
+    Tools: string | number | (string | number)[];
   }
 }
 

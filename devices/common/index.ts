@@ -59,6 +59,7 @@ export const config = {
     Info: ["i", 73],
     ChannelList: ["l", 76],
     Guide: ["g", 71],
+    Tools: ["o", 79],
     Key0: ["0", 96, 48],
     Key1: ["1", 97, 49],
     Key2: ["2", 98, 50],

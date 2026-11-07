@@ -18,9 +18,20 @@ const channels: PlaylistChannel[] = [
 describe("channel columns", () => {
   it("give back the same channels", () => {
     expect(fromColumns(toColumns(channels), "s")).toEqual(
-      channels.map(channel => ({ ...channel, source: "s", id: `s/${channel.index}` })),
+      channels.map(channel => ({
+        ...channel,
+        source: "s",
+        id: `s/${channel.providerId ? `i:${channel.providerId}` : `n:${channel.name.toLowerCase()}`}`,
+      })),
     );
     expect(fromColumns(toColumns([]), "s")).toEqual([]);
+  });
+
+  it("key channels at import, and lists stored without keys as they're read", () => {
+    const columns = toColumns(channels);
+    expect(columns.key).toEqual(["n:one", "n:two", "i:3"]);
+    const { key: _key, ...old } = columns;
+    expect(fromColumns(old, "s").map(channel => channel.id)).toEqual(["s/n:one", "s/n:two", "s/i:3"]);
   });
 
   it("only hold columns for fields some channel has", () => {

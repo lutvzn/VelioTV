@@ -1,5 +1,6 @@
 import { Text, View } from "@solidtv/solid";
 import { createMemo, Index, Show } from "solid-js";
+import { FavouriteDot } from "../../components/FavouriteDot";
 import type { Channel } from "../../data/lineup";
 import { type Cell, placeCell } from "../../guide/timeline";
 import { $t } from "../../translate";
@@ -87,6 +88,7 @@ export const GuideRow = (props: GuideRowProps) => {
         <Text x={78} mountX={1} height={INNER} lineHeight={INNER} fontSize={26} color={COLORS.dim}>
           {String(props.number)}
         </Text>
+        <FavouriteDot channelId={props.channel.id} x={83} y={INNER / 2} size={9} />
         <Text
           x={96}
           width={CHANNEL_WIDTH - 108}

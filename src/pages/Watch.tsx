@@ -1,5 +1,6 @@
 import { useNavigate } from "@solidjs/router";
 import { type ElementNode, Text, View } from "@solidtv/solid";
+import { useHold } from "@solidtv/solid/primitives";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js";
 import { MENU_WIDTH } from "../components/SideMenu";
 import { exposeToProbes } from "../devHooks";
@@ -15,6 +16,7 @@ import { $t } from "../translate";
 import { FULL_SCREEN } from "../videoWindow";
 import { Banner } from "./live/Banner";
 import { ChannelList, LIST_ROWS } from "./live/ChannelList";
+import { ChannelOptions, HOLD_MS, OPTIONS_WIDTH } from "./live/ChannelOptions";
 import { TrackPanel } from "./live/TrackPanel";
 
 // Live TV full screen (PLAN.md, Phase 3, step 3, and Phase 4). The app
@@ -25,7 +27,8 @@ import { TrackPanel } from "./live/TrackPanel";
 // press and the stream changing once they stop; OK or the channel-list key
 // opens the list over the video, where Left and Right change group; Right
 // opens the audio and subtitle choices (step 5); Info shows the banner;
-// number keys pick a channel by number. Back closes whatever is open, and
+// number keys pick a channel by number. Holding OK, or the Tools key, opens
+// the options for the channel playing or highlighted (Phase 5, step 1). Back closes whatever is open, and
 // then goes to the guide, on the channel playing; the Guide key goes there
 // at once, and Back there comes back (src/live/handoff.ts).
 
@@ -180,7 +183,53 @@ export default () => {
   // A new channel has other tracks.
   createEffect(on(zapper.playing, () => setTracksOpen(false), { defer: true }));
 
-  exposeToProbes("live", { zapper, watching, listOpen, bannerShown, tracksOpen, rows, trackCursor });
+  // Options for the channel playing, or the one highlighted in the list.
+  const [optionsFor, setOptionsFor] = createSignal<Channel>();
+  const openOptions = () => {
+    const channel = listOpen() ? listChannels()[cursor()] : zapper.shown();
+    if (tracksOpen() || zapper.digits() || !channel) return false;
+    hideBanner();
+    setOptionsFor(channel);
+    return true;
+  };
+  const closeOptions = () => {
+    setOptionsFor(undefined);
+    watchNode?.setFocus();
+  };
+
+  // OK: a tap acts at once; a hold opens the options.
+  const pressEnter = () => {
+    if (tracksOpen()) chooseTrack();
+    else if (zapper.digits()) {
+      zapper.enterNumber();
+      showBanner();
+    } else if (listOpen()) {
+      const channel = listChannels()[cursor()];
+      setListOpen(false);
+      if (channel) zapper.tune(channel, listGroup());
+      showBanner();
+    } else {
+      openList();
+    }
+  };
+  const [holdEnter, releaseEnter] = useHold({
+    onEnter: pressEnter,
+    onHold: () => {
+      if (!openOptions()) pressEnter();
+    },
+    holdThreshold: HOLD_MS,
+  });
+
+  exposeToProbes("live", {
+    zapper,
+    watching,
+    listOpen,
+    bannerShown,
+    tracksOpen,
+    rows,
+    trackCursor,
+    optionsFor,
+  });
 
   const nowNext = createNowNext(zapper.shown, { guide, clock });
   const listGuide = createNowNext(() => (listOpen() ? listChannels()[cursor()] : undefined), {
@@ -244,20 +293,11 @@ export default () => {
         else openTracks();
         return true;
       }}
-      onEnter={() => {
+      onEnter={(event, target, handler) => (watching() ? holdEnter(event, target, handler) : false)}
+      onEnterRelease={releaseEnter}
+      onTools={() => {
         if (!watching()) return false;
-        if (tracksOpen()) chooseTrack();
-        else if (zapper.digits()) {
-          zapper.enterNumber();
-          showBanner();
-        } else if (listOpen()) {
-          const channel = listChannels()[cursor()];
-          setListOpen(false);
-          if (channel) zapper.tune(channel, listGroup());
-          showBanner();
-        } else {
-          openList();
-        }
+        openOptions();
         return true;
       }}
       onChannelList={() => {
@@ -376,6 +416,9 @@ export default () => {
               {zapper.digits() || $t("live.noNumber", { number: zapper.missing() ?? "" })}
             </Text>
           </View>
+        </Show>
+        <Show when={optionsFor()}>
+          {channel => <ChannelOptions channel={channel()} x={1920 - OPTIONS_WIDTH} onClose={closeOptions} />}
         </Show>
       </Show>
     </View>

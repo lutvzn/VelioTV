@@ -3,10 +3,11 @@
 // stored, add sources without typing them on the remote, and play streams.
 
 import { onCleanup } from "solid-js";
+import { channelKeys } from "./data/channelKey";
 import * as db from "./data/db";
 import { createGuideClient } from "./data/guideClient";
 import { importSource } from "./data/importClient";
-import { guide, guideReader, library, lineup } from "./library";
+import { edits, guide, guideReader, library, lineup } from "./library";
 import { player } from "./player";
 
 const hooks: Record<string, unknown> = {
@@ -18,6 +19,8 @@ const hooks: Record<string, unknown> = {
   guide,
   guideReader,
   createGuideClient,
+  edits,
+  channelKeys,
 };
 
 export const installDevHooks = () => Object.assign(globalThis, { tiviplayer: hooks });

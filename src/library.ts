@@ -1,8 +1,10 @@
 // The app's sources and their imports (src/data/sourceManager.ts), their
 // channels, kept in memory (src/data/lineup.ts), and the guide days read so
-// far (src/data/guideCache.ts), read in a worker (src/data/guideClient.ts).
+// far (src/data/guideCache.ts), read in a worker (src/data/guideClient.ts),
+// and the user's edits to channels (src/data/channelEdits.ts).
 
 import { createEffect, createRoot } from "solid-js";
+import { createChannelEdits } from "./data/channelEdits";
 import { createGuideCache } from "./data/guideCache";
 import { createGuideClient } from "./data/guideClient";
 import { importSource } from "./data/importClient";
@@ -15,6 +17,8 @@ export const lineup = createLineup({
   sources: library.sources,
   stateOf: id => library.statusOf(id).state,
 });
+
+export const edits = createChannelEdits({ storage: localStorage });
 
 export const guideReader = createGuideClient();
 export const guide = createGuideCache({ read: guideReader.read });

@@ -21,6 +21,7 @@ const REMOTE_KEYS = [
   "Info",
   "ChannelList",
   "Guide",
+  "Tools",
   "0",
   "1",
   "2",

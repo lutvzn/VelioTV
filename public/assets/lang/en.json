@@ -95,5 +95,7 @@
   "guide.noInformation": "No information",
   "guide.searchResults": "Search: “{{ query }}”",
   "guide.noMatches": "No channels match “{{ query }}”",
-  "guide.filterHint": "‹ ›  Change group     OK  Search channels"
+  "guide.filterHint": "‹ ›  Change group     OK  Search channels",
+  "options.favourite": "Add to favourites",
+  "options.unfavourite": "Remove from favourites"
 }

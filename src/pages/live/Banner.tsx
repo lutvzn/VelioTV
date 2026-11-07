@@ -1,6 +1,7 @@
 import { Text, View } from "@solidtv/solid";
 import { Show } from "solid-js";
 import type { NowAndNext } from "../../data/guideCache";
+import { FavouriteDot } from "../../components/FavouriteDot";
 import type { Channel } from "../../data/lineup";
 import { clockTime, progress, timeRange } from "../../live/format";
 import { $t } from "../../translate";
@@ -25,6 +26,7 @@ export const Banner = (props: BannerProps) => {
       <Text x={80} y={36} width={160} contain="width" fontSize={56} fontFamily="NotoSans700">
         {String(props.number)}
       </Text>
+      <FavouriteDot channelId={props.channel.id} x={TEXT_X - 30} y={72} size={16} />
       <Text x={TEXT_X} y={40} width={1240} maxLines={1} contain="width" fontSize={48}>
         {props.channel.name}
       </Text>

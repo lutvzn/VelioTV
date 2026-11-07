@@ -1,4 +1,5 @@
 import { Text, View } from "@solidtv/solid";
+import { FavouriteDot } from "../../components/FavouriteDot";
 import { For, Show } from "solid-js";
 import type { NowAndNext } from "../../data/guideCache";
 import type { Channel } from "../../data/lineup";
@@ -63,6 +64,7 @@ export const ChannelList = (props: ChannelListProps) => {
                 >
                   {String(props.numberOf(channel()))}
                 </Text>
+                <FavouriteDot channelId={channel().id} x={109} y={(ROW_HEIGHT - 6) / 2} />
                 <Text
                   x={130}
                   width={ROW_WIDTH - 150}
