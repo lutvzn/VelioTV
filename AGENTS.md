@@ -17,7 +17,7 @@ TiviPlayer is an IPTV app built with SolidTV, for Samsung Tizen first and LG web
 - Keep a TV run to a minute or two. Before a longer one, say how long it will take, or shrink the input.
 - The user checks anything visual on the TV themselves (alignment, smoothness, layout) and reports back. Ask them to look when a test is visual.
 - `#/dev/video?url=<stream>` opens a developer page for video behind the UI.
-- The app's storage is capped at 80 MB on the TV, and deleted records under 64 KB keep their space (PLAN.md, Phase 8, step 2). If repeated imports run into `QuotaExceededError`, reinstall the app (`tizen uninstall`, then deploy) to reset it.
+- The app's storage is capped at 80 MB on the TV, and deleted records under 64 KB keep their space (PLAN.md, Phase 8, step 2), so the guide is stored in blocks over 64 KB. Keep new records that are written often over that size, or few. If storage still fills up, deleting the app's database (`indexedDB.deleteDatabase("tiviplayer")` from a probe while the app holds no connection, or reinstalling) gives the space back; the sources then import again.
 
 ## Test data
 

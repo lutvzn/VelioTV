@@ -1,86 +1,133 @@
-// Collects programmes into one record per guide channel per day, compresses
-// them, and writes them in large batches, keeping the guide within a storage
-// budget.
+// Packs programmes into guide blocks (db.ts, guideCodec.ts) and writes them
+// in large batches, keeping the guide within a storage budget.
 //
-// Guides usually list each channel's programmes together, so most records
-// are complete when written. When a channel's day is split across batches,
-// the later batch merges into the stored record.
+// Blocks: each day has its own run of blocks, and each guide channel a place
+// in the guide's order, given when its first programme comes. A day's open
+// block packs each channel's day as soon as the guide moves on to another
+// channel, and closes once it is over BLOCK_BYTES packed, so the import holds
+// little more than the open blocks' compressed bytes. Guides list each
+// channel's programmes together; a channel that comes back later goes to the
+// block that holds its place, merged into it if that block is closed.
+//
+// Details: only the days around today keep the programmes' subtitles and
+// descriptions, which are most of a guide's size; the other days keep
+// titles, times and episodes. A refresh brings each day's details as it
+// comes near.
+//
+// Generations: the writer writes a new generation beside the last import's.
+// commit() switches the source's guide index to it and deletes the others;
+// abandon() deletes it instead. If the browser reports its quota is full,
+// `makeRoom` deletes the last generation early, and the batch is written
+// again; if that fails too, storing stops.
 //
 // The budget: the TV allows each app only 80 MB. When the guide grows past
-// the budget, the farthest day goes (from what is stored and from what comes
-// next), so the nearest days are always kept. If even one day doesn't fit,
-// it keeps as much of it as fits and stops storing; it stops too if the
-// browser reports its quota is full.
+// the budget, a day goes: whichever of the first and last is farther from
+// today, counting a day before today as a little farther than the day as
+// far after it. Today is kept longest. If even today doesn't fit, the writer
+// keeps as many of its blocks as fit, and stops storing.
 //
 // Guides give each channel's days together, so by the time the budget runs
 // out, the first channels' later days would already be packed and stored
-// for nothing. To avoid that, once a few hundred records are stored, the
-// writer predicts the guide's size from their average and the number of
-// channels the guide lists (`expectedChannels`), and drops days early.
+// for nothing. To avoid that, once a few hundred channel-days are packed,
+// the writer predicts each day's size from them and the number of channels
+// the guide lists (`expectedChannels`), and drops days early.
 //
 // One batch is written while the next is parsed: flush() waits only for the
 // batch before. IndexedDB runs transactions on the same store in order, so a
 // merge always sees the earlier batch.
 
-import { DAY, finished, isQuotaError, writeTransaction, type GuideDay } from "./db";
-import { decodeDay, encodeDay, type StoredProgramme } from "./guideCodec";
+import {
+  blockAt,
+  DAY,
+  deleteOtherGenerations,
+  finished,
+  generationRange,
+  isQuotaError,
+  writeTransaction,
+  type GuideBlock,
+  type GuideIndex,
+} from "./db";
+import { BlockEncoder, decodeBlock, encodeBlock, tidy, type Unfinished } from "./guideCodec";
 import type { Programme } from "./types";
 
-const HOUR = 3_600_000;
-/** Programmes held before writing a batch. */
+/** Programmes in closed blocks held before writing them. */
 const BATCH = 20_000;
+/**
+ * Packed bytes at which a block closes. It ends up a little bigger, as the
+ * encoder counts its output late, and over 64 KB (see db.ts).
+ */
+export const BLOCK_BYTES = 80 * 1024;
 /** Roughly what each record costs besides its data: keys and bookkeeping. */
 export const RECORD_OVERHEAD = 64;
-/** A guess at a programme's packed size, until a merged record is packed. */
-const PROGRAMME_GUESS = 64;
-/** Records stored before predicting the guide's size from them. */
+/** A guess at a programme's packed size, until a merged block is packed. */
+const PROGRAMME_GUESS = 32;
+/** Channel-days packed before predicting the guide's size from them. */
 const PREDICT_AFTER = 300;
+/** Days before and after today that keep subtitles and descriptions. */
+export const DETAIL_DAYS = 1;
 
-type Unfinished = Omit<Programme, "channel"> & { stop?: number };
+interface OpenBlock {
+  block: number;
+  encoder: BlockEncoder;
+  channels: Set<string>;
+  /** The channel whose programmes are coming now. */
+  current?: { channel: string; programmes: Unfinished[] };
+}
 
-// Sorts a day's programmes, drops repeats of the same start time (keeping
-// the later one), and fills in missing stop times from the next programme.
-const tidy = (programmes: Unfinished[]): StoredProgramme[] => {
-  // Not toSorted(): older TVs' browsers lack it, and workers get no polyfills.
-  const sorted = [...programmes];
-  sorted.sort((a, b) => a.start - b.start);
-  const list: StoredProgramme[] = [];
-  for (let i = 0; i < sorted.length; i++) {
-    const p = sorted[i];
-    const next = sorted[i + 1];
-    if (next && next.start === p.start) continue;
-    list.push({ ...p, stop: p.stop ?? (next ? next.start : p.start + HOUR) });
-  }
-  return list;
-};
-
-interface Pending {
-  channel: string;
+interface Closed {
   day: number;
-  programmes: Unfinished[];
+  block: number;
+  data: Uint8Array;
+  channels: number;
+  count: number;
+}
+
+/** Programmes for blocks already closed. */
+interface Late {
+  day: number;
+  block: number;
+  programmes: Map<string, Unfinished[]>;
 }
 
 interface Stored {
-  channel: string;
   day: number;
+  block: number;
   bytes: number;
   count: number;
+  channels: number;
 }
 
 export interface GuideWriterOptions {
   source: string;
-  /** Days to store, as days since 1970 (UTC). */
+  /** The generation to write; see the top of this file. */
+  generation: number;
+  /** Days since 1970 (UTC). */
+  today: number;
+  /** Days to store. */
   firstDay: number;
   lastDay: number;
   budgetBytes: number;
+  /** Deletes the last import's guide to make room; resolves whether it deleted anything. */
+  makeRoom?: () => Promise<boolean>;
 }
+
+const keyOf = (day: number, block: number) => `${day}\n${block}`;
+
+const sizeOf = (block: Closed): Stored => ({
+  day: block.day,
+  block: block.block,
+  bytes: block.data.length + RECORD_OVERHEAD,
+  count: block.count,
+  channels: block.channels,
+});
 
 export class GuideWriter {
   /** Programmes given to add(). */
   added = 0;
   /** Programmes left out: outside the days kept, or after storing stopped. */
   skipped = 0;
-  /** The last day still kept; it moves earlier to stay within the budget. */
+  /** The days still kept; they narrow to stay within the budget. */
+  firstDay: number;
   lastDay: number;
   trimmed = false;
   /** Set when storing has stopped; see the top of this file. */
@@ -92,16 +139,32 @@ export class GuideWriter {
 
   private db: IDBDatabase;
   private options: GuideWriterOptions;
-  private pending = new Map<string, Pending>();
+  /** Guide channels in the guide's order, and their places. */
+  private order: string[] = [];
+  private positions = new Map<string, number>();
+  /** Each day's blocks' first places (GuideIndex.days). */
+  private starts = new Map<number, number[]>();
+  /** Each day's last place in any block. */
+  private lastPlace = new Map<number, number>();
+  private open = new Map<number, OpenBlock>();
+  private closed: Closed[] = [];
+  private late = new Map<string, Late>();
   private pendingCount = 0;
-  /** Each stored record, by "channel\nday". */
+  /** Days with programmes added, for the budget. */
+  private seen = new Set<number>();
+  /** Each stored block, by keyOf(). */
   private stored = new Map<string, Stored>();
   private bytesByDay = new Map<number, number>();
+  private channelsByDay = new Map<number, number>();
+  /** Stored blocks of days dropped since the last write. */
+  private dropped: Stored[] = [];
+  private madeRoom = false;
   private writing: Promise<void> = Promise.resolve();
 
   constructor(db: IDBDatabase, options: GuideWriterOptions) {
     this.db = db;
     this.options = options;
+    this.firstDay = options.firstDay;
     this.lastDay = options.lastDay;
   }
 
@@ -122,105 +185,259 @@ export class GuideWriter {
     return total;
   }
 
-  /** The last day with programmes stored, which may be before lastDay. */
-  get lastStoredDay() {
-    return this.guideDays().last;
+  /** The first and last days with programmes stored, which may be inside the days kept. */
+  get storedDays() {
+    const days = [...this.bytesByDay.keys()];
+    return days.length > 0 ? { first: Math.min(...days), last: Math.max(...days) } : undefined;
   }
 
-  /** Whether a record for this channel and day is stored. */
-  has(channel: string, day: number) {
-    return this.stored.has(`${channel}\n${day}`);
+  /** Blocks stored. */
+  get blocks() {
+    return this.stored.size;
   }
 
   add(programme: Programme) {
     this.added++;
     const day = Math.floor(programme.start / DAY);
-    if (this.stopped || day < this.options.firstDay || day > this.lastDay) {
+    if (this.stopped || day < this.firstDay || day > this.lastDay) {
       this.skipped++;
       return;
     }
-    const { channel, ...rest } = programme;
-    const key = `${channel}\n${day}`;
-    let record = this.pending.get(key);
-    if (!record) {
-      record = { channel, day, programmes: [] };
-      this.pending.set(key, record);
+    this.seen.add(day);
+    const { channel, start, stop, title, episode, subTitle, description } = programme;
+    // Only what is stored, so the XML it came from can go.
+    const slim: Unfinished = { start, title };
+    if (stop !== undefined) slim.stop = stop;
+    if (episode !== undefined) slim.episode = episode;
+    if (this.details(day)) {
+      if (subTitle !== undefined) slim.subTitle = subTitle;
+      if (description !== undefined) slim.description = description;
     }
-    record.programmes.push(rest);
+
+    let open = this.open.get(day);
+    if (open?.current?.channel === channel) {
+      open.current.programmes.push(slim);
+      return;
+    }
+    let position = this.positions.get(channel);
+    if (position === undefined) {
+      position = this.order.length;
+      this.order.push(channel);
+      this.positions.set(channel, position);
+    }
+    let starts = this.starts.get(day);
+    if (!starts) this.starts.set(day, (starts = []));
+    // A place the day's blocks already reach belongs to the block that holds
+    // it; a channel before the first block's start moves that start back.
+    const newPlace = position > (this.lastPlace.get(day) ?? -1);
+    const block = newPlace ? undefined : blockAt(starts, position);
+    if (!newPlace && position < starts[0]) starts[0] = position;
+    if (block !== undefined && block !== open?.block) {
+      this.addLate(day, block, channel, slim);
+      return;
+    }
+    if (open) {
+      this.packCurrent(open);
+      if (newPlace && open.encoder.bytes >= BLOCK_BYTES) {
+        this.close(day);
+        open = undefined;
+      }
+    }
+    if (!open) {
+      open = { block: starts.length, encoder: new BlockEncoder(day, this.details(day)), channels: new Set() };
+      starts.push(position);
+      this.open.set(day, open);
+    }
+    if (newPlace) this.lastPlace.set(day, position);
+    open.channels.add(channel);
+    open.current = { channel, programmes: [slim] };
+  }
+
+  /** Starts writing the closed blocks, once the previous batch is written. */
+  async flush() {
+    await this.settle();
+    this.write();
+  }
+
+  /** Closes the open blocks, writes everything, and waits until it is stored. */
+  async finish() {
+    for (const day of this.open.keys()) this.close(day);
+    await this.flush();
+    await this.settle();
+  }
+
+  /** Makes what was written the source's guide, deleting the last import's. */
+  async commit() {
+    const run = async () => {
+      const transaction = writeTransaction(this.db, ["guide", "guideIndex"]);
+      transaction.objectStore("guideIndex").put(this.index());
+      deleteOtherGenerations(transaction.objectStore("guide"), this.options.source, this.options.generation);
+      await finished(transaction);
+    };
+    await this.retryWhenFull(run);
+  }
+
+  /** Deletes what was written, after a failed import. */
+  async abandon() {
+    await this.writing.catch(() => {});
+    const transaction = writeTransaction(this.db, "guide");
+    transaction.objectStore("guide").delete(generationRange(this.options.source, this.options.generation));
+    await finished(transaction);
+  }
+
+  /** The guide index for what is stored. */
+  index(): GuideIndex {
+    const days: Record<number, number[]> = {};
+    for (const [day, starts] of this.starts) {
+      if (day >= this.firstDay && day <= this.lastDay && starts.length > 0) days[day] = starts;
+    }
+    return {
+      source: this.options.source,
+      generation: this.options.generation,
+      channels: this.order,
+      days,
+    };
+  }
+
+  private details(day: number) {
+    return Math.abs(day - this.options.today) <= DETAIL_DAYS;
+  }
+
+  private addLate(day: number, block: number, channel: string, programme: Unfinished) {
+    const key = keyOf(day, block);
+    let late = this.late.get(key);
+    if (!late) this.late.set(key, (late = { day, block, programmes: new Map() }));
+    const list = late.programmes.get(channel);
+    if (list) list.push(programme);
+    else late.programmes.set(channel, [programme]);
     this.pendingCount++;
   }
 
-  /** Starts writing the waiting programmes, once the previous batch is written. */
-  async flush() {
-    await this.settle();
-    const batch = [...this.pending.values()];
-    this.pending = new Map();
-    this.pendingCount = 0;
-    if (this.stopped || batch.length === 0) return;
+  private packCurrent(open: OpenBlock) {
+    if (!open.current) return;
+    open.encoder.add(open.current.channel, tidy(open.current.programmes));
+    open.current = undefined;
+  }
 
-    // Pack new records first, so their sizes count against the budget.
-    const before = { stored: new Map(this.stored), bytesByDay: new Map(this.bytesByDay) };
-    const items = batch.map(record => {
-      const key = `${record.channel}\n${record.day}`;
-      if (this.stored.has(key)) return { key, record, data: undefined };
-      const programmes = tidy(record.programmes);
-      return { key, record, programmes, data: encodeDay(record.day, programmes) };
+  private close(day: number) {
+    const open = this.open.get(day);
+    if (!open) return;
+    this.packCurrent(open);
+    this.open.delete(day);
+    const { encoder } = open;
+    const data = encoder.finish();
+    this.closed.push({
+      day,
+      block: open.block,
+      data,
+      channels: open.channels.size,
+      count: encoder.programmes,
     });
+    this.pendingCount += encoder.programmes;
+  }
+
+  // Merges programmes into a packed block.
+  private merge(day: number, data: Uint8Array | undefined, extra: Map<string, Unfinished[]>) {
+    const channels = data ? decodeBlock(day, data) : new Map();
+    for (const [channel, programmes] of extra) {
+      channels.set(channel, tidy([...(channels.get(channel) ?? []), ...programmes]));
+    }
+    let count = 0;
+    for (const programmes of channels.values()) count += programmes.length;
+    return { data: encodeBlock(day, channels, this.details(day)), channels: channels.size, count };
+  }
+
+  private write() {
+    const closed = this.closed;
+    const late = [...this.late.values()];
+    this.closed = [];
+    this.late = new Map();
+    this.pendingCount = 0;
+    if (this.stopped || (closed.length === 0 && late.length === 0 && this.dropped.length === 0)) return;
+
+    // Late programmes for blocks in this batch are merged now; for stored
+    // ones, in the transaction.
+    const inBatch = new Map(closed.map(block => [keyOf(block.day, block.block), block]));
+    const toMerge: Late[] = [];
+    for (const extra of late) {
+      const block = inBatch.get(keyOf(extra.day, extra.block));
+      if (block) Object.assign(block, this.merge(block.day, block.data, extra.programmes));
+      else toMerge.push(extra);
+    }
     // A merge's size is known only in the transaction; until then, count
-    // the old record plus a guess for the new programmes.
-    const sizeOf = ({ key, record, programmes, data }: (typeof items)[number]): Stored => {
-      const old = this.stored.get(key);
-      const bytes = data ? data.length : (old?.bytes ?? 0) + record.programmes.length * PROGRAMME_GUESS;
-      const count = programmes ? programmes.length : (old?.count ?? 0) + record.programmes.length;
-      return { channel: record.channel, day: record.day, bytes: bytes + RECORD_OVERHEAD, count };
+    // the old block plus a guess for the new programmes.
+    const guessOf = (extra: Late): Stored => {
+      const old = this.stored.get(keyOf(extra.day, extra.block));
+      let count = 0;
+      for (const programmes of extra.programmes.values()) count += programmes.length;
+      return {
+        day: extra.day,
+        block: extra.block,
+        bytes: (old?.bytes ?? RECORD_OVERHEAD) + count * PROGRAMME_GUESS,
+        count: (old?.count ?? 0) + count,
+        channels: (old?.channels ?? 0) + extra.programmes.size,
+      };
     };
-    for (const item of items) this.account(item.key, sizeOf(item));
-    let dropped = [...this.predict(), ...this.trim()];
-    // With storing stopped, only the records of this batch that still fit.
+    const before = {
+      stored: new Map(this.stored),
+      bytesByDay: new Map(this.bytesByDay),
+      channelsByDay: new Map(this.channelsByDay),
+    };
+    for (const block of closed) this.account(sizeOf(block));
+    for (const extra of toMerge) this.account(guessOf(extra));
+    this.predict();
+    this.trim();
+    // With storing stopped, only the blocks of this batch that still fit.
     let fits: Set<string> | undefined;
     if (this.stopped) {
-      // Not even one day fits: keep as much of it as the budget holds, in
-      // the guide's order, and no more.
+      // Not even today fits: keep as much of it as the budget holds, in the
+      // guide's order, and no more.
       this.stored = before.stored;
       this.bytesByDay = before.bytesByDay;
-      dropped = this.dropAfter(this.lastDay);
+      this.channelsByDay = before.channelsByDay;
+      this.forgetOutside();
       fits = new Set();
-      for (const item of items) {
-        if (item.record.day > this.lastDay) continue;
-        const size = sizeOf(item);
-        const old = this.stored.get(item.key)?.bytes ?? 0;
-        if (this.bytes - old + size.bytes > this.options.budgetBytes) break;
-        this.account(item.key, size);
-        fits.add(item.key);
+      for (const block of closed) {
+        if (block.day < this.firstDay || block.day > this.lastDay) continue;
+        const size = sizeOf(block);
+        if (this.bytes + size.bytes > this.options.budgetBytes) break;
+        this.account(size);
+        fits.add(keyOf(block.day, block.block));
       }
     }
+    const kept = (day: number, key: string) =>
+      day >= this.firstDay && day <= this.lastDay && (!fits || fits.has(key));
+    const dropped = this.dropped;
+    this.dropped = [];
 
-    const { source } = this.options;
-    const transaction = writeTransaction(this.db, "guide");
-    const store = transaction.objectStore("guide");
-    for (const { channel, day } of dropped) store.delete([source, channel, day]);
-    for (const { key, record, programmes, data } of items) {
-      const { channel, day } = record;
-      if (day > this.lastDay || (fits && !fits.has(key))) continue;
-      if (data && programmes) {
-        const value: GuideDay = { source, channel, day, count: programmes.length, data };
+    const { source, generation } = this.options;
+    const run = async () => {
+      const transaction = writeTransaction(this.db, "guide");
+      const store = transaction.objectStore("guide");
+      for (const { day, block } of dropped) store.delete([source, generation, day, block]);
+      for (const block of closed) {
+        if (!kept(block.day, keyOf(block.day, block.block))) continue;
+        const value: GuideBlock = { source, generation, ...block };
         store.put(value);
-        continue;
       }
-      const request = store.get([source, channel, day]);
-      request.addEventListener("success", () => {
-        const old: GuideDay | undefined = request.result;
-        const merged = tidy(old ? [...decodeDay(day, old.data), ...record.programmes] : record.programmes);
-        const packed = encodeDay(day, merged);
-        this.account(key, { channel, day, bytes: packed.length + RECORD_OVERHEAD, count: merged.length });
-        const value: GuideDay = { source, channel, day, count: merged.length, data: packed };
-        store.put(value);
-      });
-    }
+      for (const extra of fits ? [] : toMerge) {
+        const { day, block } = extra;
+        if (!kept(day, keyOf(day, block))) continue;
+        const request = store.get([source, generation, day, block]);
+        request.addEventListener("success", () => {
+          const old: GuideBlock | undefined = request.result;
+          const { data, channels, count } = this.merge(day, old?.data, extra.programmes);
+          this.account({ day, block, bytes: data.length + RECORD_OVERHEAD, channels, count });
+          const value: GuideBlock = { source, generation, day, block, data, channels, count };
+          store.put(value);
+        });
+      }
+      await finished(transaction);
+    };
     this.writeState = "pending";
     this.writing = (async () => {
       try {
-        await finished(transaction);
+        await this.retryWhenFull(run);
         this.writeState = "done";
       } catch (error) {
         this.writeState = `failed: ${error instanceof Error ? error.name : String(error)}`;
@@ -232,10 +449,16 @@ export class GuideWriter {
     this.writing.catch(() => {});
   }
 
-  /** Writes everything still waiting, and waits until it is stored. */
-  async finish() {
-    await this.flush();
-    await this.settle();
+  // Runs a write; if storage is full, makes room once and runs it again.
+  private async retryWhenFull(run: () => Promise<void>) {
+    try {
+      await run();
+    } catch (error) {
+      if (!isQuotaError(error) || this.madeRoom || !this.options.makeRoom) throw error;
+      this.madeRoom = true;
+      if (!(await this.options.makeRoom())) throw error;
+      await run();
+    }
   }
 
   // Waits for the batch being written. Full storage stops storing; any other
@@ -251,74 +474,100 @@ export class GuideWriter {
     }
   }
 
-  private account(key: string, record: Stored) {
+  private account(record: Stored) {
+    const key = keyOf(record.day, record.block);
     const old = this.stored.get(key);
-    if (old) this.bytesByDay.set(old.day, (this.bytesByDay.get(old.day) ?? 0) - old.bytes);
+    if (old) this.addToDay(old, -1);
     this.stored.set(key, record);
-    this.bytesByDay.set(record.day, (this.bytesByDay.get(record.day) ?? 0) + record.bytes);
+    this.addToDay(record, 1);
   }
 
-  // The days with programmes stored, within those kept. Guides give each
-  // channel's days together, so after the first batch these are the guide's
-  // own days. The days kept can reach further: catch-up keeps days before
-  // today that a guide may not have, and counting those, the guide's own
-  // days were dropped to fit the budget (PLAN.md, Phase 8, step 3).
-  private guideDays() {
-    let first = Infinity;
-    let last = -Infinity;
-    for (const day of this.bytesByDay.keys()) {
-      first = Math.min(first, day);
-      last = Math.max(last, day);
-    }
-    if (first === Infinity) return { first: this.options.firstDay, last: this.lastDay };
-    return { first: Math.max(this.options.firstDay, first), last: Math.min(this.lastDay, last) };
+  private addToDay(record: Stored, sign: number) {
+    const { day } = record;
+    this.bytesByDay.set(day, (this.bytesByDay.get(day) ?? 0) + sign * record.bytes);
+    this.channelsByDay.set(day, (this.channelsByDay.get(day) ?? 0) + sign * record.channels);
   }
 
-  // Drops days that the guide, predicted from what is stored so far, won't
-  // have room for. Returns the stored records to delete.
+  // Drops days that the guide, predicted from what is packed so far, won't
+  // have room for.
   private predict() {
-    const dropped: Stored[] = [];
-    if (this.expectedChannels === 0 || this.stored.size < PREDICT_AFTER) return dropped;
-    const perRecord = this.bytes / this.stored.size;
-    const { budgetBytes } = this.options;
-    const { first, last } = this.guideDays();
-    const predicted = () => perRecord * this.expectedChannels * (Math.min(this.lastDay, last) - first + 1);
-    // No margin: if the prediction is low, trim() still keeps the budget.
-    while (predicted() > budgetBytes && this.lastDay > first) {
-      this.lastDay = Math.min(this.lastDay, last) - 1;
-      this.trimmed = true;
-      dropped.push(...this.dropAfter(this.lastDay));
+    if (this.expectedChannels === 0) return;
+    // Each day's packed bytes and channels, open blocks included.
+    const days = new Map<number, { bytes: number; channels: number }>();
+    for (const [day, bytes] of this.bytesByDay) {
+      days.set(day, { bytes, channels: this.channelsByDay.get(day) ?? 0 });
     }
-    return dropped;
+    for (const [day, open] of this.open) {
+      const known = days.get(day) ?? { bytes: 0, channels: 0 };
+      days.set(day, {
+        bytes: known.bytes + open.encoder.bytes,
+        channels: known.channels + open.channels.size,
+      });
+    }
+    let channelDays = 0;
+    for (const { channels } of days.values()) channelDays += channels;
+    if (channelDays < PREDICT_AFTER) return;
+    const predicted = () => {
+      let total = 0;
+      for (const [day, { bytes, channels }] of days) {
+        if (day >= this.firstDay && day <= this.lastDay && channels > 0) {
+          total += (bytes / channels) * this.expectedChannels;
+        }
+      }
+      return total;
+    };
+    // No margin: if the prediction is low, trim() still keeps the budget.
+    while (predicted() > this.options.budgetBytes && this.dropDay()) {
+      // dropDay() narrowed the days.
+    }
   }
 
-  // Drops the farthest days until the guide fits the budget, and returns the
-  // stored records to delete.
+  // Drops days until the guide fits the budget.
   private trim() {
-    const dropped: Stored[] = [];
     while (this.bytes > this.options.budgetBytes) {
-      if (this.lastDay <= this.guideDays().first) {
-        // Not even the first day fits: flush() keeps what fits, and stops.
+      if (!this.dropDay()) {
+        // Not even one day fits: write() keeps what fits, and stops.
         this.stop("budget");
         break;
       }
-      this.lastDay = Math.min(this.lastDay, this.guideDays().last) - 1;
-      this.trimmed = true;
-      dropped.push(...this.dropAfter(this.lastDay));
     }
-    return dropped;
   }
 
-  // Forgets the records after `day`, and returns them to delete.
-  private dropAfter(day: number) {
-    const dropped: Stored[] = [];
-    for (const [key, record] of this.stored) {
-      if (record.day <= day) continue;
-      this.stored.delete(key);
-      this.bytesByDay.delete(record.day);
-      dropped.push(record);
+  // Drops the day farthest from today, of those with programmes; false if
+  // only one is left.
+  private dropDay() {
+    let first = Infinity;
+    let last = -Infinity;
+    for (const day of this.seen) {
+      if (day < this.firstDay || day > this.lastDay) continue;
+      first = Math.min(first, day);
+      last = Math.max(last, day);
     }
-    return dropped;
+    if (!(first < last)) return false;
+    const { today } = this.options;
+    // Today 0, yesterday 1, tomorrow 2, the day before 3, and so on.
+    const rank = (day: number) => (day >= today ? (day - today) * 2 : (today - day) * 2 - 1);
+    if (rank(last) >= rank(first)) this.lastDay = last - 1;
+    else this.firstDay = first + 1;
+    this.trimmed = true;
+    this.forgetOutside();
+    return true;
+  }
+
+  // Forgets everything of the days no longer kept, and keeps their stored
+  // blocks to delete.
+  private forgetOutside() {
+    const outside = (day: number) => day < this.firstDay || day > this.lastDay;
+    for (const [key, record] of this.stored) {
+      if (!outside(record.day)) continue;
+      this.stored.delete(key);
+      this.dropped.push(record);
+    }
+    for (const map of [this.bytesByDay, this.channelsByDay, this.open, this.starts, this.lastPlace]) {
+      for (const day of map.keys()) if (outside(day)) map.delete(day);
+    }
+    this.closed = this.closed.filter(block => !outside(block.day));
+    for (const [key, extra] of this.late) if (outside(extra.day)) this.late.delete(key);
   }
 
   private stop(reason: "budget" | "quota") {

@@ -13,17 +13,16 @@
 
 import {
   DAY,
+  deleteOtherGenerations,
   finished,
   measureGuide,
   openDb,
+  readGuideIndex,
   readImport,
-  request,
-  sourceRange,
   writeChannels,
   writeTransaction,
   writeVod,
   type ImportState,
-  type StoredGuideChannel,
 } from "./db";
 import { GuideWriter, RECORD_OVERHEAD } from "./guideWriter";
 import { M3uParser } from "./m3u";
@@ -40,8 +39,6 @@ import {
 } from "./xtream";
 
 const MB = 1_048_576;
-// Guide channels per write.
-const GUIDE_CHANNEL_BATCH = 2000;
 const PROGRESS_EVERY_MS = 250;
 /**
  * How long parsing runs before letting the thread handle events. A download
@@ -52,11 +49,13 @@ const PROGRESS_EVERY_MS = 250;
  */
 const YIELD_EVERY_MS = 100;
 /**
- * The guide's share of the TV's 80 MB. The rest leaves room for channel
- * lists, other data, and space deleted records hold until the database
- * compacts.
+ * The guide's share of the TV's 80 MB, for all sources. A refresh writes the
+ * new guide beside the old one (db.ts); a source with all of this has room
+ * for both beside the channel lists, and if it doesn't, the old guide goes
+ * early (guideWriter.ts). A week of a 10,000-channel guide took 38 MB
+ * (PLAN.md, Phase 8, step 2).
  */
-export const GUIDE_BUDGET_BYTES = 50 * MB;
+export const GUIDE_BUDGET_BYTES = 40 * MB;
 /** The most days of guide kept before today, for catch-up. */
 const MAX_PAST_DAYS = 7;
 
@@ -140,32 +139,23 @@ const putState = async (db: IDBDatabase, state: ImportState) => {
   await finished(transaction);
 };
 
-// Deletes what an import left from before: records it didn't write. When
-// storage filled up, the guide stopped partway, and the old records for the
-// channels it didn't reach are still good, so only days no longer kept go.
-const deleteStale = async (
-  db: IDBDatabase,
-  source: string,
-  guideChannels: Set<string>,
-  writer: GuideWriter,
-  firstDay: number,
-) => {
-  const full = writer.stopped === "quota";
-  const transaction = writeTransaction(db, ["guideChannels", "guide"]);
-  const guideChannelStore = transaction.objectStore("guideChannels");
-  const guideStore = transaction.objectStore("guide");
-  const [guideChannelKeys, guideKeys] = await Promise.all([
-    request<[string, string][]>(guideChannelStore.getAllKeys(sourceRange(source))),
-    request<[string, string, number][]>(guideStore.getAllKeys(sourceRange(source))),
-  ]);
-  for (const key of guideChannelKeys) {
-    if (!full && !guideChannels.has(key[1])) guideChannelStore.delete(key);
-  }
-  for (const [, channel, day] of guideKeys) {
-    const stale = full ? day < firstDay || day > writer.lastDay : !writer.has(channel, day);
-    if (stale) guideStore.delete([source, channel, day]);
-  }
+// The guide generation an import writes, after deleting any that an import
+// cut short left behind (db.ts). Its makeRoom deletes the source's guide.
+const startGeneration = async (db: IDBDatabase, source: string) => {
+  const current = (await readGuideIndex(db, source))?.generation ?? 0;
+  const transaction = writeTransaction(db, "guide");
+  deleteOtherGenerations(transaction.objectStore("guide"), source, current);
   await finished(transaction);
+  const makeRoom = async () => {
+    if (current === 0) return false;
+    const deleting = writeTransaction(db, ["guide", "guideIndex"]);
+    deleting.objectStore("guideIndex").delete(source);
+    deleteOtherGenerations(deleting.objectStore("guide"), source, current + 1);
+    await finished(deleting);
+    console.warn("Storage is full: deleted the old guide to make room for the new one.");
+    return true;
+  };
+  return { generation: current + 1, makeRoom };
 };
 
 export const runImport = async (input: ImportRequest, options: ImportOptions = {}): Promise<ImportResult> => {
@@ -212,6 +202,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
   // What the import was storing, for the message if a write fails (network
   // and parse errors name their file).
   let storing: string | undefined;
+  let abandonGuide: (() => Promise<void>) | undefined;
   try {
     previous = await readImport(db, source);
     if (previous?.lastDoneAt) state.lastDoneAt = previous.lastDoneAt;
@@ -289,23 +280,23 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
 
     // Without a channel list, keep the whole guide.
     const keepAll = input.kind !== "xtream" && !input.playlistUrl;
+    storing = "deleting the old guide";
+    const { generation, makeRoom } = await startGeneration(db, source);
     const writer = new GuideWriter(db, {
       source,
+      generation,
+      today,
       firstDay: state.guideFirstDay,
       lastDay: state.guideLastDay,
       budgetBytes: input.guideBudgetBytes ?? GUIDE_BUDGET_BYTES,
+      makeRoom,
     });
+    abandonGuide = () => writer.abandon();
+    // The guide channels kept. Only their programmes are stored: the app
+    // names channels from the playlist.
     const kept = new Set<string>();
-    let guideChannels: StoredGuideChannel[] = [];
     let unmatched = 0;
     let read = 0;
-    const writeGuideChannels = async () => {
-      const transaction = writeTransaction(db, "guideChannels");
-      const store = transaction.objectStore("guideChannels");
-      for (const channel of guideChannels) store.put(channel);
-      guideChannels = [];
-      await finished(transaction);
-    };
     const keep = (id: string) => (keepAll ? id : guideIds.get(id.toLowerCase()));
 
     for (const url of guideUrls) {
@@ -317,9 +308,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
         defaultOffsetMinutes: input.guideOffsetMinutes,
         onChannel: (channel: GuideChannel) => {
           const id = keep(channel.id);
-          if (!id || kept.has(id)) return;
-          kept.add(id);
-          guideChannels.push({ ...channel, id, source });
+          if (id) kept.add(id);
         },
         onProgramme: programme => {
           read++;
@@ -340,11 +329,6 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
           await writer.flush();
           storing = undefined;
         }
-        if (guideChannels.length >= GUIDE_CHANNEL_BATCH) {
-          storing = "storing the guide's channels";
-          await writeGuideChannels();
-          storing = undefined;
-        }
         progress.programmes = read;
         progress.guide = {
           bytes: writer.bytes,
@@ -359,15 +343,13 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       }
       storing = "storing the guide";
       await writer.finish();
-      storing = "storing the guide's channels";
-      await writeGuideChannels();
       report(true);
     }
     storing = "storing the guide";
     await writer.finish();
-    storing = "deleting the old guide";
-    await deleteStale(db, source, kept, writer, state.guideFirstDay);
-    // What's stored now, old records included, when storage filled up.
+    await writer.commit();
+    abandonGuide = undefined;
+    // When storage filled up, a batch may not have been stored: what is.
     const guide =
       writer.stopped === "quota"
         ? await measureGuide(db, source)
@@ -375,8 +357,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
             programmes: writer.programmes,
             bytes: writer.bytes,
             records: 0,
-            lastDay: writer.lastStoredDay,
-            guideChannels: kept.size,
+            lastDay: writer.storedDays?.last,
           };
 
     const finishedAt = Date.now();
@@ -384,9 +365,10 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       status: "done",
       finishedAt,
       lastDoneAt: finishedAt,
-      guideChannels: guide.guideChannels,
+      guideChannels: kept.size,
       programmes: guide.programmes,
       guideBytes: guide.bytes + guide.records * RECORD_OVERHEAD,
+      guideFirstDay: writer.firstDay,
       // The guide's own last day, which may be before the last day kept.
       guideLastDay: guide.lastDay ?? writer.lastDay,
       guideTrimmed: writer.trimmed,
@@ -404,6 +386,8 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
   } catch (error) {
     const reason = error instanceof Error ? error.message || error.name : String(error);
     const message = storing ? `${reason} (while ${storing})` : reason;
+    // The guide from before stays (unless storage filled up and it went).
+    await abandonGuide?.().catch(() => {});
     await putState(db, shownState("failed", message)).catch(() => {});
     throw error;
   } finally {

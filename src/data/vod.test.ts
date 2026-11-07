@@ -3,7 +3,7 @@ import { catalog, guideWindow } from "../../scripts/test-streams/catalog.mjs";
 import { m3u } from "../../scripts/test-streams/playlist.mjs";
 import { vodLibrary, vodLines } from "../../scripts/test-streams/vod.mjs";
 import { playerApi } from "../../scripts/test-streams/xtream.mjs";
-import { deleteDb, openDb, readChannels, readImport, readVod, request } from "./db";
+import { deleteDb, openDb, prepareDb, readChannels, readImport, readVod, request } from "./db";
 import { runImport } from "./importer";
 import { episodeTitle, parseEpisodeName, vodKind, xtreamFilmInfo, xtreamSeriesInfo } from "./vod";
 import type { XtreamLogin } from "./xtream";
@@ -168,6 +168,64 @@ describe("films and series", () => {
     const db = await openDb(DB);
     expect(await readImport(db, "kept")).toMatchObject({ status: "done" });
     expect(await readVod(db, "kept")).toEqual({ source: "kept", films: [], series: [] });
+    db.close();
+  });
+
+  it("make a database again that can't be opened", async () => {
+    // A newer version than the app's can't be opened by it.
+    const newer = await request<IDBDatabase>(
+      (() => {
+        const opening = indexedDB.open(DB, 99);
+        opening.addEventListener("upgradeneeded", () => opening.result.createObjectStore("other"));
+        return opening;
+      })(),
+    );
+    newer.close();
+    expect(await prepareDb(DB)).toBe("remade");
+    const db = await openDb(DB);
+    expect(db.objectStoreNames.contains("guideIndex")).toBe(true);
+    db.close();
+    expect(await prepareDb(DB)).toBe("opened");
+  });
+
+  it("replace a version 4 database's guide, and import every source again", async () => {
+    const old = await request<IDBDatabase>(
+      (() => {
+        const opening = indexedDB.open(DB, 4);
+        opening.addEventListener("upgradeneeded", () => {
+          const db = opening.result;
+          db.createObjectStore("imports", { keyPath: "source" }).put({
+            source: "kept",
+            status: "done",
+            programmes: 10,
+            guideBytes: 100,
+            lastDoneAt: 5,
+          });
+          db.createObjectStore("channelLists", { keyPath: "source" });
+          db.createObjectStore("guideChannels", { keyPath: ["source", "id"] });
+          db.createObjectStore("guide", { keyPath: ["source", "channel", "day"] }).put({
+            source: "kept",
+            channel: "one",
+            day: 1,
+          });
+          db.createObjectStore("vod", { keyPath: "source" });
+        });
+        return opening;
+      })(),
+    );
+    old.close();
+    const db = await openDb(DB);
+    expect(await readImport(db, "kept")).toMatchObject({
+      status: "done",
+      programmes: 0,
+      guideBytes: 0,
+      lastDoneAt: 0,
+    });
+    const guide = db.transaction("guide").objectStore("guide");
+    expect(guide.keyPath).toEqual(["source", "generation", "day", "block"]);
+    expect(await request(guide.count())).toBe(0);
+    expect(db.objectStoreNames.contains("guideIndex")).toBe(true);
+    expect(db.objectStoreNames.contains("guideChannels")).toBe(false);
     db.close();
   });
 });

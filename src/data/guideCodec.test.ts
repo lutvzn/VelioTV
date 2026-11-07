@@ -1,30 +1,66 @@
 import { describe, expect, it } from "vitest";
-import { DAY, decodeDay, encodeDay, type StoredProgramme } from "./guideCodec";
+import { BlockEncoder, DAY, decodeBlock, encodeBlock, type StoredProgramme } from "./guideCodec";
 import { readText } from "./stream";
 
-describe("encodeDay", () => {
-  it("packs and unpacks a day's programmes", () => {
-    const day = 20_759;
-    const start = day * DAY;
-    const programmes: StoredProgramme[] = [
-      { start, stop: start + 1_800_000, title: "News" },
-      {
-        start: start + 1_800_000,
-        stop: start + 5_400_000,
-        title: "Film",
-        subTitle: "Part 2",
-        description: 'A long description, with "quotes" and é.',
-        categories: ["Movie", "Drama"],
-        episode: "S01E02",
-        icon: "http://img/1.jpg",
-        isNew: true,
-      },
-      // One that runs past midnight stays in the day it starts.
-      { start: start + 23 * 3_600_000, stop: start + 25 * 3_600_000, title: "Late" },
-    ];
-    const packed = encodeDay(day, programmes);
-    expect(decodeDay(day, packed)).toEqual(programmes);
+describe("guide blocks", () => {
+  const day = 20_759;
+  const start = day * DAY;
+  const programmes: StoredProgramme[] = [
+    { start: start + 600_000, stop: start + 1_800_000, title: "News" },
+    {
+      start: start + 1_800_000,
+      stop: start + 5_400_000,
+      title: "Film",
+      subTitle: "Part 2",
+      description: 'A long description, with "quotes" and é.',
+      episode: "S01E02",
+    },
+    // A gap before it, and it runs past midnight, staying in the day it starts.
+    { start: start + 23 * 3_600_000, stop: start + 25 * 3_600_000, title: "Late" },
+  ];
+
+  it("packs and unpacks channels' days", () => {
+    const other = [{ start, stop: start + 3_600_000, title: "Other" }];
+    const packed = encodeBlock(
+      day,
+      [
+        ["one", programmes],
+        ["two", other],
+      ],
+      true,
+    );
+    expect(decodeBlock(day, packed)).toEqual(
+      new Map([
+        ["one", programmes],
+        ["two", other],
+      ]),
+    );
     expect(packed.length).toBeLessThan(JSON.stringify(programmes).length);
+  });
+
+  it("leaves out subtitles and descriptions when asked, keeping episodes", () => {
+    const packed = encodeBlock(day, [["one", programmes]], false);
+    expect(decodeBlock(day, packed).get("one")?.[1]).toEqual({
+      start: start + 1_800_000,
+      stop: start + 5_400_000,
+      title: "Film",
+      episode: "S01E02",
+    });
+  });
+
+  it("merges a channel that comes in parts, in start order", () => {
+    const encoder = new BlockEncoder(day, true);
+    encoder.add("one", programmes.slice(1));
+    encoder.add("two", programmes.slice(0, 1));
+    encoder.add("one", programmes.slice(0, 1));
+    const unpacked = decodeBlock(day, encoder.finish());
+    expect(unpacked.get("one")).toEqual(programmes);
+    expect(unpacked.get("two")).toEqual(programmes.slice(0, 1));
+    expect(encoder.programmes).toBe(4);
+  });
+
+  it("packs an empty block", () => {
+    expect(decodeBlock(day, new BlockEncoder(day, true).finish())).toEqual(new Map());
   });
 });
 

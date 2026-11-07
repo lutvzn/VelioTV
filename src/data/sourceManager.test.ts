@@ -88,18 +88,25 @@ describe("the source manager", () => {
       { id: "b", ...draft("B", `${BASE}/b.m3u`) },
     ]);
     const { importer, requests } = recording();
-    manager = createSourceManager({ dbName: DB, storage, importer, guideBudgetBytes: 1000 });
+    const total = 1_000_000;
+    manager = createSourceManager({ dbName: DB, storage, importer, guideBudgetBytes: total });
     const stop = await manager.start();
     expect(manager.statusOf("b")).toMatchObject({ importing: false, queued: true });
     await manager.whenIdle();
     stop();
+    // Each gets what the others leave, and at least an equal share.
+    const held = (id: string) => manager?.statusOf(id).state?.guideBytes ?? 0;
+    expect(held("a")).toBeGreaterThan(0);
     expect(requests.map(r => r.source)).toEqual(["a", "b"]);
-    expect(requests.map(r => r.guideBudgetBytes)).toEqual([500, 500]);
+    expect(requests.map(r => r.guideBudgetBytes)).toEqual([total, Math.max(total / 2, total - held("a"))]);
 
-    // A source added later gets a share of what the others leave.
+    // A source added later too.
     const c = manager.add(draft("C", `${BASE}/b.m3u`));
     await manager.whenIdle();
-    expect(requests[2]).toMatchObject({ source: c.id, guideBudgetBytes: 333 });
+    expect(requests[2]).toMatchObject({
+      source: c.id,
+      guideBudgetBytes: Math.max(Math.floor(total / 3), total - held("a") - held("b")),
+    });
   });
 
   it("at startup, imports only the sources that are due", async () => {

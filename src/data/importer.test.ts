@@ -8,11 +8,13 @@ import {
   openDb,
   readChannels,
   readGuide,
-  readGuideChannels,
   readImport,
+  request as idbRequest,
+  sourceRange,
 } from "./db";
 import { importSource } from "./importClient";
 import { runImport, type ImportProgress } from "./importer";
+import type { GuideBlock } from "./db";
 
 const BASE = "http://test.local";
 const HOUR = 3_600_000;
@@ -68,8 +70,19 @@ afterEach(async () => {
   await deleteDb(DB);
 });
 
-// From the `after`th guide write on, writes fail as they do when storage is full.
-const fillStorageAfter = (after: number) => {
+// Every block of a source's guide, of any generation.
+const allBlocks = async (id: string) => {
+  const db = await openDb(DB);
+  const blocks = await idbRequest<GuideBlock[]>(
+    db.transaction("guide").objectStore("guide").getAll(sourceRange(id)),
+  );
+  db.close();
+  return blocks;
+};
+
+// From the `after`th write to the guide store alone (the first is the
+// import's clean-up), `times` writes fail as they do when storage is full.
+const fillStorageAfter = (after: number, times = Infinity) => {
   // Called with the database as `this` below.
   // oxlint-disable-next-line typescript/unbound-method
   const transaction = IDBDatabase.prototype.transaction;
@@ -79,7 +92,7 @@ const fillStorageAfter = (after: number) => {
     ...args: Parameters<IDBDatabase["transaction"]>
   ) {
     const opened = transaction.apply(this, args);
-    if (args[0] === "guide" && args[1] === "readwrite" && ++writes >= after) {
+    if (args[0] === "guide" && args[1] === "readwrite" && ++writes >= after && writes < after + times) {
       const full = new DOMException("Storage is full", "QuotaExceededError");
       Object.defineProperty(opened, "error", { get: () => full });
       queueMicrotask(() => opened.abort());
@@ -115,7 +128,7 @@ describe("runImport", () => {
     const db = await openDb(DB);
     expect(await readImport(db, "test")).toMatchObject({ status: "done", channels: 120 });
     expect((await readChannels(db, "test")).map(c => c.name)).toEqual(channels.map(c => c.name));
-    expect(await readGuideChannels(db, "test")).toHaveLength(result.guideChannels);
+    expect(result.guideChannels).toBe(new Set(channels.map(c => c.guideId).filter(Boolean)).size);
 
     // Each channel's guide reads back as generated, across midnight too.
     const from = window.start + 30 * HOUR;
@@ -143,7 +156,7 @@ describe("runImport", () => {
     db.close();
   });
 
-  it("refreshes in place, and keeps the old data if a refresh fails", async () => {
+  it("refreshes, and keeps the old data if a refresh fails", async () => {
     const { channels, window, files } = await source(30);
     const request = { source: "test", playlistUrl: PLAYLIST };
     await runImport(request, { dbName: DB, fetch: serve(files) });
@@ -169,7 +182,11 @@ describe("runImport", () => {
       lastDoneAt: first?.finishedAt,
     });
     expect(await readChannels(db, "test")).toHaveLength(30);
+    expect((await readGuide(db, "test", guideId, window.start, window.end)).length).toBeGreaterThan(0);
     db.close();
+    // Nothing of the failed refresh's guide is left.
+    const blocks = await allBlocks("test");
+    expect(new Set(blocks.map(block => block.generation)).size).toBe(1);
 
     // A refresh with fewer channels deletes the ones that went.
     const smaller = await source(30, 20);
@@ -179,6 +196,43 @@ describe("runImport", () => {
     expect(await readChannels(db, "test")).toHaveLength(20);
     expect(await readGuide(db, "test", guideId, window.start, window.end)).toEqual([]);
     db.close();
+    // Only the last refresh's guide is left.
+    expect(new Set((await allBlocks("test")).map(block => block.generation)).size).toBe(1);
+  });
+
+  it("stores the guide in blocks over 64 KB, but for each day's last", async () => {
+    const { files } = await source(600);
+    await runImport({ source: "test", playlistUrl: PLAYLIST }, { dbName: DB, fetch: serve(files) });
+    const blocks = await allBlocks("test");
+    const days = new Map<number, GuideBlock[]>();
+    for (const block of blocks) days.set(block.day, [...(days.get(block.day) ?? []), block]);
+    let checked = 0;
+    for (const list of days.values()) {
+      const last = Math.max(...list.map(block => block.block));
+      for (const block of list) {
+        if (block.block === last) continue;
+        expect(block.data.length).toBeGreaterThan(65_536);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("keeps descriptions only for the days near today", async () => {
+    const { channels, window, files } = await source(20);
+    // Today is the day before the guide starts: it has only tomorrow near.
+    await runImport(
+      { source: "test", playlistUrl: PLAYLIST },
+      { dbName: DB, fetch: serve(files), now: window.start - DAY },
+    );
+    const db = await openDb(DB);
+    const channel = channels.find(c => c.guideId);
+    const near = await readGuide(db, "test", channel.guideId, window.start, window.start + DAY);
+    const far = await readGuide(db, "test", channel.guideId, window.start + DAY, window.end);
+    db.close();
+    expect(near.filter(p => p.start >= window.start).every(p => p.description)).toBe(true);
+    expect(far.filter(p => p.start >= window.start + DAY).length).toBeGreaterThan(0);
+    expect(far.filter(p => p.start >= window.start + DAY).some(p => p.description)).toBe(false);
   });
 
   it("keeps as many days before today as the channels' catch-up reaches", async () => {
@@ -220,64 +274,88 @@ describe("runImport", () => {
     expect(result).toMatchObject({ status: "done", guideTrimmed: true });
     expect(result.guideBytes).toBeLessThanOrEqual(budget);
     expect(result.programmes).toBeGreaterThan(0);
+    // Today is the day kept.
+    const today = Math.floor(Date.now() / DAY);
+    expect([result.guideFirstDay, result.guideLastDay]).toEqual([today, today]);
   });
 
-  it("drops the farthest days to stay within the budget", async () => {
+  it("drops the days farthest from today to stay within the budget", async () => {
     const { channels, window, files } = await source(60);
-    const budget = 120_000;
+    const request = { source: "test", playlistUrl: PLAYLIST, guideDays: 3, guidePastDays: 1 };
+    const whole = await runImport(request, { dbName: DB, fetch: serve(files) });
+    // Room for about two of the guide's days.
+    const days = whole.guideLastDay - whole.guideFirstDay + 1;
+    const budget = Math.round((whole.guideBytes / days) * 2.2);
     const result = await runImport(
-      { source: "test", playlistUrl: PLAYLIST, guideDays: 3, guidePastDays: 1, guideBudgetBytes: budget },
+      { ...request, source: "small", guideBudgetBytes: budget },
       { dbName: DB, fetch: serve(files) },
     );
     expect(result.guideTrimmed).toBe(true);
     expect(result.guideBytes).toBeLessThanOrEqual(budget);
-    const firstDay = Math.floor(window.start / DAY);
-    expect(result.guideFirstDay).toBe(firstDay);
-    expect(result.guideLastDay).toBeLessThan(firstDay + 3);
+    // Today and yesterday stay; tomorrow and the day after go.
+    const today = Math.floor(Date.now() / DAY);
+    expect([result.guideFirstDay, result.guideLastDay]).toEqual([today - 1, today]);
     expect(result.programmes).toBeLessThan(result.programmesRead);
 
-    // The nearest days are all there; the dropped ones are gone.
+    // The days kept are all there; the dropped ones are gone.
     const db = await openDb(DB);
     const channel = channels.find(c => c.guideId);
-    const kept = (result.guideLastDay + 1) * DAY;
-    const nearest = await readGuide(db, "test", channel.guideId, window.start, kept);
-    const expected = programmesBetween(channel, window, window.start, kept);
-    expect(nearest.map(p => p.start)).toEqual(
-      expected
-        .filter(p => p.start >= firstDay * DAY && Math.floor(p.start / DAY) <= result.guideLastDay)
-        .map(p => p.start),
-    );
-    const later = await readGuide(db, "test", channel.guideId, kept + DAY, window.end);
-    expect(later.filter(p => p.start >= kept + DAY)).toEqual([]);
+    const from = (today - 1) * DAY;
+    const to = (today + 1) * DAY;
+    const kept = await readGuide(db, "small", channel.guideId, from, to);
+    const expected = programmesBetween(channel, window, from, to).filter(p => p.start >= from);
+    expect(kept.filter(p => p.start >= from).map(p => p.start)).toEqual(expected.map(p => p.start));
+    const later = await readGuide(db, "small", channel.guideId, to, window.end + DAY);
+    expect(later.filter(p => p.start >= to)).toEqual([]);
     db.close();
   });
 });
 
+// Enough channels for a few batches of blocks.
+const big = () => source(1500);
+
 describe("full storage", () => {
-  it("keeps the old guide of the channels a refresh didn't reach", async () => {
-    const { channels, window, files } = await source(300);
+  it("deletes the old guide early to make room for the new one", async () => {
+    const { channels, window, files } = await big();
     const request = { source: "test", playlistUrl: PLAYLIST };
     const first = await runImport(request, { dbName: DB, fetch: serve(files) });
-    let db = await openDb(DB);
-    const before = await measureGuide(db, "test");
-    db.close();
 
-    // The refresh stores its first guide batch, and then storage is full.
-    fillStorageAfter(2);
+    // The refresh's first batch doesn't fit beside the old guide.
+    fillStorageAfter(2, 1);
     const result = await runImport(request, { dbName: DB, fetch: serveInChunks(files) });
     vi.restoreAllMocks();
-    expect(result).toMatchObject({ status: "done", channels: 300, guideTrimmed: true });
-    expect(result.guideChannels).toBe(first.guideChannels);
-    db = await openDb(DB);
-    const after = await measureGuide(db, "test");
-    expect(after.records).toBe(before.records);
-    expect(result.programmes).toBe(after.programmes);
-    // Only the channel's day split across the two batches lost the part the
-    // second one had.
-    expect(after.programmes).toBeGreaterThan(before.programmes - 50);
+    expect(result).toMatchObject({ status: "done", guideTrimmed: false, programmes: first.programmes });
+    const blocks = await allBlocks("test");
+    expect(new Set(blocks.map(block => block.generation))).toEqual(new Set([2]));
+    const db = await openDb(DB);
     const last = channels.findLast(channel => channel.guideId);
     expect((await readGuide(db, "test", last.guideId, window.start, window.end)).length).toBeGreaterThan(0);
     db.close();
+  });
+
+  it("stops storing when even that isn't enough, and keeps what it stored", async () => {
+    const { channels, window, files } = await big();
+    const request = { source: "test", playlistUrl: PLAYLIST };
+    const first = await runImport(request, { dbName: DB, fetch: serve(files) });
+
+    // The refresh stores its first batch, and then storage is full.
+    fillStorageAfter(3);
+    const result = await runImport(request, { dbName: DB, fetch: serveInChunks(files) });
+    vi.restoreAllMocks();
+    expect(result).toMatchObject({ status: "done", channels: 1500, guideTrimmed: true });
+    expect(result.guideChannels).toBe(first.guideChannels);
+    const db = await openDb(DB);
+    const after = await measureGuide(db, "test");
+    expect(result.programmes).toBe(after.programmes);
+    expect(after.programmes).toBeGreaterThan(0);
+    expect(after.programmes).toBeLessThan(first.programmes);
+    // The first channels have their guide; the old one went to make room.
+    const firstChannel = channels.find(channel => channel.guideId);
+    expect(
+      (await readGuide(db, "test", firstChannel.guideId, window.start, window.end)).length,
+    ).toBeGreaterThan(0);
+    db.close();
+    expect(new Set((await allBlocks("test")).map(block => block.generation))).toEqual(new Set([2]));
   });
 });
 

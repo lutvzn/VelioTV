@@ -1,15 +1,20 @@
-// Reads guide days from the store and unpacks them. It runs in the guide
-// worker (guide.worker.ts), so that unpacking, which took 62-103 ms for a
-// guide screen on the TV's main thread (PLAN.md, Phase 2), never holds up the
-// UI.
+// Reads guide blocks from the store and unpacks them. It runs in the guide
+// worker (guide.worker.ts), so that unpacking never holds up the UI.
 //
-// The store keeps a record per guide channel per day of start times, so a
-// day's programmes are that day's record plus the end of the day before's.
-// Unpacked records are kept for a while, so reading the next day of a channel
-// reuses the day it shares.
+// Each source's guide index says which block holds a channel's day (db.ts);
+// a day's programmes are that day's block plus the end of the day before's.
+// The index and the last few unpacked blocks are kept, so the channels next
+// to one just read, and its other days, mostly cost nothing.
 
-import { DAY, type GuideDay, request } from "./db";
-import { decodeDay, type StoredProgramme } from "./guideCodec";
+import {
+  type BlockKey,
+  createLookup,
+  type GuideBlock,
+  type GuideIndex,
+  type GuideLookup,
+  request,
+} from "./db";
+import { DAY, decodeBlock, type StoredProgramme } from "./guideCodec";
 
 export interface DayRequest {
   source: string;
@@ -25,16 +30,17 @@ export interface ReadStats {
   getMs: number;
   /** Unpacking them. */
   decodeMs: number;
-  /** Records unpacked; the others were kept from earlier reads or don't exist. */
+  /** Blocks unpacked; the others were kept from earlier reads. */
   decoded: number;
 }
 
-const keyOf = (source: string, channel: string, day: number) => `${source}\n${channel}\n${day}`;
+const textOf = (key: BlockKey) => key.join("\n");
 
 export const createGuideReader = (openDb: () => Promise<IDBDatabase>, options: { keep?: number } = {}) => {
-  const keep = options.keep ?? 100;
-  // Unpacked records, in order of use, oldest first.
-  const unpacked = new Map<string, StoredProgramme[]>();
+  const keep = options.keep ?? 8;
+  // Unpacked blocks, in order of use, oldest first.
+  const unpacked = new Map<string, Map<string, StoredProgramme[]>>();
+  const lookups = new Map<string, GuideLookup | undefined>();
   let db: Promise<IDBDatabase> | undefined;
 
   const connect = () =>
@@ -47,9 +53,9 @@ export const createGuideReader = (openDb: () => Promise<IDBDatabase>, options: {
       return opened;
     }));
 
-  const remember = (key: string, programmes: StoredProgramme[]) => {
+  const remember = (key: string, channels: Map<string, StoredProgramme[]>) => {
     unpacked.delete(key);
-    unpacked.set(key, programmes);
+    unpacked.set(key, channels);
     while (unpacked.size > keep) {
       const oldest = unpacked.keys().next().value;
       if (oldest === undefined) break;
@@ -60,45 +66,64 @@ export const createGuideReader = (openDb: () => Promise<IDBDatabase>, options: {
   /** The programmes that overlap each requested UTC day, in start order. */
   const read = async (requests: DayRequest[]) => {
     const stats: ReadStats = { getMs: 0, decodeMs: 0, decoded: 0 };
-    // Each request needs its day's record and the day before's.
-    const found = new Map<string, StoredProgramme[]>();
-    const wanted = new Map<string, DayRequest>();
-    for (const { source, channel, day } of requests) {
-      for (const d of [day - 1, day]) {
-        const key = keyOf(source, channel, d);
-        const kept = unpacked.get(key);
-        if (kept) found.set(key, kept);
-        else wanted.set(key, { source, channel, day: d });
-      }
+    const opened = await connect();
+    const started = performance.now();
+
+    const sources = [...new Set(requests.map(r => r.source))].filter(source => !lookups.has(source));
+    if (sources.length > 0) {
+      const store = opened.transaction("guideIndex").objectStore("guideIndex");
+      const indexes = await Promise.all(
+        sources.map(source => request<GuideIndex | undefined>(store.get(source))),
+      );
+      sources.forEach((source, i) => {
+        const index = indexes[i];
+        lookups.set(source, index && createLookup(index));
+      });
     }
 
+    // Each request needs its day's block and the day before's.
+    const keysOf = ({ source, channel, day }: DayRequest) => {
+      const keys: BlockKey[] = [];
+      for (const d of [day - 1, day]) {
+        const key = lookups.get(source)?.blockKey(channel, d);
+        if (key) keys.push(key);
+      }
+      return keys;
+    };
+    const wanted = new Map<string, BlockKey>();
+    for (const r of requests) {
+      for (const key of keysOf(r)) if (!unpacked.has(textOf(key))) wanted.set(textOf(key), key);
+    }
+    const found = new Map<string, Map<string, StoredProgramme[]>>();
     if (wanted.size > 0) {
-      const opened = await connect();
-      const started = performance.now();
       const store = opened.transaction("guide").objectStore("guide");
-      const records = await Promise.all(
-        Array.from(wanted.values(), ({ source, channel, day }) =>
-          request<GuideDay | undefined>(store.get([source, channel, day])),
-        ),
+      const blocks = await Promise.all(
+        Array.from(wanted.values(), key => request<GuideBlock | undefined>(store.get(key))),
       );
       const got = performance.now();
       stats.getMs = got - started;
       let i = 0;
-      for (const key of wanted.keys()) {
-        const record = records[i++];
-        // A day with no record has no programmes.
-        found.set(key, record ? decodeDay(record.day, record.data) : []);
-        if (record) stats.decoded++;
+      for (const [text, key] of wanted) {
+        const block = blocks[i++];
+        if (block) {
+          found.set(text, decodeBlock(block.day, block.data));
+          stats.decoded++;
+        } else {
+          // An import replaced the guide since its index was read.
+          lookups.delete(key[0]);
+        }
       }
       stats.decodeMs = performance.now() - got;
     }
-    for (const [key, programmes] of found) remember(key, programmes);
+    for (const [text, channels] of found) remember(text, channels);
 
-    const days = requests.map(({ source, channel, day }) => {
-      const before = found.get(keyOf(source, channel, day - 1)) ?? [];
-      const today = found.get(keyOf(source, channel, day)) ?? [];
-      const from = day * DAY;
-      const programmes = before.filter(p => p.stop > from).concat(today);
+    const days = requests.map(r => {
+      const from = r.day * DAY;
+      const programmes: StoredProgramme[] = [];
+      for (const key of keysOf(r)) {
+        const list = (unpacked.get(textOf(key)) ?? found.get(textOf(key)))?.get(r.channel) ?? [];
+        for (const p of list) if (p.stop > from && p.start < from + DAY) programmes.push(p);
+      }
       // toSorted() needs Chromium 110; older TVs are still targets.
       // oxlint-disable-next-line unicorn/no-array-sort
       return programmes.sort((a, b) => a.start - b.start);
@@ -108,7 +133,10 @@ export const createGuideReader = (openDb: () => Promise<IDBDatabase>, options: {
 
   return {
     read,
-    /** Forgets what was unpacked, such as after an import replaced the guide. */
-    clear: () => unpacked.clear(),
+    /** Forgets what was read, such as after an import replaced the guide. */
+    clear: () => {
+      unpacked.clear();
+      lookups.clear();
+    },
   };
 };

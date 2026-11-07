@@ -169,13 +169,11 @@ export const refreshDue = (source: Source, state: ImportState | undefined, now: 
 
 /**
  * The guide budget for importing one source, out of the total for all of
- * them: an equal share, or less if the others already hold more than theirs
- * (they shrink to their share at their next refresh).
+ * them: what the others leave, and at least an equal share. A source with a
+ * small guide leaves the rest to the others, and one that took more shrinks
+ * to its share at its next refresh if the others have grown. Until then the
+ * guides can hold more than the total, by up to a share; if storage runs
+ * out, the import keeps what fitted (guideWriter.ts).
  */
-export const guideBudget = (total: number, sourceCount: number, othersBytes: number) => {
-  const share = Math.floor(total / Math.max(1, sourceCount));
-  const free = total - othersBytes;
-  // Some guide even when the others hold it all; if that runs out of space,
-  // the import keeps what fitted.
-  return Math.max(Math.min(share, free), Math.floor(share / 4));
-};
+export const guideBudget = (total: number, sourceCount: number, othersBytes: number) =>
+  Math.max(Math.floor(total / Math.max(1, sourceCount)), total - othersBytes);

@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { DAY, deleteDb, finished, type GuideDay, openDb, readGuide, writeTransaction } from "./db";
+import {
+  DAY,
+  deleteDb,
+  finished,
+  type GuideBlock,
+  type GuideIndex,
+  openDb,
+  readGuide,
+  writeTransaction,
+} from "./db";
 import { createGuideClient, type GuideClient } from "./guideClient";
-import { encodeDay, type StoredProgramme } from "./guideCodec";
+import { encodeBlock, type StoredProgramme } from "./guideCodec";
 
 const DB = "tiviplayer-guide-test";
 const HOUR = 3_600_000;
@@ -21,14 +30,28 @@ const second = [
   { ...show("Film", day + 1, 20), description: "A film." },
 ];
 
+const block = (d: number, programmes: StoredProgramme[]): GuideBlock => ({
+  source: "s",
+  generation: 1,
+  day: d,
+  block: 0,
+  channels: 1,
+  count: programmes.length,
+  data: encodeBlock(d, [["one", programmes]], true),
+});
+
 const store = async () => {
   const db = await openDb(DB);
-  const transaction = writeTransaction(db, "guide");
-  const records: GuideDay[] = [
-    { source: "s", channel: "one", day, count: first.length, data: encodeDay(day, first) },
-    { source: "s", channel: "one", day: day + 1, count: second.length, data: encodeDay(day + 1, second) },
-  ];
-  for (const record of records) transaction.objectStore("guide").put(record);
+  const transaction = writeTransaction(db, ["guide", "guideIndex"]);
+  for (const record of [block(day, first), block(day + 1, second)])
+    transaction.objectStore("guide").put(record);
+  const index: GuideIndex = {
+    source: "s",
+    generation: 1,
+    channels: ["one"],
+    days: { [day]: [0], [day + 1]: [0] },
+  };
+  transaction.objectStore("guideIndex").put(index);
   await finished(transaction);
   return db;
 };

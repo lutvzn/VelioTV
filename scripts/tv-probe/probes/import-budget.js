@@ -9,6 +9,7 @@
 //   "source": "Test 10k"   the source's name
 //   "budgetMb": 10         the guide budget
 //   "days": 2              guide days from today
+//   "sizes": true          also report every store's size by source, before deleting
 //   "enable": true         only turn the source on again
 
 async function probe(input) {
@@ -24,6 +25,39 @@ async function probe(input) {
   }
   library.setDisabled(source.id, true);
   await library.whenIdle();
+
+  // Each store's records, by source: their count and roughly their bytes
+  // (strings at a byte a character, numbers 8, binary its length).
+  const sizeOf = value => {
+    if (typeof value === "string") return value.length;
+    if (typeof value === "number") return 8;
+    if (typeof value === "boolean" || value === null || value === undefined) return 1;
+    if (ArrayBuffer.isView(value)) return value.byteLength;
+    if (Array.isArray(value)) return value.reduce((total, item) => total + sizeOf(item), 0);
+    return Object.entries(value).reduce((total, [key, item]) => total + key.length + sizeOf(item), 0);
+  };
+  const sizes = async db => {
+    const out = {};
+    for (const name of db.objectStoreNames) {
+      await new Promise((resolve, reject) => {
+        const r = db.transaction(name).objectStore(name).openCursor();
+        r.addEventListener("success", () => {
+          const cursor = r.result;
+          if (!cursor) return resolve();
+          const owner = Array.isArray(cursor.key) ? cursor.key[0] : cursor.key;
+          const row = ((out[name] ??= {})[owner] ??= { records: 0, mb: 0 });
+          row.records++;
+          row.mb += sizeOf(cursor.value) / 1e6;
+          cursor.continue();
+        });
+        r.addEventListener("error", () => reject(r.error));
+      });
+    }
+    for (const bySource of Object.values(out))
+      for (const row of Object.values(bySource)) row.mb = Math.round(row.mb * 100) / 100;
+    const { usage, quota } = await navigator.storage.estimate();
+    return { stores: out, usageMb: Math.round(usage / 1e5) / 10, quotaMb: Math.round(quota / 1e5) / 10 };
+  };
 
   const id = "probe-budget";
   const request = {
@@ -70,6 +104,7 @@ async function probe(input) {
   await sleep(2000);
   const db = await data.openDb();
   const measured = await data.measureGuide(db, id);
+  if (input.sizes) result.sizes = await sizes(db);
   log(`${seconds()} s: guide measured`, measured);
   await data.deleteSource(db, id);
   db.close();
@@ -77,6 +112,7 @@ async function probe(input) {
   const { status, error, programmes, programmesRead, guideBytes, guideFirstDay, guideLastDay, guideTrimmed } =
     result;
   return {
+    sizes: result.sizes,
     seconds: seconds(),
     status,
     error,

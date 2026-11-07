@@ -134,12 +134,11 @@ describe("refreshDue", () => {
 });
 
 describe("guideBudget", () => {
-  it("gives each source an equal share, less what the others hold over theirs", () => {
+  it("gives each source what the others leave, and at least an equal share", () => {
     expect(guideBudget(100, 1, 0)).toBe(100);
-    expect(guideBudget(100, 2, 0)).toBe(50);
-    expect(guideBudget(100, 2, 40)).toBe(50);
-    expect(guideBudget(100, 2, 70)).toBe(30);
-    // Never less than a quarter of a share.
-    expect(guideBudget(100, 2, 100)).toBe(12);
+    expect(guideBudget(100, 2, 0)).toBe(100);
+    expect(guideBudget(100, 2, 40)).toBe(60);
+    expect(guideBudget(100, 2, 70)).toBe(50);
+    expect(guideBudget(100, 5, 100)).toBe(20);
   });
 });
