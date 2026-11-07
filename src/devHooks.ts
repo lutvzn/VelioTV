@@ -14,6 +14,7 @@ import {
   edits,
   guide,
   guideReader,
+  isBlocked,
   library,
   lineup,
   liveView,
@@ -25,6 +26,7 @@ import {
 } from "./library";
 import { handPlay } from "./play/session";
 import { player, secondPlayer } from "./player";
+import { smallVideoWindow, videoWindow } from "./videoWindow";
 
 const hooks: Record<string, unknown> = {
   importSource,
@@ -33,6 +35,9 @@ const hooks: Record<string, unknown> = {
   lineup,
   player,
   secondPlayer,
+  videoWindow,
+  smallVideoWindow,
+  isBlocked,
   guide,
   guideReader,
   createGuideClient,

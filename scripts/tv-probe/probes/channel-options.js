@@ -6,7 +6,8 @@
 // In order: the ids (all unique, how each was keyed, how long keying the
 // whole lineup takes, and whether they match the last run's); holding OK in
 // full screen opens the playing channel's options, and OK there makes it a
-// favourite; a quick OK still opens the channel list; Back to the guide,
+// favourite; a quick OK shows or hides the channel's card, and Left opens
+// the channel list; Back to the guide,
 // where the Tools key opens the highlighted channel's options and Back
 // closes them; holding OK there and OK removes the favourite again.
 //
@@ -21,7 +22,7 @@ async function probe(input) {
   const { lineup, edits } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));
-  const KEYS = { down: 40, enter: 13, back: 10009, tools: 10135 };
+  const KEYS = { left: 37, down: 40, enter: 13, back: 10009, tools: 10135 };
   const send = (type, keyCode) => document.dispatchEvent(new KeyboardEvent(type, { keyCode, bubbles: true }));
   const press = keyCode => {
     send("keydown", keyCode);
@@ -97,10 +98,18 @@ async function probe(input) {
   };
   log("full screen", results.fullScreen);
 
-  // A quick OK still opens the list; Back closes it.
+  // A quick OK shows the channel's card, and again hides it; Left opens the
+  // list, and Back closes it.
+  const cardBefore = live().bannerShown();
   press(KEYS.enter);
   await sleep(300);
-  results.tap = { listOpen: live().listOpen(), options: !!live().optionsFor() };
+  results.tap = { card: live().bannerShown() !== cardBefore, options: !!live().optionsFor() };
+  press(KEYS.enter);
+  await sleep(300);
+  results.tap.cardBack = live().bannerShown() === cardBefore;
+  press(KEYS.left);
+  await sleep(300);
+  results.tap.listOpen = live().listOpen();
   press(KEYS.back);
   await sleep(300);
   results.tap.listClosed = !live().listOpen();

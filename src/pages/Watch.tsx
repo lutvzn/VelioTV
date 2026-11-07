@@ -35,9 +35,10 @@ import { TrackPanel } from "./live/TrackPanel";
 // Guide.tsx, the Live TV page) opens a channel here.
 //
 // Up and Down (and the channel keys) zap, with the banner following each
-// press and the stream changing once they stop; OK or the channel-list key
-// opens the list over the video, where Left and Right change group; Right
-// opens the audio and subtitle choices (step 5); Info shows the banner;
+// press and the stream changing once they stop; Left or the channel-list
+// key opens the list over the video, where Left and Right change group, and
+// OK picks; Right opens the audio and subtitle choices (step 5); OK or Info
+// shows or hides the banner, the channel's card (decided 2026-11-07);
 // number keys pick a channel by number. Holding OK, or the Tools key, opens
 // the options for the channel playing or highlighted (Phase 5, step 1). Back closes whatever is open, and
 // then goes to the guide, on the channel playing; the Guide key goes there
@@ -320,9 +321,10 @@ export default () => {
   };
 
   // A second channel in a small window (PLAN.md, Phase 7, step 3), without
-  // sound, on TVs with a second player; the main one keeps the keys. While
-  // the main stream opens, the small one waits, as the two opening at once
-  // can't share the TV's decoders.
+  // sound, on TVs with a second player; the main one keeps the keys. Each
+  // time the main stream opens (a zap, a reconnect, a swap), the small one
+  // closes first and opens again once the main one plays: opened the other
+  // way round, or left playing, the TV may draw the main picture over it.
   const [smallChannel, setSmallChannel] = createSignal<Channel>();
   const [smallWaiting, setSmallWaiting] = createSignal(false);
   const [corner, setCorner] = createSignal(0);
@@ -338,10 +340,24 @@ export default () => {
     const channel = smallChannel();
     if (!smallWaiting() || !channel) return;
     const { state } = player.status();
-    if (state !== "playing" && state !== "failed") return;
+    // A locked channel stops the main one, with nothing to wait for.
+    if (state !== "playing" && state !== "failed" && !(state === "idle" && lockedChannel())) return;
     setSmallWaiting(false);
     void secondPlayer.play(channelStream(channel));
   });
+  // The main stream opening: the small one waits for it. (player.play() says
+  // "starting" before the main player opens, after the next frame.)
+  createEffect(
+    on(
+      () => player.status().state,
+      state => {
+        if (!smallChannel() || smallWaiting()) return;
+        if (state !== "starting" && state !== "reconnecting") return;
+        secondPlayer.stop();
+        setSmallWaiting(true);
+      },
+    ),
+  );
   const closeSmall = () => {
     secondPlayer.stop();
     setSmallWaiting(false);
@@ -419,9 +435,8 @@ export default () => {
       setListOpen(false);
       if (channel) zapper.tune(channel, listGroup());
       showBanner();
-    } else {
-      openList();
-    }
+    } else if (bannerShown()) hideBanner();
+    else showBanner();
   };
   const [holdEnter, releaseEnter] = useHold({
     onEnter: pressEnter,
@@ -508,6 +523,7 @@ export default () => {
         if (!watching()) return false;
         if (tracksOpen()) setTracksOpen(false);
         else if (listOpen()) changeGroup(-1);
+        else openList();
         return true;
       }}
       onRight={() => {

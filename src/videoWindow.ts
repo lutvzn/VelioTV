@@ -13,6 +13,11 @@ export interface Rect {
 // src/pages/App.tsx.
 export const [videoWindow, setVideoWindow] = createSignal<Rect | null>(null);
 
+// The small window's (PLAN.md, Phase 7, step 3). It sits inside the main
+// video's window, so it only needs a hole of its own while the main one has
+// none, as on a locked channel.
+export const [smallVideoWindow, setSmallVideoWindow] = createSignal<Rect | null>(null);
+
 export const FULL_SCREEN: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
 
 // Whether video fills the screen, in which case the app hides its menu.

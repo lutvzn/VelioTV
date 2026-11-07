@@ -9,7 +9,7 @@ import { device } from "../device";
 import { library } from "../library";
 import { SECTIONS } from "../sections";
 import { $t } from "../translate";
-import { videoFillsScreen, videoWindow } from "../videoWindow";
+import { smallVideoWindow, videoFillsScreen, videoWindow } from "../videoWindow";
 import { progressSummary } from "./settings/status";
 
 declare module "@solidtv/solid/primitives" {
@@ -34,9 +34,10 @@ declare global {
   }
 }
 
-// The background's hole for the video window; an empty hole when there's none.
+// The background's hole for the video window, or else the small window's; an
+// empty hole when there's neither.
 const backgroundHole = () => {
-  const video = videoWindow();
+  const video = videoWindow() ?? smallVideoWindow();
   if (!video) return { x: 0, y: 0, w: 0, h: 0 };
   return { x: video.x, y: video.y, w: video.width, h: video.height };
 };

@@ -130,7 +130,7 @@ async function probe(input) {
   // The channel list: open it, scroll, change group, pick a channel.
   await sleep(1000);
   section();
-  press(KEYS.enter);
+  press(KEYS.left);
   await sleep(500);
   log("list opened", { at: Math.round(performance.now()) });
   for (let i = 0; i < 30; i++) {

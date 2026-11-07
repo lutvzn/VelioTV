@@ -2,7 +2,7 @@
 // (src/pages/Watch.tsx), through its options, with the remote's keys. It
 // needs the test server's sources (the `sources` probe). About 50 s.
 //
-// 1. OK opens the list; Down, then holding OK on another channel and
+// 1. Left opens the list; Down, then holding OK on another channel and
 //    choosing "Watch in a small window" plays it in the top right corner,
 //    without sound, and the list closes. Both play.
 // 2. Channel up zaps the main channel; the small one plays on.
@@ -41,7 +41,7 @@ async function probe(input) {
     send("keyup", keyCode);
     await sleep(300);
   };
-  const KEY = { up: 38, down: 40, enter: 13, back: 10009, channelUp: 427 };
+  const KEY = { up: 38, down: 40, left: 37, enter: 13, back: 10009, channelUp: 427 };
   const live = () => app.live;
   const options = () => app.channelOptions;
   const look = () => sleep((input.look ?? 0) * 1000);
@@ -85,7 +85,7 @@ async function probe(input) {
   {
     const step = {};
     result.open = step;
-    press(KEY.enter);
+    press(KEY.left);
     await sleep(400);
     step.listOpen = live().listOpen();
     for (let i = 0; i < 10; i++) {
