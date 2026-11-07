@@ -14,17 +14,20 @@
 // that day's programmes compressed (guideCodec.ts), written with relaxed
 // durability, which was about 20 times faster on the TV than one record per
 // programme.
+//
+// A source's films and series are one record too (vod.ts; PLAN.md, Phase 6).
 
 import { type ChannelColumns, fromColumns, type StoredChannel, toColumns } from "./channelList";
 import { DAY, decodeDay, type StoredProgramme } from "./guideCodec";
 import type { GuideChannel, PlaylistChannel } from "./types";
+import type { StoredVod } from "./vod";
 import type { XtreamAccount } from "./xtream";
 
 export { DAY, type StoredChannel, type StoredProgramme };
 
 export const DB_NAME = "tiviplayer";
-const VERSION = 3;
-const STORES = ["imports", "channelLists", "guideChannels", "guide"];
+const VERSION = 4;
+const STORES = ["imports", "channelLists", "guideChannels", "guide", "vod"];
 
 /** How a source's last import went. */
 export interface ImportState {
@@ -52,6 +55,9 @@ export interface ImportState {
   guideTrimmed: boolean;
   /** An Xtream account's details, from its last import. */
   account?: XtreamAccount;
+  /** Films and series stored, from imports since Phase 6. */
+  films?: number;
+  series?: number;
 }
 
 export interface StoredChannelList {
@@ -99,16 +105,21 @@ export const isQuotaError = (error: unknown) =>
 
 export const openDb = (name = DB_NAME): Promise<IDBDatabase> => {
   const r = indexedDB.open(name, VERSION);
-  r.addEventListener("upgradeneeded", () => {
+  r.addEventListener("upgradeneeded", event => {
     const db = r.result;
-    // Earlier versions (records keyed by import id, then a record per
-    // channel) hold nothing that can't be imported again, and without their
-    // import states the app imports every source again at its next check.
-    for (const store of Array.from(db.objectStoreNames)) db.deleteObjectStore(store);
-    db.createObjectStore("imports", { keyPath: "source" });
-    db.createObjectStore("channelLists", { keyPath: "source" });
-    db.createObjectStore("guideChannels", { keyPath: ["source", "id"] });
-    db.createObjectStore("guide", { keyPath: ["source", "channel", "day"] });
+    if (event.oldVersion < 3) {
+      // Earlier versions (records keyed by import id, then a record per
+      // channel) hold nothing that can't be imported again, and without their
+      // import states the app imports every source again at its next check.
+      for (const store of Array.from(db.objectStoreNames)) db.deleteObjectStore(store);
+      db.createObjectStore("imports", { keyPath: "source" });
+      db.createObjectStore("channelLists", { keyPath: "source" });
+      db.createObjectStore("guideChannels", { keyPath: ["source", "id"] });
+      db.createObjectStore("guide", { keyPath: ["source", "channel", "day"] });
+    }
+    // Version 4 adds films and series, keeping what version 3 holds; they
+    // come with each source's next import.
+    if (!db.objectStoreNames.contains("vod")) db.createObjectStore("vod", { keyPath: "source" });
   });
   return request(r);
 };
@@ -131,6 +142,19 @@ export const writeChannels = async (db: IDBDatabase, source: string, channels: P
   const list: StoredChannelList = { source, columns: toColumns(channels) };
   transaction.objectStore("channelLists").put(list);
   await finished(transaction);
+};
+
+/** Replaces a source's films and series. */
+export const writeVod = async (db: IDBDatabase, vod: StoredVod) => {
+  const transaction = writeTransaction(db, "vod");
+  transaction.objectStore("vod").put(vod);
+  await finished(transaction);
+};
+
+/** A source's films and series; empty if it has none, or hasn't been imported since Phase 6. */
+export const readVod = async (db: IDBDatabase, source: string): Promise<StoredVod> => {
+  const stored = await request<StoredVod | undefined>(db.transaction("vod").objectStore("vod").get(source));
+  return stored ?? { source, films: [], series: [] };
 };
 
 /** A source's channels, in playlist order. */
@@ -171,6 +195,7 @@ export const deleteSource = async (db: IDBDatabase, source: string) => {
     transaction.objectStore(store).delete(sourceRange(source));
   }
   transaction.objectStore("channelLists").delete(source);
+  transaction.objectStore("vod").delete(source);
   transaction.objectStore("imports").delete(source);
   await finished(transaction);
 };

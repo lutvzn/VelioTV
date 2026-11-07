@@ -26,6 +26,8 @@ export interface XtreamAccount {
   isTrial?: boolean;
   /** The stream formats the account allows, such as "ts" and "m3u8". */
   formats: string[];
+  /** The server's time zone, such as "Europe/London", which its catch-up times are in. */
+  timeZone?: string;
 }
 
 type Json = Record<string, unknown>;
@@ -96,6 +98,9 @@ export const xtreamAccount = async (login: XtreamLogin, fetcher: typeof fetch): 
   const active = number(user.active_cons);
   if (active !== undefined) account.activeConnections = active;
   if (user.is_trial !== undefined) account.isTrial = number(user.is_trial) === 1;
+  const server = isObject(reply) && isObject(reply.server_info) ? reply.server_info : undefined;
+  const timeZone = text(server?.timezone);
+  if (timeZone) account.timeZone = timeZone;
   return account;
 };
 

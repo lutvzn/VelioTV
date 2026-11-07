@@ -4,10 +4,12 @@
 // ordering and sorting groups. Each reads the edits as it shows, so it
 // follows the changes it makes.
 
+import { inArchive } from "../../data/catchup";
 import { CUSTOM_GROUP, GROUP_SORTS, type GroupSort } from "../../data/channelEdits";
+import type { StoredProgramme } from "../../data/guideCodec";
 import type { Channel } from "../../data/lineup";
 import { FAVOURITES } from "../../live/groups";
-import { edits, groupTitle, liveView, settings } from "../../library";
+import { edits, groupTitle, liveView, reminders, settings } from "../../library";
 import { askPin } from "../../pin";
 import { editText } from "../../textEntry";
 import { $t } from "../../translate";
@@ -90,6 +92,44 @@ const moveToMenu = (channel: Channel): Menu => ({
     ];
   },
 });
+
+/**
+ * A programme's options, for a channel's menu (PLAN.md, Phase 6): watching
+ * it from the start from the channel's catch-up, once it has begun, or a
+ * reminder, before it starts.
+ */
+export const programmeOptions = (
+  channel: Channel,
+  programme: StoredProgramme | undefined,
+  now: number,
+  watchFromStart: (programme: StoredProgramme) => void,
+): MenuOption[] => {
+  if (!programme) return [];
+  if (inArchive(channel, programme.start, now)) {
+    return [
+      {
+        id: "fromStart",
+        label: programme.stop > now ? $t("options.fromStart") : $t("options.playRecording"),
+        run: () => watchFromStart(programme),
+      },
+    ];
+  }
+  if (programme.start <= now) return [];
+  const reminder = {
+    channelId: channel.id,
+    channelName: channel.name,
+    title: programme.title,
+    start: programme.start,
+    stop: programme.stop,
+  };
+  return [
+    {
+      id: "remind",
+      label: reminders.has(channel.id, programme.start) ? $t("options.noReminder") : $t("options.remind"),
+      run: () => reminders.toggle(reminder),
+    },
+  ];
+};
 
 /** A channel's options; `extra` are the page's own, after the first. */
 export const channelMenu = (channel: Channel, extra: MenuOption[] = []): Menu => ({

@@ -7,6 +7,27 @@ const parts = {
   sources: [{ id: "a", name: "A", kind: "m3u" as const, url: "http://a/p.m3u", refreshHours: 24 }],
   edits: { ...emptyEdits(), favourites: ["a/n:one"] },
   settings: { ...defaultSettings(), pin: "1234" },
+  watched: [
+    {
+      key: "a/m:1",
+      kind: "film" as const,
+      title: "F",
+      positionMs: 60_000,
+      durationMs: 1,
+      updatedAt: 3,
+      finished: false,
+    },
+  ],
+  // In 2100, so it hasn't ended.
+  reminders: [
+    {
+      channelId: "a/n:one",
+      channelName: "One",
+      title: "T",
+      start: 4_102_444_800_000,
+      stop: 4_102_446_600_000,
+    },
+  ],
 };
 
 describe("backups", () => {
@@ -32,6 +53,9 @@ describe("backups", () => {
     const read = readBackup({ ...makeBackup(parts, 5), sources: [{ id: 1 }, ...parts.sources], edits: "x" });
     expect(read.sources).toEqual(parts.sources);
     expect(read.edits).toEqual(emptyEdits());
+    // Backups from before Phase 6 have neither.
+    const older = readBackup({ ...makeBackup(parts, 5), watched: undefined, reminders: undefined });
+    expect([older.watched, older.reminders]).toEqual([[], []]);
     expect(() => readBackup({ app: "other" })).toThrow("backup.problem.notBackup");
     expect(() => readBackup({ app: "tiviplayer", version: 2 })).toThrow("backup.problem.version");
   });

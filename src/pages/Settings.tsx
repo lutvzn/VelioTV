@@ -10,19 +10,21 @@ import { AppPage } from "./settings/AppPage";
 import { BackupPage } from "./settings/BackupPage";
 import { HiddenPage } from "./settings/HiddenPage";
 import { PinPage } from "./settings/PinPage";
+import { RemindersPage } from "./settings/RemindersPage";
 import { SourceForm } from "./settings/SourceForm";
 import { progressFraction, statusLines } from "./settings/status";
 
 // Settings: the sources, in the order the lineup takes them, then pages for
-// hidden channels and groups, the parental PIN, the app's own settings, and
-// backup and restore (PLAN.md, Phase 5). Each opens in the list's place, and
+// hidden channels and groups, the parental PIN, the app's own settings,
+// backup and restore (PLAN.md, Phase 5), and the reminders (Phase 6). Each opens in the list's place, and
 // Back comes back to the row it was opened from.
 
-type Page = "hidden" | "pin" | "app" | "backup";
+type Page = "hidden" | "pin" | "app" | "reminders" | "backup";
 const PAGES: { page: Page; label: string }[] = [
   { page: "hidden", label: "settings.hidden" },
   { page: "pin", label: "settings.pin" },
   { page: "app", label: "settings.app" },
+  { page: "reminders", label: "settings.reminders" },
   { page: "backup", label: "settings.backup" },
 ];
 
@@ -197,6 +199,9 @@ export default () => {
           </Match>
           <Match when={page() === "app"}>
             <AppPage onClose={close} />
+          </Match>
+          <Match when={page() === "reminders"}>
+            <RemindersPage onClose={close} />
           </Match>
           <Match when={page() === "backup"}>
             <BackupPage onClose={close} />

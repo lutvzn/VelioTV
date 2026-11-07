@@ -15,6 +15,8 @@ export interface GuideDetailsProps {
   /** "Today", "Tomorrow" or a date, for the cell's day. */
   day: string;
   now: number;
+  /** What OK or the options can do with it, such as playing it from the catch-up. */
+  note?: string;
 }
 
 /** The highlighted programme, beside the preview: its title, time and description. */
@@ -73,6 +75,21 @@ export const GuideDetails = (props: GuideDetailsProps) => {
                 borderRadius={3}
                 color="#7fb2ffff"
               />
+            </Show>
+            <Show when={props.note}>
+              {note => (
+                <Text
+                  x={onNow() ? 390 : 0}
+                  y={140}
+                  width={props.width - (onNow() ? 390 : 0)}
+                  maxLines={1}
+                  contain="width"
+                  fontSize={24}
+                  color="#7fb2ffff"
+                >
+                  {note()}
+                </Text>
+              )}
             </Show>
             <Text
               y={176}

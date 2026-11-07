@@ -17,6 +17,10 @@
 // live stream that fails while the TV is offline waits for the network
 // rather than using up its tries (Phase 3, step 6).
 //
+// A film or recording (a stream that isn't live) can pause and seek. One
+// that drops or stalls is opened again where it was, a few times; one that
+// fails to start fails (PLAN.md, Phase 6, step 1).
+//
 // It lists the stream's audio and subtitle tracks once it starts, and picks
 // the languages chosen last time, on every channel (Phase 3, step 5). On the
 // TV the app draws the subtitles, from the `subtitle` signal.
@@ -56,6 +60,8 @@ export type PlayerState =
   | "playing"
   /** Waiting for data after it had started. */
   | "buffering"
+  /** A film or recording, paused. */
+  | "paused"
   /** A live stream failed, and will be opened again. */
   | "reconnecting"
   /** Closed while the app is hidden; resume() opens it again. */
@@ -92,6 +98,12 @@ export interface PlayerOptions {
   now?: () => number;
   /** Resolves once the UI has drawn a frame. */
   afterPaint?: () => Promise<void>;
+  /**
+   * Where the UI shows this player's video through its background
+   * (src/videoWindow.ts). A second, small player (PLAN.md, Phase 7, step 3)
+   * plays over the main one's, so it leaves the hole alone.
+   */
+  showVideo?: (rect: Rect | null) => void;
   preferences?: PreferenceStore;
 }
 
@@ -163,6 +175,9 @@ export const DROPPED = "dropped";
 /** A live stream waiting for the network to come back. */
 export const OFFLINE = "offline";
 
+/** How many times a film or recording that drops is opened again where it was. */
+export const VOD_RETRIES = 3;
+
 /** Failures that opening the stream again won't fix. */
 const lasting = (error: string) =>
   error === NEEDS_REFERER || /NOT_SUPPORTED|INVALID_URI|UNSUPPORTED/i.test(error);
@@ -175,6 +190,8 @@ interface Request {
   failures: number;
   reconnects: number;
   startMs?: number;
+  /** Whether it has shown a picture, at any open. */
+  started?: boolean;
 }
 
 /** What a status says about a request's earlier opens. */
@@ -205,6 +222,7 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
   const delays = options.retryDelaysMs ?? RETRY_DELAYS_MS;
   const stallMs = options.stallMs ?? STALL_MS;
   const preferences = options.preferences ?? memoryPreferences();
+  const showVideo = options.showVideo ?? setVideoWindow;
   const [status, setStatus] = createSignal<PlayerStatus>({ state: "idle" });
   const [tracks, setTracks] = createSignal<Track[]>([]);
   const [subtitle, setSubtitle] = createSignal<string>();
@@ -245,10 +263,11 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
     const mine = ++session;
     clearTimers();
     const { stream } = request;
-    setVideoWindow(rect);
+    showVideo(rect);
     setTracks([]);
     clearSubtitle();
 
+    let paused = false;
     let active: PlaybackEngine;
     try {
       [active] = await Promise.all([(loading ??= getEngine()), (options.afterPaint ?? nextPaint)()]);
@@ -278,7 +297,11 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
         return;
       }
       const attempt = request.failures + 1;
-      if (!stream.live || lasting(error) || attempt > delays.length) {
+      // A film that played and dropped carries on where it was.
+      const vod = !stream.live && request.started;
+      if (vod) request.stream = { ...stream, startMs: Math.max(0, lastPosition) };
+      const tries = vod ? Math.min(VOD_RETRIES, delays.length) : delays.length;
+      if ((!stream.live && !vod) || lasting(error) || attempt > tries) {
         setStatus({ state: "failed", stream, error, ...counts(request) });
         return;
       }
@@ -288,7 +311,7 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
         stream,
         error,
         attempt,
-        attempts: delays.length,
+        attempts: tries,
         ...counts(request),
       });
       after(delays[attempt - 1] ?? 0, () => {
@@ -300,6 +323,8 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
     // stalled. The position only counts once it has moved, as not every
     // engine reports one for live streams.
     let position = -1;
+    // Where a film was, to open it there again if it drops.
+    let lastPosition = stream.startMs ?? 0;
     let moved = false;
     let progressAt = opened;
     let bufferingSince: number | undefined;
@@ -307,6 +332,12 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
       if (!tracksListed) tracksListed = applyPreferences(active);
       const at = now();
       const current = active.position();
+      if (current > 0) lastPosition = current;
+      // Paused, nothing moves: it hasn't stalled.
+      if (paused) {
+        progressAt = at;
+        return;
+      }
       if (current !== position) {
         if (position >= 0) moved = true;
         position = current;
@@ -332,21 +363,24 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
         }
         if (event.type === "ended") {
           if (stream.live) return fail(DROPPED);
+          paused = false;
           clearTimers();
           setStatus({ state: "ended", stream, ...counts(request) });
           return;
         }
         if (event.type === "buffering") {
-          // Before the first picture, it is still starting.
-          if (!started) return;
+          // Before the first picture, it is still starting; paused, it stays paused.
+          if (!started || paused) return;
           bufferingSince ??= now();
           setStatus({ state: "buffering", stream, ...counts(request) });
           return;
         }
         bufferingSince = undefined;
         progressAt = now();
+        if (paused) return;
         if (!started) {
           started = true;
+          request.started = true;
           clearTimers();
           if (request.startMs === undefined) request.startMs = Math.round(now() - request.requested);
           else request.reconnects++;
@@ -363,7 +397,34 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
     } catch (error) {
       fail(errorText(error));
     }
+    controls = {
+      setPaused: (value: boolean) => {
+        if (mine !== session) return;
+        const { state } = status();
+        if (value && (state === "playing" || state === "buffering")) {
+          active.setPaused(true);
+          paused = true;
+          bufferingSince = undefined;
+          setStatus({ state: "paused", stream: request.stream, ...counts(request) });
+        } else if (!value && state === "paused") {
+          active.setPaused(false);
+          paused = false;
+          progressAt = now();
+          setStatus({ state: "playing", stream: request.stream, ...counts(request) });
+        }
+      },
+      seek: (ms: number) => {
+        if (mine !== session || stream.live) return;
+        active.seek(ms);
+        lastPosition = ms;
+        position = -1;
+        moved = false;
+        progressAt = now();
+      },
+    };
   };
+  /** Pause and seek for the stream open now. */
+  let controls: { setPaused: (paused: boolean) => void; seek: (ms: number) => void } | undefined;
 
   /** Picks the languages chosen before, once the stream lists its tracks. Returns whether it has. */
   const applyPreferences = (active: PlaybackEngine) => {
@@ -402,16 +463,20 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
     await open({ stream, requested: now(), failures: 0, reconnects: 0 });
   };
 
-  /** Closes the stream while the app is hidden, keeping it for resume(). */
+  /**
+   * Closes the stream while the app is hidden, keeping it for resume(). A
+   * film keeps its place.
+   */
   const suspend = () => {
     const { state, stream } = status();
     if (state === "idle" || state === "suspended" || !stream) return;
+    const at = engine?.position() ?? 0;
     session++;
     clearTimers();
     engine?.stop();
     setTracks([]);
     clearSubtitle();
-    setStatus({ state: "suspended", stream });
+    setStatus({ state: "suspended", stream: stream.live || at <= 0 ? stream : { ...stream, startMs: at } });
   };
 
   /** Opens the suspended stream again, timed from now. */
@@ -430,20 +495,21 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
   };
 
   const stop = () => {
+    controls = undefined;
     session++;
     clearTimers();
     engine?.stop();
     setTracks([]);
     clearSubtitle();
     setStatus({ state: "idle" });
-    setVideoWindow(null);
+    showVideo(null);
   };
 
   /** Where the video shows, in pixels of the 1920x1080 app. */
   const setWindow = (next: Rect) => {
     rect = next;
     if (status().state === "idle") return;
-    setVideoWindow(next);
+    showVideo(next);
     engine?.setWindow(next);
   };
 
@@ -457,6 +523,12 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
     setWindow,
     /** How far the stream has played, in milliseconds. */
     position: () => engine?.position() ?? 0,
+    /** How long the stream is, in milliseconds, if it has a length the engine knows. */
+    duration: () => engine?.duration() ?? 0,
+    /** Pauses a film or recording, or plays it on. */
+    setPaused: (paused: boolean) => controls?.setPaused(paused),
+    /** Jumps to `ms` from the start of a film. */
+    seek: (ms: number) => controls?.seek(ms),
     formats: () => engine?.formats() ?? [],
     /** The stream's audio and subtitle tracks, once it has started. */
     tracks,

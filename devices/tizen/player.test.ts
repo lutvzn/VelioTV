@@ -53,8 +53,17 @@ const fakeAvplay = () => {
     setDisplayMethod: method => calls.push(method),
     setBufferingParam: (when, _unit, amount) => calls.push(`buffer ${when} ${amount}`),
     setStreamingProperty: (name, value) => calls.push(`${name}=${value}`),
+    pause: () => {
+      calls.push("pause");
+      state = "PAUSED";
+    },
+    seekTo: (ms, success) => {
+      calls.push(`seek ${ms}`);
+      success?.();
+    },
     getState: () => state,
     getCurrentTime: () => 1234,
+    getDuration: () => 360_000,
     getCurrentStreamInfo: () => all.filter(track => current.get(track.type) === track.index),
     getTotalTrackInfo: () => all,
     setSelectTrack: (type, index) => {
@@ -107,6 +116,45 @@ describe("the AVPlay engine", () => {
     ]);
     expect(engine.position()).toBe(1234);
     expect(engine.formats()).toEqual(["VIDEO H264 1920x1080", "AUDIO AAC 2ch", "TEXT text/plain"]);
+  });
+
+  it("plays as a second player without sound, on the sub video scaler", () => {
+    const fake = fakeAvplay();
+    const muted: string[] = [];
+    const engine = new AvplayEngine(
+      { ...fake.av, disableAudioStream: () => muted.push("muted") },
+      { second: true },
+    );
+    engine.open({ url: "http://a/2.ts" }, () => undefined);
+    expect(muted).toEqual(["muted"]);
+    expect(fake.calls.slice(0, 2)).toEqual([
+      "open http://a/2.ts",
+      "IN_APP_MULTIVIEW=VIDEO_VIEW_RESOURCE_SUB",
+    ]);
+  });
+
+  it("plays a file on the TV without buffering it", () => {
+    const fake = fakeAvplay();
+    const engine = new AvplayEngine(fake.av);
+    const events: EngineEvent[] = [];
+    engine.open({ url: "file:///home/owner/a.ts" }, event => events.push(event));
+    expect(fake.calls.some(call => call.startsWith("buffer"))).toBe(false);
+    fake.prepared(0);
+    expect(events).toEqual([{ type: "buffering" }, { type: "playing" }]);
+  });
+
+  it("starts a film where it was left, pauses, seeks and knows its length", () => {
+    const fake = fakeAvplay();
+    const engine = new AvplayEngine(fake.av);
+    engine.open({ url: "http://a/film.mp4", startMs: 90_000 }, () => {});
+    fake.prepared(0);
+    expect(fake.calls.slice(-2)).toEqual(["seek 90000", "play"]);
+    engine.setPaused(true);
+    engine.setPaused(true);
+    engine.seek(120_000);
+    engine.setPaused(false);
+    expect(fake.calls.slice(-3)).toEqual(["pause", "seek 120000", "play"]);
+    expect(engine.duration()).toBe(360_000);
   });
 
   it("drops a stream that is still opening when another is asked for", () => {

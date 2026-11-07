@@ -67,15 +67,18 @@ export const isPlaying = (channel: Channel) => {
   );
 };
 
+/** A channel's live stream. */
+export const channelStream = (channel: Channel) => ({
+  url: channel.url,
+  userAgent: channel.headers?.userAgent,
+  referer: channel.headers?.referer,
+  live: true,
+});
+
 /** Starts a channel's stream, unless it is already playing. */
 export const playChannel = (channel: Channel, options: { keep?: boolean } = {}) => {
   if (options.keep !== false && isPlaying(channel)) return;
-  void player.play({
-    url: channel.url,
-    userAgent: channel.headers?.userAgent,
-    referer: channel.headers?.referer,
-    live: true,
-  });
+  void player.play(channelStream(channel));
 };
 
 /** What went wrong, in words. */

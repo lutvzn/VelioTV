@@ -1,8 +1,9 @@
 import { useLocation, useNavigate } from "@solidjs/router";
-import { View, ElementNode } from "@solidtv/solid";
+import { activeElement, View, ElementNode } from "@solidtv/solid";
 import { useAnnouncer, useMouse } from "@solidtv/solid/primitives";
-import type { JSX } from "solid-js";
+import { createEffect, on, onCleanup, type JSX } from "solid-js";
 import { PinPrompt } from "../components/PinPrompt";
+import { ReminderNotice } from "../components/ReminderNotice";
 import { MENU_WIDTH, SideMenu } from "../components/SideMenu";
 import { device } from "../device";
 import { library } from "../library";
@@ -59,6 +60,19 @@ const closeApp = () => {
 // Right moves from the menu into the section; Left or Back moves back out.
 // Back on the menu leaves the app. While video fills the screen, the menu
 // hides and Left and Back are left to the page.
+/**
+ * The top of the tree a node is in: the app's, unless it has been taken
+ * out. A node taken out may keep its parent, which no longer has it.
+ */
+const topOf = (node: ElementNode) => {
+  let at = node;
+  for (let parent = at.parent; parent; parent = at.parent) {
+    if (!parent.children.includes(at)) return at;
+    at = parent;
+  }
+  return at;
+};
+
 const App = (props: { children?: JSX.Element }) => {
   useMouse();
   const navigate = useNavigate();
@@ -72,8 +86,9 @@ const App = (props: { children?: JSX.Element }) => {
   let content: ElementNode | undefined;
 
   // The menu is hidden while video fills the screen, and on the full-screen
-  // page even before its video shows.
-  const menuHidden = () => videoFillsScreen() || location.pathname === "/watch";
+  // pages even before their video shows.
+  const menuHidden = () =>
+    videoFillsScreen() || location.pathname === "/watch" || location.pathname === "/play";
   const focusMenu = () => {
     if (menuHidden()) return false;
     menu?.setFocus();
@@ -83,6 +98,26 @@ const App = (props: { children?: JSX.Element }) => {
     content?.setFocus();
     return true;
   };
+
+  // A page that goes while it has the keys, such as when another page
+  // opens it, takes them with it; they come back to the menu. Pages that
+  // take the keys keep them, as full-screen ones (with no menu) do.
+  let check: ReturnType<typeof setTimeout> | undefined;
+  createEffect(
+    on(
+      () => location.pathname,
+      () => {
+        clearTimeout(check);
+        check = setTimeout(() => {
+          const active = activeElement();
+          if (active && menu && topOf(active) === topOf(menu)) return;
+          focusMenu();
+        });
+      },
+      { defer: true },
+    ),
+  );
+  onCleanup(() => clearTimeout(check));
 
   return (
     <View ref={window.APP} onAnnouncer={() => (announcer.enabled = !announcer.enabled)}>
@@ -113,6 +148,7 @@ const App = (props: { children?: JSX.Element }) => {
         onRight={focusContent}
         onBack={closeApp}
       />
+      <ReminderNotice />
       <PinPrompt />
     </View>
   );

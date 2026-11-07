@@ -6,6 +6,10 @@
 // Only guide channels the playlist uses are kept, matched by tvg-id (ignoring
 // case). Without a playlist, the whole guide is kept. The guide is kept
 // within a storage budget; see guideWriter.ts.
+//
+// Films and series are kept too (vod.ts): an Xtream account's lists, or a
+// playlist's entries that aren't channels. An Xtream server that won't list
+// them keeps those from before.
 
 import {
   DAY,
@@ -16,6 +20,7 @@ import {
   sourceRange,
   writeChannels,
   writeTransaction,
+  writeVod,
   type ImportState,
   type StoredGuideChannel,
 } from "./db";
@@ -23,6 +28,7 @@ import { GuideWriter } from "./guideWriter";
 import { M3uParser } from "./m3u";
 import { readText } from "./stream";
 import type { GuideChannel, PlaylistChannel } from "./types";
+import { M3uVod, xtreamVod, type Film, type Series } from "./vod";
 import { XmltvParser } from "./xmltv";
 import {
   normalizeServer,
@@ -42,6 +48,8 @@ const PROGRESS_EVERY_MS = 250;
  * compacts.
  */
 export const GUIDE_BUDGET_BYTES = 50 * MB;
+/** The most days of guide kept before today, for catch-up. */
+const MAX_PAST_DAYS = 7;
 
 interface ImportCommon {
   /** The source being imported. Its earlier data is replaced. */
@@ -55,7 +63,10 @@ interface ImportCommon {
   guideOffsetMinutes?: number;
   /** Days of guide to keep from today, 7 by default. */
   guideDays?: number;
-  /** Days of guide to keep before today, for catch-up; 1 by default. */
+  /**
+   * Days of guide to keep before today, for catch-up: by default as many as
+   * the channels' catch-up reaches, from 1 to 7.
+   */
   guidePastDays?: number;
   guideBudgetBytes?: number;
 }
@@ -177,8 +188,10 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
 
     // Kept until the channel stage ends, then stored as one record.
     let channels: PlaylistChannel[] = [];
+    let catchupDays = 0;
     const addChannel = (channel: PlaylistChannel) => {
       channels.push(channel);
+      if (channel.catchup) catchupDays = Math.max(catchupDays, channel.catchup.days ?? 1);
       if (channel.guideId && !guideIds.has(channel.guideId.toLowerCase())) {
         guideIds.set(channel.guideId.toLowerCase(), channel.guideId);
       }
@@ -187,6 +200,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       progress.bytes += bytes;
       report();
     };
+    let vod: { films: Film[]; series: Series[] } | undefined;
 
     if (input.kind === "xtream") {
       progress = { ...progress, url: normalizeServer(input.server) };
@@ -196,19 +210,27 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
         addChannel(channel);
       progress.channels = channels.length;
       report(true);
+      vod = await xtreamVod(input, fetcher).catch((error: unknown) => {
+        console.error("The Xtream server didn't list its films and series:", error);
+        return undefined;
+      });
       if (!input.guideUrls) guideUrls = [xtreamGuideUrl(input)];
     } else if (input.playlistUrl) {
       const { body, totalBytes } = await download(fetcher, input.playlistUrl);
       progress = { ...progress, url: input.playlistUrl, totalBytes };
-      const parser = new M3uParser(addChannel);
+      const films = new M3uVod();
+      const parser = new M3uParser(channel => {
+        if (!films.add(channel)) addChannel(channel);
+      });
       for await (const text of readText(body, bytes => (progress.bytes += bytes))) {
         parser.push(text);
-        progress.channels = parser.count;
+        progress.channels = channels.length;
         report();
       }
       parser.end();
-      progress.channels = parser.count;
+      progress.channels = channels.length;
       report(true);
+      vod = { films: films.films, series: films.allSeries() };
       if (!input.guideUrls) guideUrls = parser.guideUrls;
     }
 
@@ -216,6 +238,17 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     await writeChannels(db, source, channels);
     state.channels = channels.length;
     channels = [];
+    if (vod) {
+      await writeVod(db, { source, ...vod });
+      state.films = vod.films.length;
+      state.series = vod.series.length;
+    } else if (previous) {
+      state.films = previous.films;
+      state.series = previous.series;
+    }
+    if (input.guidePastDays === undefined) {
+      state.guideFirstDay = today - Math.max(1, Math.min(MAX_PAST_DAYS, Math.ceil(catchupDays)));
+    }
 
     // Without a channel list, keep the whole guide.
     const keepAll = input.kind !== "xtream" && !input.playlistUrl;

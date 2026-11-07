@@ -1,6 +1,6 @@
 // Backing up and restoring what the user set up (PLAN.md, Phase 5, step 7):
 // the sources, the edits to channels and groups, and the app's settings, as
-// one JSON file. Channels and guides aren't in it: they import again from
+// one JSON file, with where films were left and the reminders (Phase 6). Channels and guides aren't in it: they import again from
 // the sources. A backup is sent with PUT to a URL the user types, and
 // restored with GET from one, such as the test server's /backup/<name>.json.
 //
@@ -9,7 +9,9 @@
 
 import { readSettings, type AppSettings } from "./appSettings";
 import { readEdits, type ChannelEdits } from "./channelEdits";
+import { readReminders, type Reminder } from "./reminders";
 import { readSources, type Source } from "./sources";
+import { readWatched, type WatchedEntry } from "./watched";
 
 export const BACKUP_APP = "tiviplayer";
 export const BACKUP_VERSION = 1;
@@ -22,10 +24,19 @@ export interface Backup {
   sources: Source[];
   edits: ChannelEdits;
   settings: AppSettings;
+  /** Where films and episodes were left; not in backups from before Phase 6. */
+  watched?: WatchedEntry[];
+  reminders?: Reminder[];
 }
 
 export const makeBackup = (
-  parts: { sources: Source[]; edits: ChannelEdits; settings: AppSettings },
+  parts: {
+    sources: Source[];
+    edits: ChannelEdits;
+    settings: AppSettings;
+    watched?: WatchedEntry[];
+    reminders?: Reminder[];
+  },
   now = Date.now(),
 ): Backup => ({
   app: BACKUP_APP,
@@ -34,6 +45,8 @@ export const makeBackup = (
   sources: parts.sources,
   edits: parts.edits,
   settings: parts.settings,
+  watched: parts.watched ?? [],
+  reminders: parts.reminders ?? [],
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -52,6 +65,8 @@ export const readBackup = (value: unknown): Backup => {
     sources: readSources(record.sources),
     edits: readEdits(record.edits),
     settings: readSettings(record.settings),
+    watched: readWatched(record.watched),
+    reminders: readReminders(record.reminders),
   };
 };
 

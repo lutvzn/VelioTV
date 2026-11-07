@@ -14,7 +14,8 @@ import {
   Show,
 } from "solid-js";
 import { MENU_WIDTH } from "../components/SideMenu";
-import { DAY } from "../data/guideCodec";
+import { catchupDays, inArchive } from "../data/catchup";
+import { DAY, type StoredProgramme } from "../data/guideCodec";
 import type { Channel, ChannelGroup } from "../data/lineup";
 import { exposeToProbes } from "../devHooks";
 import { createGuideDays } from "../guide/guideDays";
@@ -33,10 +34,21 @@ import { handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../li
 import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow";
 import { createNumberEntry } from "../live/numberEntry";
 import { rememberedChannel } from "../live/zapper";
-import { edits, groupTitle, guide, isBlocked, lineup, liveGroups, liveNumbers, liveView } from "../library";
+import {
+  edits,
+  groupTitle,
+  guide,
+  isBlocked,
+  lineup,
+  liveGroups,
+  liveNumbers,
+  liveView,
+  reminders,
+} from "../library";
 import { askPin } from "../pin";
 import { FAVOURITES } from "../live/groups";
 import { player } from "../player";
+import { watchRecording } from "../play/start";
 import { editText } from "../textEntry";
 import { $t } from "../translate";
 import type { Rect } from "../videoWindow";
@@ -49,7 +61,7 @@ import {
   OPTIONS_WIDTH,
   OVERLAY_Z,
 } from "./live/ChannelOptions";
-import { groupMenu } from "./live/menus";
+import { groupMenu, programmeOptions } from "./live/menus";
 import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
 
 // Live TV: the TV guide (PLAN.md, Phase 4). Channels run down and time
@@ -65,6 +77,12 @@ import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
 // channel names with the TV's keyboard. Holding OK on a channel, or the
 // Tools key, opens its options (Phase 5, step 1).
 //
+// Channels with catch-up reach back as far as their archive (Phase 6): Left
+// goes on into the past, programmes that can be played are marked, and OK on
+// one that has ended plays it (src/pages/Play.tsx). The options offer
+// watching a programme on now from its start, and reminders for programmes
+// to come.
+//
 // Like the Live TV channel list, it draws a fixed number of rows and fills
 // them as it scrolls, so 10,000 channels cost the same as 8.
 
@@ -73,6 +91,8 @@ export const SPAN = 2 * HOUR;
 export const STEP = HOUR / 2;
 /** How far ahead the guide goes. */
 const AHEAD = 7 * DAY;
+/** How far back catch-up can take it. */
+const MAX_BACK_DAYS = 7;
 export const GUIDE_ROWS = 8;
 /** How long the cursor stays on a channel before the preview plays it. */
 export const PREVIEW_DELAY_MS = 800;
@@ -113,6 +133,15 @@ const groupFilter = (group: ChannelGroup): Filter => ({
 
 const numberOf = (channel: Channel) => liveNumbers().byId.get(channel.id) ?? channel.index + 1;
 
+const dayWords = () => ({
+  today: $t("guide.today"),
+  tomorrow: $t("guide.tomorrow"),
+  yesterday: $t("guide.yesterday"),
+});
+
+/** How many days back a channel's catch-up reaches here. */
+const backDays = (channel: Channel) => Math.min(MAX_BACK_DAYS, catchupDays(channel));
+
 export default () => {
   const navigate = useNavigate();
   let root: ElementNode | undefined;
@@ -122,7 +151,8 @@ export default () => {
   const [focused, setFocused] = createSignal(false);
   const [now, setNow] = createSignal(Date.now());
   const ticker = setInterval(() => setNow(Date.now()), CLOCK_MS);
-  const earliest = () => alignDown(now(), STEP);
+  /** Where the span starts when the page opens: now. */
+  const nowStart = () => alignDown(now(), STEP);
   const latest = () => now() + AHEAD;
 
   const days = createGuideDays(guide);
@@ -147,6 +177,14 @@ export default () => {
   const [filterId, setFilterId] = createSignal(handoff?.group === undefined ? ALL : `group:${handoff.group}`);
   const filter = createMemo(() => filters().find(f => f.id === filterId()) ?? filters()[0]);
   const list = createMemo(() => filter().channels);
+  // As far back as the longest catch-up among the channels shown; each
+  // row's Left stops at its own.
+  const reach = createMemo(() => list().reduce((most, channel) => Math.max(most, backDays(channel)), 0));
+  const earliest = () => alignDown(now() - reach() * DAY, STEP);
+  const rowEarliest = (channel: Channel) => {
+    const back = backDays(channel);
+    return back > 0 ? alignDown(now() - back * DAY, STEP) : nowStart();
+  };
 
   // The cursor's row, and the first row drawn. When the channels change,
   // the cursor stays on its channel if it can.
@@ -190,13 +228,19 @@ export default () => {
   };
 
   // The time shown, and the moment the focus is on (src/guide/timeline.ts).
-  const [from, setFrom] = createSignal(earliest());
+  const [from, setFrom] = createSignal(nowStart());
   const [anchor, setAnchor] = createSignal(Date.now());
   const to = () => from() + SPAN;
   const anchorAt = () => Math.max(anchor(), earliest());
   createEffect(
     on(earliest, first => {
       if (from() < first) setFrom(first);
+    }),
+  );
+  // A span showing now moves on with it.
+  createEffect(
+    on(nowStart, (start, before) => {
+      if (before !== undefined && from() === before) setFrom(start);
     }),
   );
   const moveTo = (next: number) =>
@@ -306,11 +350,28 @@ export default () => {
       },
     });
 
+  /** Plays a programme from the channel's catch-up. */
+  const watchFromStart = (channel: Channel, programme: StoredProgramme) => {
+    if (isBlocked(channel)) {
+      void askPin().then(right => right && watchFromStart(channel, programme));
+      return;
+    }
+    watchRecording(navigate, channel, programme, { group: filter().group });
+  };
+
+  // OK on a programme that has ended, in the archive, plays it; otherwise the
+  // channel plays live.
   const watch = () => {
     const channel = cursorChannel();
     if (!channel) return;
     if (isBlocked(channel)) {
       void askPin().then(right => right && watch());
+      return;
+    }
+    const programme = focusedCell()?.programme;
+    const time = Date.now();
+    if (programme && programme.stop <= time && inArchive(channel, programme.start, time)) {
+      watchFromStart(channel, programme);
       return;
     }
     handOff({ channelId: channel.id, group: filter().group });
@@ -418,6 +479,31 @@ export default () => {
     entry.digit(value);
     return true;
   };
+  /** The focused programme's day: its start's, or today while it's on. */
+  const focusedDay = () => {
+    const cell = focusedCell();
+    if (!cell) return now();
+    return cell.stop <= now() ? cell.start : Math.max(cell.start, now());
+  };
+  /** Where a channel's archive starts, now; undefined without catch-up. */
+  const archiveStart = (channel: Channel) => {
+    const back = catchupDays(channel);
+    return back > 0 ? now() - back * DAY : undefined;
+  };
+  /** The focused programme, for `channel`'s options. */
+  const focusedProgramme = (channel: Channel) =>
+    channel.id === cursorChannel()?.id && area() === "grid" && !isBlocked(channel)
+      ? focusedCell()?.programme
+      : undefined;
+  /** What OK or the options can do with the focused programme. */
+  const detailsNote = () => {
+    const channel = cursorChannel();
+    const programme = focusedCell()?.programme;
+    if (!channel || !programme || isBlocked(channel)) return undefined;
+    if (reminders.has(channel.id, programme.start)) return $t("guide.reminderSet");
+    if (!inArchive(channel, programme.start, now())) return undefined;
+    return programme.stop <= now() ? $t("guide.okPlays") : $t("guide.canStartOver");
+  };
   const ticks = () => Array.from({ length: SPAN / STEP }, (_, i) => from() + i * STEP);
   const nowX = () => GRID_X + (now() - from()) * PX_PER_MS;
 
@@ -459,7 +545,7 @@ export default () => {
           return true;
         }
         const row = currentRow();
-        const previous = row && previousAnchor(row.cells, anchorAt(), earliest(), STEP);
+        const previous = row && previousAnchor(row.cells, anchorAt(), rowEarliest(row.channel), STEP);
         // From the first programme, on to the menu.
         if (previous === undefined) return false;
         moveTo(previous);
@@ -543,11 +629,9 @@ export default () => {
           channel={cursorChannel()}
           number={cursorNumber()}
           cell={focusedCell()}
-          day={dayLabel(Math.max(focusedCell()?.start ?? now(), now()), now(), {
-            today: $t("guide.today"),
-            tomorrow: $t("guide.tomorrow"),
-          })}
+          day={dayLabel(focusedDay(), now(), dayWords())}
           now={now()}
+          note={detailsNote()}
         />
 
         <View
@@ -586,7 +670,7 @@ export default () => {
         </View>
 
         <Text x={LEFT} y={TIMES_Y} width={CHANNEL_WIDTH} maxLines={1} contain="width" fontSize={26}>
-          {dayLabel(from(), now(), { today: $t("guide.today"), tomorrow: $t("guide.tomorrow") })}
+          {dayLabel(from(), now(), dayWords())}
         </Text>
         <Index each={ticks()}>
           {time => (
@@ -625,6 +709,8 @@ export default () => {
                     pxPerMs={PX_PER_MS}
                     gridX={GRID_X - LEFT}
                     now={now()}
+                    archiveFrom={archiveStart(row().channel)}
+                    reminded={start => reminders.has(row().channel.id, start)}
                     current={top() + slot === cursor()}
                     moving={moving()?.id === row().channel.id}
                     focused={
@@ -687,8 +773,11 @@ export default () => {
             channel={channel()}
             x={PAGE_WIDTH - OPTIONS_WIDTH}
             onClose={closeOptions}
-            extra={
-              inFavourites()
+            extra={[
+              ...programmeOptions(channel(), focusedProgramme(channel()), Date.now(), programme =>
+                watchFromStart(channel(), programme),
+              ),
+              ...(inFavourites()
                 ? [
                     {
                       id: "move",
@@ -698,8 +787,8 @@ export default () => {
                       },
                     },
                   ]
-                : []
-            }
+                : []),
+            ]}
           />
         )}
       </Show>

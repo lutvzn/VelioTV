@@ -24,6 +24,8 @@ const COLORS = {
   faint: "#ffffff66",
   playing: "#7fb2ffff",
   moving: "#f2c14e59",
+  archive: "#7fb2ffb3",
+  reminder: "#ffd166ff",
 };
 
 export interface GuideRowProps {
@@ -43,6 +45,10 @@ export interface GuideRowProps {
   moving?: boolean;
   /** The focused cell, when the guide has focus and the cursor is here. */
   focused?: Cell;
+  /** Where the channel's catch-up starts; programmes since then that have begun can be played. */
+  archiveFrom?: number;
+  /** Whether a programme starting at `start` has a reminder. */
+  reminded?: (start: number) => boolean;
 }
 
 interface Placed {
@@ -50,6 +56,10 @@ interface Placed {
   width: number;
   label: string;
   color: string;
+  textColor: string;
+  /** Marked as playable from the archive. */
+  archive: boolean;
+  reminder: boolean;
 }
 
 /**
@@ -75,7 +85,17 @@ export const GuideRow = (props: GuideRowProps) => {
       let color = cell.kind === "gap" ? COLORS.empty : COLORS.cell;
       if (cell.kind === "programme" && cell.start <= props.now && cell.stop > props.now) color = COLORS.onNow;
       if (cell === props.focused) color = COLORS.focused;
-      list.push({ x, width: width - CELL_GAP, label, color });
+      const programme = cell.kind === "programme";
+      const archive =
+        programme &&
+        props.archiveFrom !== undefined &&
+        cell.start >= props.archiveFrom &&
+        cell.start < props.now;
+      // Programmes that have ended, and can't be played, are fainter.
+      const textColor =
+        programme && cell.stop <= props.now && !archive && cell !== props.focused ? COLORS.dim : COLORS.text;
+      const reminder = programme && cell.start > props.now && (props.reminded?.(cell.start) ?? false);
+      list.push({ x, width: width - CELL_GAP, label, color, textColor, archive, reminder });
     }
     return list;
   });
@@ -119,10 +139,30 @@ export const GuideRow = (props: GuideRowProps) => {
                   maxLines={1}
                   contain="width"
                   fontSize={26}
-                  color={COLORS.text}
+                  color={cell().textColor}
                 >
                   {cell().label}
                 </Text>
+                <Show when={cell().archive}>
+                  <View
+                    x={6}
+                    y={INNER - 8}
+                    width={Math.max(0, cell().width - 12)}
+                    height={4}
+                    borderRadius={2}
+                    color={COLORS.archive}
+                  />
+                </Show>
+                <Show when={cell().reminder}>
+                  <View
+                    x={cell().width - 16}
+                    y={8}
+                    width={10}
+                    height={10}
+                    borderRadius={5}
+                    color={COLORS.reminder}
+                  />
+                </Show>
               </View>
             )}
           </Index>

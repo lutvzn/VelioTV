@@ -6,6 +6,7 @@ import type { RendererMain } from "@solidtv/renderer";
 import App from "./pages/App";
 import Guide from "./pages/Guide";
 import Watch from "./pages/Watch";
+import Play from "./pages/Play";
 import Movies from "./pages/Movies";
 import Series from "./pages/Series";
 import Settings from "./pages/Settings";
@@ -16,7 +17,7 @@ import { merge } from "lodash-es";
 import { config } from "./device";
 import { installDevHooks } from "./devHooks";
 import { library, settings } from "./library";
-import { player } from "./player";
+import { player, secondPlayer } from "./player";
 import { watchLifecycle } from "./player/lifecycle";
 import {
   Rounded,
@@ -31,6 +32,7 @@ import {
 merge(LightningConfig, config.lightning);
 installDevHooks();
 watchLifecycle(player);
+watchLifecycle(secondPlayer);
 
 const { render, renderer } = createRenderer();
 
@@ -59,6 +61,7 @@ render(() => {
     <HashRouter root={App}>
       <Route path="/" component={Guide} />
       <Route path="/watch" component={Watch} />
+      <Route path="/play" component={Play} />
       <Route path="/movies" component={Movies} />
       <Route path="/series" component={Series} />
       <Route path="/settings" component={Settings} />

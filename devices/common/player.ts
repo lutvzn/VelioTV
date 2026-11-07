@@ -25,6 +25,8 @@ export interface Stream {
    * drops, stalls or fails to start, rather than stopping.
    */
   live?: boolean;
+  /** Where to start, in milliseconds, for a film or recording carried on from before. */
+  startMs?: number;
 }
 
 /** An audio or subtitle track of the stream playing. */
@@ -68,6 +70,12 @@ export interface PlaybackEngine {
   setWindow(rect: DisplayRect): void;
   /** How far the stream has played, in milliseconds. */
   position(): number;
+  /** How long the stream is, in milliseconds; 0 for live streams, or before it is known. */
+  duration(): number;
+  /** Pauses the stream, or plays it on from where it was paused. */
+  setPaused(paused: boolean): void;
+  /** Jumps to `ms` from the start, for streams that have a length. */
+  seek(ms: number): void;
   /** The stream's formats, such as "VIDEO H264 1920x1080", to show when diagnosing. */
   formats(): string[];
   /** The stream's audio and subtitle tracks, once it has started. */
@@ -143,7 +151,7 @@ export class VideoElementEngine implements PlaybackEngine {
       try {
         const player = await this.player();
         if (session !== this.session) return;
-        await player.load(stream.url);
+        await player.load(stream.url, stream.startMs ? stream.startMs / 1000 : undefined);
         if (session !== this.session) return;
         this.loaded = player;
         await this.video.play();
@@ -171,6 +179,20 @@ export class VideoElementEngine implements PlaybackEngine {
 
   position() {
     return Math.round(this.video.currentTime * 1000);
+  }
+
+  duration() {
+    const seconds = this.video.duration;
+    return Number.isFinite(seconds) ? Math.round(seconds * 1000) : 0;
+  }
+
+  setPaused(paused: boolean) {
+    if (paused) this.video.pause();
+    else void this.video.play().catch(() => {});
+  }
+
+  seek(ms: number) {
+    this.video.currentTime = ms / 1000;
   }
 
   formats() {

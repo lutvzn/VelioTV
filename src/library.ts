@@ -3,7 +3,9 @@
 // far (src/data/guideCache.ts), read in a worker (src/data/guideClient.ts),
 // the user's edits to channels (src/data/channelEdits.ts) and what Live TV
 // shows with them (src/live/liveView.ts), and the app's settings
-// (src/data/appSettings.ts), which a backup holds with the sources.
+// (src/data/appSettings.ts), which a backup holds with the sources, where
+// films were left (src/data/watched.ts) and the reminders
+// (src/data/reminders.ts).
 
 import { createEffect, createMemo, createRoot } from "solid-js";
 import { createAppSettings } from "./data/appSettings";
@@ -13,6 +15,9 @@ import { createGuideCache } from "./data/guideCache";
 import { createGuideClient } from "./data/guideClient";
 import { importSource } from "./data/importClient";
 import { createLineup, type Channel } from "./data/lineup";
+import { createReminders } from "./data/reminders";
+import { createVodLibrary } from "./data/vodLibrary";
+import { createWatched } from "./data/watched";
 import { setTwelveHour } from "./live/format";
 import { groupLabel } from "./live/groups";
 import { buildLiveView } from "./live/liveView";
@@ -27,9 +32,17 @@ export const lineup = createLineup({
   stateOf: id => library.statusOf(id).state,
 });
 
+/** Every source's films and series (src/data/vodLibrary.ts). */
+export const vod = createVodLibrary({
+  sources: () => library.sources().filter(source => !source.disabled),
+  stateOf: id => library.statusOf(id).state,
+});
+
 export const edits = createChannelEdits({ storage: localStorage });
 
 export const settings = createAppSettings({ storage: localStorage });
+export const watched = createWatched({ storage: localStorage });
+export const reminders = createReminders({ storage: localStorage });
 createRoot(() => createEffect(() => setTwelveHour(settings.clock() === "12h")));
 
 /** What Live TV shows, with the user's edits applied (src/live/liveView.ts). */
@@ -58,12 +71,20 @@ export const liveNumbers = createRoot(() =>
 
 /** Everything the user set up, as a backup holds it (src/data/backup.ts). */
 export const currentBackup = () =>
-  makeBackup({ sources: library.sources(), edits: edits.all(), settings: settings.all() });
+  makeBackup({
+    sources: library.sources(),
+    edits: edits.all(),
+    settings: settings.all(),
+    watched: watched.all(),
+    reminders: reminders.all(),
+  });
 
 /** Puts a backup's sources, edits and settings in place of the ones here; the sources then import. */
 export const restoreBackup = async (backup: Backup) => {
   edits.replace(backup.edits);
   settings.replace(backup.settings);
+  watched.replace(backup.watched ?? []);
+  reminders.replace(backup.reminders ?? []);
   await library.replaceAll(backup.sources);
 };
 

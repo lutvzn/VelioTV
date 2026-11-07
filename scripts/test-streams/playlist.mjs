@@ -28,12 +28,43 @@ export const streamUrl = (base, channel) => {
 
 export const logoUrl = (base, channel) => (channel.logo ? `${base}${channel.logo}` : "");
 
+/**
+ * The plain playlist's catch-up channels take turns at each catch-up style
+ * (PLAN.md, Phase 6, step 2); Flussonic needs a URL of its own shape, so
+ * channels that need a header use append instead.
+ */
+export const CATCHUP_STYLES = ["default", "append", "shift", "flussonic"];
+export const catchupStyle = channel => {
+  if (!channel.archiveDays) return null;
+  const style = CATCHUP_STYLES[Math.floor(channel.number / 10) % CATCHUP_STYLES.length];
+  return style === "flussonic" && channel.header ? "append" : style;
+};
+
+// A Flussonic-style live URL: /fs/<stream>/index.m3u8 for HLS, /fs/<stream>/mpegts for raw TS.
+const flussonicUrl = (base, channel) =>
+  `${base}/fs/${channel.stream}/${channel.hls ? "index.m3u8" : "mpegts"}`;
+
+// The catch-up attributes for a style.
+const catchupAttributes = (base, channel, style) => {
+  const days = ["catchup-days", channel.archiveDays];
+  if (style === "default") {
+    return [
+      ["catchup", "default"],
+      days,
+      ["catchup-source", `${base}/archive/${channel.id}/{Y}-{m}-{d}/{H}{M}{S}/{duration:60}.ts`],
+    ];
+  }
+  if (style === "append") return [["catchup", "append"], days, ["catchup-source", "?utc={utc}&lutc={lutc}"]];
+  return [["catchup", style], days];
+};
+
 // M3U attribute values can't hold double quotes.
 const attribute = value => String(value).replaceAll('"', "'");
 
 // An extended M3U playlist (#EXTM3U with #EXTINF attributes), as IPTV
-// providers serve it. `url` gives each channel's stream URL.
-export const m3u = ({ base, channels, guideUrl, url = channel => streamUrl(base, channel) }) => {
+// providers serve it. `url` gives each channel's stream URL, `catchup` each
+// catch-up channel's style, and `extra` lines to add at the end.
+export const m3u = ({ base, channels, guideUrl, url, catchup = catchupStyle, extra = [] }) => {
   const lines = [guideUrl ? `#EXTM3U url-tvg="${guideUrl}" x-tvg-url="${guideUrl}"` : "#EXTM3U"];
   for (const channel of channels) {
     const attributes = [
@@ -43,19 +74,16 @@ export const m3u = ({ base, channels, guideUrl, url = channel => streamUrl(base,
       ["tvg-chno", channel.number],
       ["group-title", channel.group],
     ];
-    if (channel.archiveDays) {
-      attributes.push(
-        ["catchup", "append"],
-        ["catchup-days", channel.archiveDays],
-        ["catchup-source", "?utc={utc}&lutc={lutc}"],
-      );
-    }
+    const style = channel.archiveDays ? catchup(channel) : null;
+    if (style) attributes.push(...catchupAttributes(base, channel, style));
     const text = attributes.map(([key, value]) => `${key}="${attribute(value)}"`).join(" ");
     lines.push(`#EXTINF:-1 ${text},${channel.name}`);
     if (channel.header === "referer") lines.push(`#EXTVLCOPT:http-referrer=${REQUIRED_REFERER}`);
     if (channel.header === "user-agent") lines.push(`#EXTVLCOPT:http-user-agent=${REQUIRED_USER_AGENT}`);
-    lines.push(url(channel));
+    if (url) lines.push(url(channel));
+    else lines.push(style === "flussonic" ? flussonicUrl(base, channel) : streamUrl(base, channel));
   }
+  lines.push(...extra);
   return `${lines.join("\n")}\n`;
 };
 

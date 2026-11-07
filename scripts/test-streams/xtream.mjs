@@ -1,16 +1,23 @@
-// A mock Xtream Codes API, for live TV only (no films or series yet).
+// A mock Xtream Codes API, with live TV, catch-up, films and series.
 //
 //   /player_api.php?username=&password=[&action=...]
-//   /get.php?username=&password=&type=m3u_plus&output=ts   M3U playlist
+//   /get.php?username=&password=&type=m3u_plus&output=ts   M3U playlist, with
+//                                                          films and episodes
 //   /xmltv.php?username=&password=                         XMLTV guide
 //   /live/<user>/<pass>/<stream_id>.ts|.m3u8               live stream
-//   /timeshift/<user>/<pass>/<minutes>/<start>/<id>.ts     catch-up
+//   /timeshift/<user>/<pass>/<minutes>/<start>/<id>.ts     catch-up, from
+//                                                          <start> as
+//                                                          YYYY-MM-DD:HH-MM, UTC
+//   /movie/<user>/<pass>/<id>.<ext>, /series/<user>/<pass>/<id>.<ext>
+//                                                          films and episodes
 //
 // The streams redirect to the test streams, as many real servers redirect to
-// another host. Catch-up plays the live stream.
+// another host. Catch-up goes to ctx.archive (server.mjs), which makes a
+// recording of the time asked for.
 
 import { programmesBetween } from "./catalog.mjs";
 import { logoUrl, m3u, streamPath, xmltv } from "./playlist.mjs";
+import { findEpisode, vodLibrary, vodLines, xtreamVod } from "./vod.mjs";
 
 const HOUR = 3_600_000;
 
@@ -92,6 +99,8 @@ const listing = (channel, p, now) => ({
 export const playerApi = (url, ctx) => {
   const { account, base, now, window } = ctx;
   const { channels, groups } = account.catalog;
+  const vod = account.vod ?? vodLibrary(channels.length);
+  const id = name => Number(url.searchParams.get(name));
   const action = url.searchParams.get("action");
   const byId = () => channels.find(c => c.id === Number(url.searchParams.get("stream_id")));
 
@@ -123,19 +132,25 @@ export const playerApi = (url, ctx) => {
       return { epg_listings: list.map(p => listing(channel, p, now)) };
     }
     case "get_vod_categories":
-    case "get_vod_streams":
     case "get_series_categories":
+      return xtreamVod.categories(vod);
+    case "get_vod_streams":
+      return xtreamVod.films(vod, base, url.searchParams.get("category_id"));
+    case "get_vod_info":
+      return xtreamVod.filmInfo(vod, base, id("vod_id"));
     case "get_series":
-      return [];
+      return xtreamVod.series(vod, base, url.searchParams.get("category_id"));
+    case "get_series_info":
+      return xtreamVod.seriesInfo(vod, base, id("series_id"));
     default:
       return { error: `Unknown action ${action}` };
   }
 };
 
-const LIVE = [
-  /^\/live\/([^/]+)\/([^/]+)\/(\d+)\.(ts|m3u8)$/,
-  /^\/timeshift\/([^/]+)\/([^/]+)\/\d+\/[^/]+\/(\d+)\.(ts|m3u8)$/,
-];
+const LIVE = /^\/live\/([^/]+)\/([^/]+)\/(\d+)\.(ts|m3u8)$/;
+const TIMESHIFT =
+  /^\/timeshift\/([^/]+)\/([^/]+)\/(\d+)\/(\d{4})-(\d\d)-(\d\d):(\d\d)-(\d\d)\/(\d+)\.(ts|m3u8)$/;
+const VOD = /^\/(movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.(\w+)$/;
 
 // Handles an Xtream request, or returns false if `url` isn't one.
 // `ctx.accounts` maps "username:password" to { username, password, catalog }.
@@ -163,8 +178,15 @@ export const handleXtream = (req, res, url, ctx) => {
       channels: account.catalog.channels,
       guideUrl: `${ctx.base}/xmltv.php?username=${username}&password=${password}`,
       url: channel => `${ctx.base}/live/${username}/${password}/${channel.id}.${output}`,
+      catchup: () => "xc",
     });
-    return send(200, body, "audio/x-mpegurl");
+    // Panels list films and episodes after the channels.
+    const vod = vodLines(
+      account.vod ?? vodLibrary(account.catalog.channels.length),
+      ctx.base,
+      (kind, id, ext) => `${ctx.base}/${kind}/${username}/${password}/${id}.${ext}`,
+    );
+    return send(200, `${body}${vod.join("\n")}\n`, "audio/x-mpegurl");
   }
   if (url.pathname === "/xmltv.php") {
     if (!account) return denied();
@@ -172,14 +194,43 @@ export const handleXtream = (req, res, url, ctx) => {
     return ctx.sendChunks(res, chunks, "application/xml");
   }
 
-  const live = LIVE.map(pattern => url.pathname.match(pattern)).find(Boolean);
+  const redirect = target => {
+    res.writeHead(302, { Location: `${ctx.base}${target}`, "Access-Control-Allow-Origin": "*" });
+    res.end();
+    return true;
+  };
+
+  const shift = url.pathname.match(TIMESHIFT);
+  if (shift) {
+    const [, user, pass, minutes, year, month, day, hour, minute, streamId] = shift;
+    const owner = login(user, pass);
+    if (!owner) return denied();
+    const channel = owner.catalog.channels.find(c => c.id === Number(streamId));
+    if (!channel) return send(404, "Unknown stream\n");
+    const start = Date.UTC(+year, +month - 1, +day, +hour, +minute);
+    ctx.archive(req, res, { style: "xtream", channel, start, durationMs: Number(minutes) * 60_000 });
+    return true;
+  }
+
+  const vod = url.pathname.match(VOD);
+  if (vod) {
+    const [, kind, user, pass, itemId, ext] = vod;
+    const owner = login(user, pass);
+    if (!owner) return denied();
+    const library = owner.vod ?? vodLibrary(owner.catalog.channels.length);
+    const found =
+      kind === "movie"
+        ? library.films.find(film => film.id === Number(itemId))
+        : findEpisode(library, Number(itemId));
+    if (!found) return send(404, "Unknown film or episode\n");
+    return redirect(`/vod/film.${ext === "m3u8" ? "m3u8" : ext}`);
+  }
+
+  const live = url.pathname.match(LIVE);
   if (!live) return false;
   const owner = login(live[1], live[2]);
   if (!owner) return denied();
   const channel = owner.catalog.channels.find(c => c.id === Number(live[3]));
   if (!channel) return send(404, "Unknown stream\n");
-  const target = streamPath(channel, live[4] === "m3u8");
-  res.writeHead(302, { Location: `${ctx.base}${target}`, "Access-Control-Allow-Origin": "*" });
-  res.end();
-  return true;
+  return redirect(streamPath(channel, live[4] === "m3u8"));
 };

@@ -5,14 +5,17 @@ import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } 
 import { MENU_WIDTH } from "../components/SideMenu";
 import { exposeToProbes } from "../devHooks";
 import type { Channel } from "../data/lineup";
-import { handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../live/handoff";
+import { inArchive } from "../data/catchup";
+import { duration } from "../live/format";
+import { channelStream, handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../live/handoff";
 import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow";
 import { firstChoice, nextChoice, trackRows } from "../live/trackRows";
 import { createNowNext } from "../live/nowNext";
 import { createZapper } from "../live/zapper";
 import { groupTitle, guide, isBlocked, library, lineup, liveGroups, liveNumbers, liveView } from "../library";
 import { askPin } from "../pin";
-import { player } from "../player";
+import { canPlaySecond, player, secondPlayer } from "../player";
+import { programmeAt, watchRecording } from "../play/start";
 import { $t } from "../translate";
 import { FULL_SCREEN } from "../videoWindow";
 import { Banner } from "./live/Banner";
@@ -24,6 +27,7 @@ import {
   OPTIONS_WIDTH,
   OVERLAY_Z,
 } from "./live/ChannelOptions";
+import { type MenuOption, programmeOptions } from "./live/menus";
 import { TrackPanel } from "./live/TrackPanel";
 
 // Live TV full screen (PLAN.md, Phase 3, step 3, and Phase 4). The app
@@ -37,14 +41,36 @@ import { TrackPanel } from "./live/TrackPanel";
 // number keys pick a channel by number. Holding OK, or the Tools key, opens
 // the options for the channel playing or highlighted (Phase 5, step 1). Back closes whatever is open, and
 // then goes to the guide, on the channel playing; the Guide key goes there
-// at once, and Back there comes back (src/live/handoff.ts).
+// at once, and Back there comes back (src/live/handoff.ts). On a channel
+// with catch-up, the options can play the programme on now from its start
+// (Phase 6).
 
 const BANNER_MS = 5000;
 const MISSING_MS = 2000;
 const CLOCK_MS = 10_000;
+/**
+ * A live channel paused for less than this plays on where it paused; after
+ * longer, the TV's player can't (PLAN.md, Phase 7, step 1).
+ */
+const RESUME_IN_PLACE_MS = 10_000;
+/** Rewind on live TV goes this far back, on a channel with catch-up. */
+const REWIND_MS = 60_000;
+// The small window's places, clockwise from the top right.
+const SMALL_WIDTH = 640;
+const SMALL_HEIGHT = 360;
+const SMALL_CORNERS = [
+  { x: 1920 - SMALL_WIDTH - 60, y: 60 },
+  { x: 1920 - SMALL_WIDTH - 60, y: 1080 - SMALL_HEIGHT - 60 },
+  { x: 60, y: 1080 - SMALL_HEIGHT - 60 },
+  { x: 60, y: 60 },
+].map(corner => ({ ...corner, width: SMALL_WIDTH, height: SMALL_HEIGHT }));
 
 // A locked channel's programmes don't show until the PIN is entered.
 const unblocked = (channel: Channel | undefined) => (channel && !isBlocked(channel) ? channel : undefined);
+
+/** Whether `channel`'s archive has `time`, for a channel the viewer may watch. */
+const hasArchive = (channel: Channel | undefined, time: number) =>
+  channel !== undefined && !isBlocked(channel) && inArchive(channel, time, Date.now());
 
 export default () => {
   const navigate = useNavigate();
@@ -219,6 +245,165 @@ export default () => {
     watchNode?.setFocus();
   };
 
+  // Pausing live TV (PLAN.md, Phase 7, step 2). On a channel with catch-up,
+  // Play carries on from the archive, on the player page. Without, the TV's
+  // player can only carry on after a short pause, so after a longer one
+  // Play goes back to live.
+  const [pausedAt, setPausedAt] = createSignal<number>();
+  const [pauseClock, setPauseClock] = createSignal(0);
+  let pauseTicker: ReturnType<typeof setInterval> | undefined;
+  const clearPause = () => {
+    clearInterval(pauseTicker);
+    pauseTicker = undefined;
+    setPausedAt(undefined);
+  };
+  const pauseLive = () => {
+    const { state } = player.status();
+    if (pausedAt() !== undefined || lockedChannel() || !["playing", "buffering"].includes(state)) return;
+    player.setPaused(true);
+    setPausedAt(Date.now());
+    setPauseClock(Date.now());
+    pauseTicker = setInterval(() => setPauseClock(Date.now()), 1000);
+    hideBanner();
+  };
+  /** Plays `channel` from `time`, from its archive. */
+  const fromArchive = async (channel: Channel, time: number) => {
+    const programme = await programmeAt(channel, time).catch(() => undefined);
+    if (!programme) return false;
+    watchRecording(navigate, channel, programme, { group: zapper.group(), from: time, fromLive: true });
+    return true;
+  };
+  const playOn = async () => {
+    const at = pausedAt();
+    const channel = zapper.playing();
+    if (at === undefined || !channel) return;
+    clearPause();
+    if (Date.now() - at < RESUME_IN_PLACE_MS) {
+      player.setPaused(false);
+      return;
+    }
+    if (hasArchive(channel, at) && (await fromArchive(channel, at))) return;
+    playChannel(channel, { keep: false });
+    showBanner();
+  };
+  /** Back to live, from a pause. */
+  const cancelPause = () => {
+    const channel = zapper.playing();
+    clearPause();
+    if (channel) playChannel(channel, { keep: false });
+  };
+  const rewind = () => {
+    const channel = zapper.playing();
+    const from = Date.now() - REWIND_MS;
+    if (!channel || !hasArchive(channel, from)) return;
+    clearPause();
+    void fromArchive(channel, from);
+  };
+  // Another channel, or the stream opening again (as after the app was
+  // hidden), ends the pause.
+  createEffect(on(zapper.playing, clearPause, { defer: true }));
+  createEffect(
+    on(
+      () => player.status().state,
+      state => {
+        if (pausedAt() !== undefined && state !== "paused") clearPause();
+      },
+    ),
+  );
+  const pausedFor = () => pauseClock() - (pausedAt() ?? pauseClock());
+  const pausedHint = () => {
+    const at = pausedAt();
+    if (at === undefined) return "";
+    return pausedFor() < RESUME_IN_PLACE_MS || hasArchive(zapper.playing(), at)
+      ? $t("live.pausedCarryOn")
+      : $t("live.pausedBackToLive");
+  };
+
+  // A second channel in a small window (PLAN.md, Phase 7, step 3), without
+  // sound, on TVs with a second player; the main one keeps the keys. While
+  // the main stream opens, the small one waits, as the two opening at once
+  // can't share the TV's decoders.
+  const [smallChannel, setSmallChannel] = createSignal<Channel>();
+  const [smallWaiting, setSmallWaiting] = createSignal(false);
+  const [corner, setCorner] = createSignal(0);
+  const smallRect = () => SMALL_CORNERS[corner()];
+  const showSmall = (channel: Channel, afterMain = false) => {
+    secondPlayer.stop();
+    setSmallChannel(channel);
+    secondPlayer.setWindow(smallRect());
+    setSmallWaiting(afterMain);
+    if (!afterMain) void secondPlayer.play(channelStream(channel));
+  };
+  createEffect(() => {
+    const channel = smallChannel();
+    if (!smallWaiting() || !channel) return;
+    const { state } = player.status();
+    if (state !== "playing" && state !== "failed") return;
+    setSmallWaiting(false);
+    void secondPlayer.play(channelStream(channel));
+  });
+  const closeSmall = () => {
+    secondPlayer.stop();
+    setSmallWaiting(false);
+    setSmallChannel(undefined);
+  };
+  // Zapping to the small window's channel: it's full screen now.
+  createEffect(
+    on(zapper.playing, channel => {
+      if (channel && channel.id === smallChannel()?.id) closeSmall();
+    }),
+  );
+  const swapSmall = () => {
+    const main = zapper.playing();
+    const small = smallChannel();
+    if (!main || !small) return;
+    secondPlayer.stop();
+    zapper.tune(small, zapper.group());
+    showSmall(main, true);
+    showBanner();
+  };
+  const moveSmall = () => {
+    setCorner(at => (at + 1) % SMALL_CORNERS.length);
+    secondPlayer.setWindow(smallRect());
+  };
+  const smallOptions = (channel: Channel): MenuOption[] => {
+    const small = smallChannel();
+    const isMain = channel.id === zapper.playing()?.id;
+    const options: MenuOption[] = [];
+    if (canPlaySecond() && !isMain && !isBlocked(channel) && channel.id !== small?.id) {
+      options.push({
+        id: "smallOpen",
+        label: small ? $t("options.smallReplace") : $t("options.smallOpen"),
+        run: () => {
+          setListOpen(false);
+          showSmall(channel);
+        },
+      });
+    }
+    if (small && isMain) {
+      options.push(
+        { id: "smallSwap", label: $t("options.smallSwap", { name: small.name }), run: swapSmall },
+        {
+          id: "smallMove",
+          label: $t("options.smallMove"),
+          run: () => {
+            moveSmall();
+            return "stay";
+          },
+        },
+        { id: "smallClose", label: $t("options.smallClose"), run: closeSmall },
+      );
+    }
+    return options;
+  };
+  const smallText = () => {
+    const { state } = secondPlayer.status();
+    if (state === "failed") return $t("live.smallFailed");
+    return smallWaiting() || ["starting", "buffering", "reconnecting"].includes(state)
+      ? $t("live.smallWaiting")
+      : "";
+  };
+
   // OK: a tap acts at once; a hold opens the options.
   const pressEnter = () => {
     if (lockedChannel() && !listOpen() && !tracksOpen() && !zapper.digits() && !zapper.pending()) {
@@ -257,6 +442,13 @@ export default () => {
     trackCursor,
     optionsFor,
     lockedChannel,
+    pausedAt,
+    pausedHint,
+    smallChannel,
+    smallWaiting,
+    corner,
+    smallOptions,
+    listChannel: () => listChannels()[cursor()],
   });
 
   const nowNext = createNowNext(() => unblocked(zapper.shown()), { guide, clock });
@@ -270,6 +462,10 @@ export default () => {
     clearInterval(ticker);
     clearTimeout(bannerTimer);
     zapper.dispose();
+    closeSmall();
+    // A paused channel plays on for the page after, as the guide's preview.
+    if (pausedAt() !== undefined) player.setPaused(false);
+    clearPause();
   });
 
   // Key handlers act only once a channel shows; until then, Back goes to the guide.
@@ -346,6 +542,27 @@ export default () => {
         else showBanner();
         return true;
       }}
+      onPause={() => {
+        if (!watching()) return false;
+        pauseLive();
+        return true;
+      }}
+      onPlay={() => {
+        if (!watching()) return false;
+        void playOn();
+        return true;
+      }}
+      onPlayPause={() => {
+        if (!watching()) return false;
+        if (pausedAt() === undefined) pauseLive();
+        else void playOn();
+        return true;
+      }}
+      onRewind={() => {
+        if (!watching()) return false;
+        rewind();
+        return true;
+      }}
       onBack={() => {
         if (!watching()) {
           openGuide();
@@ -355,6 +572,7 @@ export default () => {
         else if (tracksOpen()) setTracksOpen(false);
         else if (listOpen()) setListOpen(false);
         else if (zapper.pending()) zapper.cancelZap();
+        else if (pausedAt() !== undefined) cancelPause();
         else if (bannerShown()) hideBanner();
         else openGuide();
         return true;
@@ -378,6 +596,63 @@ export default () => {
           </Text>
         }
       >
+        <Show when={smallChannel()}>
+          {channel => (
+            <View
+              x={smallRect().x - 4}
+              y={smallRect().y - 4}
+              width={SMALL_WIDTH + 8}
+              height={SMALL_HEIGHT + 8}
+              borderRadius={8}
+              border={{ width: 4, color: "#ffffffcc" }}
+            >
+              <View
+                x={4}
+                y={4}
+                height={44}
+                display="flex"
+                flexBoundary="contain"
+                padding={[6, 16]}
+                color="#000000b3"
+              >
+                <Text maxWidth={SMALL_WIDTH - 32} maxLines={1} fontSize={26}>
+                  {channel().name}
+                </Text>
+              </View>
+              <Show when={smallText()}>
+                <Text
+                  y={SMALL_HEIGHT / 2 - 16}
+                  width={SMALL_WIDTH + 8}
+                  textAlign="center"
+                  maxLines={1}
+                  contain="width"
+                  fontSize={28}
+                  color="#ffffffcc"
+                >
+                  {smallText()}
+                </Text>
+              </Show>
+            </View>
+          )}
+        </Show>
+        <Show when={pausedAt() !== undefined}>
+          <View x={60} y={60} width={760} height={130} borderRadius={16} color="#071423e6">
+            <Text
+              x={32}
+              y={20}
+              width={696}
+              maxLines={1}
+              contain="width"
+              fontSize={40}
+              fontFamily="NotoSans700"
+            >
+              {$t("live.paused", { time: duration(pausedFor()) })}
+            </Text>
+            <Text x={32} y={78} width={696} maxLines={1} contain="width" fontSize={26} color="#ffffffb3">
+              {pausedHint()}
+            </Text>
+          </View>
+        </Show>
         <Show when={lockedChannel() && !zapper.pending() && !listOpen()}>
           <View x={460} y={470} width={1000} height={110} borderRadius={16} color="#071423d9">
             <Text
@@ -470,7 +745,22 @@ export default () => {
           </View>
         </Show>
         <Show when={optionsFor()}>
-          {channel => <ChannelOptions channel={channel()} x={1920 - OPTIONS_WIDTH} onClose={closeOptions} />}
+          {channel => (
+            <ChannelOptions
+              channel={channel()}
+              x={1920 - OPTIONS_WIDTH}
+              onClose={closeOptions}
+              extra={[
+                ...smallOptions(channel()),
+                // The programme on now, for the channel playing.
+                ...(channel().id === zapper.shown()?.id && !isBlocked(channel())
+                  ? programmeOptions(channel(), nowNext().now, Date.now(), programme =>
+                      watchRecording(navigate, channel(), programme, { group: zapper.group() }),
+                    )
+                  : []),
+              ]}
+            />
+          )}
         </Show>
       </Show>
     </View>

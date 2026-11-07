@@ -137,11 +137,21 @@ describe("runImport", () => {
     db.close();
   });
 
+  it("keeps as many days before today as the channels' catch-up reaches", async () => {
+    // Every tenth test channel has 3 days of catch-up.
+    const { window, files } = await source(20);
+    const result = await runImport(
+      { source: "test", playlistUrl: PLAYLIST },
+      { dbName: DB, fetch: serve(files), now: window.start + 2 * DAY },
+    );
+    expect(result.guideFirstDay).toBe(Math.floor(window.start / DAY) + 2 - 3);
+  });
+
   it("drops the farthest days to stay within the budget", async () => {
     const { channels, window, files } = await source(60);
     const budget = 120_000;
     const result = await runImport(
-      { source: "test", playlistUrl: PLAYLIST, guideDays: 3, guideBudgetBytes: budget },
+      { source: "test", playlistUrl: PLAYLIST, guideDays: 3, guidePastDays: 1, guideBudgetBytes: budget },
       { dbName: DB, fetch: serve(files) },
     );
     expect(result.guideTrimmed).toBe(true);

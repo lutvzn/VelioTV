@@ -34,6 +34,22 @@
 //   Stalker (stalker.mjs)        portal http://<host>:<port>/c/, MAC
 //                                00:1A:79:00:00:01, or 00:1A:79:00:00:02
 //                                for 50 channels
+// Films and series (vod.mjs) are in the Xtream API and get.php, and in the
+// playlist with ?vod=1. They all play one made-up film, encoded at the first
+// run, its clock on screen:
+//   /vod/film.mp4, .mkv, .ts     with range requests
+//   /vod/film.m3u8               HLS, as a VOD playlist
+//   /poster/<channels>/(film|series)/<id>.svg
+// Catch-up (PLAN.md, Phase 6, step 2): the playlist's catch-up channels take
+// turns at the styles (playlist.mjs), and Xtream has its own. Each makes a
+// recording as it is asked for, showing the time it stands for:
+//   /archive/<channel>/<Y>-<m>-<d>/<HHMMSS>/<minutes>.ts   default (UTC)
+//   /ts/<id>.ts?utc=<s>, /hls/<id>/index.m3u8?utc=<s>      append and shift
+//   /fs/<id>/index.m3u8, /fs/<id>/mpegts                   Flussonic live,
+//   /fs/<id>/index-<s>-<seconds>.m3u8,                     and its archive
+//   /fs/<id>/timeshift_abs-<s>.ts
+//   /timeshift/...                                         Xtream (xtream.mjs)
+// /catchup/log lists the last recordings asked for, to check their times.
 // /echo answers with the request's method and headers, to see which headers
 // a TV really sends.
 // /backup/<name>.json keeps an app backup (PLAN.md, Phase 5, step 7): PUT
@@ -74,6 +90,7 @@ import {
   subtitles,
 } from "./streams.mjs";
 import { handleXtream } from "./xtream.mjs";
+import { FILM_SECONDS, posterSvg, vodLibrary, vodLines } from "./vod.mjs";
 
 const option = (name, fallback) => {
   const at = process.argv.indexOf(`--${name}`);
@@ -92,6 +109,7 @@ const cacheDir = path.join(
   "test-streams",
 );
 const guideDir = path.join(path.dirname(cacheDir), "test-guides");
+const filmDir = path.join(path.dirname(cacheDir), "test-film");
 const hlsRoot = mkdtempSync(path.join(tmpdir(), "tiviplayer-hls-"));
 const children = new Set();
 let stopping = false;
@@ -171,6 +189,277 @@ const TRACKS_MASTER = `#EXTM3U
 media_0.m3u8
 `;
 
+// The made-up film: 720p H.264 and AAC, its clock on screen, as MP4, then
+// copied into MKV, raw TS and HLS segments.
+const FILM_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+const filmText = `drawtext=fontfile=${FILM_FONT}:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=12`;
+const FILM_VERSION = "1";
+const filmPath = ext => path.join(filmDir, `film-${FILM_VERSION}.${ext}`);
+const encodeFilm = async () => {
+  if (existsSync(filmPath("m3u8"))) return;
+  console.log(`Encoding the test film (${FILM_SECONDS} s)...`);
+  mkdirSync(filmDir, { recursive: true });
+  const partial = `${filmPath("mp4")}.partial.mp4`;
+  const video = [
+    "testsrc2=size=1280x720:rate=25",
+    `${filmText}:fontsize=56:x=60:y=60:text='TiviPlayer test film'`,
+    `${filmText}:fontsize=96:x=60:y=160:text='%{pts\\:hms}'`,
+  ].join(",");
+  const audio =
+    "aevalsrc=0.3*sin(2*PI*440*t)*lt(mod(t\\,1)\\,0.1)|0.3*sin(2*PI*660*t)*lt(mod(t\\,1)\\,0.1):s=48000:c=stereo";
+  const encode = ["-y", "-f", "lavfi", "-i", video, "-f", "lavfi", "-i", audio, "-t", String(FILM_SECONDS)];
+  const codecs = [
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-b:v",
+    "1500k",
+    ...KEYFRAMES_FILM,
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+  ];
+  await finished(
+    ffmpeg([...encode, ...codecs, "-movflags", "+faststart", partial], {
+      stdio: ["ignore", "inherit", "inherit"],
+    }),
+  );
+  renameSync(partial, filmPath("mp4"));
+  for (const [ext, format] of [
+    ["mkv", "matroska"],
+    ["ts", "mpegts"],
+  ]) {
+    await finished(ffmpeg(["-y", "-i", filmPath("mp4"), "-c", "copy", "-f", format, filmPath(ext)]));
+  }
+  const segments = path.join(filmDir, `film-${FILM_VERSION}`);
+  mkdirSync(segments, { recursive: true });
+  await finished(
+    ffmpeg(
+      [
+        [
+          "-y",
+          "-i",
+          filmPath("mp4"),
+          "-c",
+          "copy",
+          "-f",
+          "hls",
+          "-hls_time",
+          "6",
+          "-hls_playlist_type",
+          "vod",
+        ],
+        ["-hls_segment_filename", path.join(segments, "seg%03d.ts"), "-hls_base_url", "film/"],
+        [filmPath("m3u8")],
+      ].flat(),
+    ),
+  );
+};
+const KEYFRAMES_FILM = ["-g", "50", "-keyint_min", "50", "-sc_threshold", "0"];
+
+const FILM_TYPES = { mp4: "video/mp4", mkv: "video/x-matroska", ts: "video/mp2t" };
+
+// A file, whole or the range asked for.
+const sendFile = (req, res, file, type) => {
+  const size = statSync(file).size;
+  const range = req.headers.range?.match(/^bytes=(\d*)-(\d*)$/);
+  const headers = { "Content-Type": type, "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": "*" };
+  if (!range || (range[1] === "" && range[2] === "")) {
+    res.writeHead(200, { ...headers, "Content-Length": size });
+    void pipeline(createReadStream(file), res).catch(() => {});
+    return;
+  }
+  const start = range[1] === "" ? Math.max(0, size - Number(range[2])) : Number(range[1]);
+  const end = range[1] !== "" && range[2] !== "" ? Math.min(Number(range[2]), size - 1) : size - 1;
+  if (start >= size || start > end) {
+    res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` });
+    res.end();
+    return;
+  }
+  res.writeHead(206, {
+    ...headers,
+    "Content-Length": end - start + 1,
+    "Content-Range": `bytes ${start}-${end}/${size}`,
+  });
+  void pipeline(createReadStream(file, { start, end }), res).catch(() => {});
+};
+
+const serveFilm = (req, res, url) => {
+  const whole = url.pathname.match(/^\/vod\/film\.(mp4|mkv|ts|m3u8)$/);
+  if (whole) {
+    if (whole[1] === "m3u8")
+      return (sendFile(req, res, filmPath("m3u8"), "application/vnd.apple.mpegurl"), true);
+    return (sendFile(req, res, filmPath(whole[1]), FILM_TYPES[whole[1]]), true);
+  }
+  const segment = url.pathname.match(/^\/vod\/film\/(seg\d+\.ts)$/);
+  if (segment) {
+    const file = path.join(filmDir, `film-${FILM_VERSION}`, segment[1]);
+    if (!existsSync(file)) return (send(res, 404, "Not found\n"), true);
+    return (sendFile(req, res, file, "video/mp2t"), true);
+  }
+  const poster = url.pathname.match(/^\/poster\/(\d+)\/(film|series)\/(\d+)\.svg$/);
+  if (poster && Number(poster[1]) <= MAX_CHANNELS) {
+    const svg = posterSvg(vodLibrary(Number(poster[1])), poster[2], Number(poster[3]));
+    if (!svg) return (send(res, 404, "No such poster\n"), true);
+    return (send(res, 200, svg, "image/svg+xml"), true);
+  }
+  return false;
+};
+
+// Catch-up recordings, made as they're asked for: a test picture with what
+// they are and the time they stand for, which moves on as they play.
+const ARCHIVE_SEGMENT_SECONDS = 6;
+/** The longest recording made when the request gives no length. */
+const ARCHIVE_MAX_SECONDS = 4 * 3600;
+const catchupLog = [];
+const plainText = text => String(text).replace(/[^\w .|()-]/g, "");
+const archiveArgs = ({ label, startMs, offsetSeconds = 0, seconds }) => {
+  const at = Math.floor(startMs / 1000) + offsetSeconds;
+  const video = [
+    "testsrc2=size=1280x720:rate=25",
+    `${filmText}:fontsize=44:x=60:y=60:text='Catch-up  ${plainText(label)}'`,
+    // The date and time it stands for, in the server's time zone.
+    `${filmText}:fontsize=72:x=60:y=150:text='%{pts\\:localtime\\:${at}}'`,
+  ].join(",");
+  const audio =
+    "aevalsrc=0.3*sin(2*PI*550*t)*lt(mod(t\\,1)\\,0.1)|0.3*sin(2*PI*550*t)*lt(mod(t\\,1)\\,0.1):s=48000:c=stereo";
+  return [
+    ["-f", "lavfi", "-i", video, "-f", "lavfi", "-i", audio, "-t", String(seconds)],
+    ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "2M", ...KEYFRAMES_FILM],
+    ["-c:a", "aac", "-b:a", "96k"],
+    offsetSeconds ? ["-output_ts_offset", String(offsetSeconds)] : [],
+    ["-f", "mpegts", "pipe:1"],
+  ].flat();
+};
+const pipeArchive = (req, res, args) => {
+  res.writeHead(200, { "Content-Type": "video/mp2t", "Access-Control-Allow-Origin": "*" });
+  const child = ffmpeg(args, { stdio: ["ignore", "pipe", "inherit"] });
+  child.stdout.pipe(res);
+  req.on("close", () => child.kill("SIGKILL"));
+};
+
+/**
+ * Answers a catch-up request: `start` and `durationMs` say what's asked for,
+ * `hls` whether as an HLS playlist. Recordings can't start later than now.
+ */
+const archive = (req, res, { style, channel, label, start, durationMs, hls = false }) => {
+  const name = label ?? `${channel.number}  ${channel.name}`;
+  const entry = {
+    at: Date.now(),
+    style,
+    channel: channel?.id,
+    label: name,
+    start,
+    durationMs,
+    hls,
+    path: req.url,
+  };
+  catchupLog.unshift(entry);
+  catchupLog.length = Math.min(catchupLog.length, 50);
+  console.log(
+    `Catch-up ${style}: ${name} from ${new Date(start).toISOString()} for ${Math.round((durationMs ?? 0) / 1000)} s`,
+  );
+  if (!Number.isFinite(start) || start > Date.now()) return send(res, 400, "Not recorded yet\n");
+  const seconds = Math.max(
+    1,
+    Math.min(ARCHIVE_MAX_SECONDS, Math.round((durationMs ?? ARCHIVE_MAX_SECONDS * 1000) / 1000)),
+  );
+  if (!hls)
+    return pipeArchive(req, res, archiveArgs({ label: `${style}  ${name}`, startMs: start, seconds }));
+  const count = Math.ceil(seconds / ARCHIVE_SEGMENT_SECONDS);
+  const lines = [
+    "#EXTM3U",
+    "#EXT-X-VERSION:3",
+    `#EXT-X-TARGETDURATION:${ARCHIVE_SEGMENT_SECONDS}`,
+    "#EXT-X-PLAYLIST-TYPE:VOD",
+    "#EXT-X-MEDIA-SEQUENCE:0",
+  ];
+  const tag = encodeURIComponent(plainText(`${style}  ${name}`));
+  for (let n = 0; n < count; n++) {
+    const length = Math.min(ARCHIVE_SEGMENT_SECONDS, seconds - n * ARCHIVE_SEGMENT_SECONDS);
+    lines.push(`#EXTINF:${length}.0,`, `/archive-seg/${start}/${n}/${length}.ts?label=${tag}`);
+  }
+  lines.push("#EXT-X-ENDLIST");
+  send(res, 200, `${lines.join("\n")}\n`, "application/vnd.apple.mpegurl");
+};
+
+const serveArchiveSegment = (req, res, url) => {
+  const segment = url.pathname.match(/^\/archive-seg\/(\d+)\/(\d+)\/(\d+)\.ts$/);
+  if (!segment) return false;
+  const [, start, n, length] = segment.map(Number);
+  pipeArchive(
+    req,
+    res,
+    archiveArgs({
+      label: url.searchParams.get("label") ?? "",
+      startMs: start,
+      offsetSeconds: n * ARCHIVE_SEGMENT_SECONDS,
+      seconds: Math.min(length, ARCHIVE_SEGMENT_SECONDS),
+    }),
+  );
+  return true;
+};
+
+// The playlist's catch-up URLs (playlist.mjs), and Flussonic's live ones.
+const serveCatchup = (req, res, url) => {
+  if (url.pathname === "/catchup/log") {
+    send(res, 200, JSON.stringify(catchupLog, null, 2), "application/json");
+    return true;
+  }
+  if (serveArchiveSegment(req, res, url)) return true;
+  const plain = url.pathname.match(
+    /^\/archive\/(\d+)\/(\d{4})-(\d\d)-(\d\d)\/(\d\d)(\d\d)(\d\d)\/(\d+)\.ts$/,
+  );
+  if (plain) {
+    const [, id, year, month, day, hour, minute, second, minutes] = plain.map(Number);
+    const start = Date.UTC(year, month - 1, day, hour, minute, second);
+    archive(req, res, { style: "default", label: `channel ${id}`, start, durationMs: minutes * 60_000 });
+    return true;
+  }
+  const utc = url.searchParams.get("utc");
+  const stream = url.pathname.match(
+    /^\/(?:need-referer\/|need-user-agent\/)?(ts|hls)\/([\w-]+)(?:\.ts|\/index\.m3u8)$/,
+  );
+  if (utc && stream) {
+    // Append and shift ask from a time, and play on until stopped.
+    archive(req, res, {
+      style: "utc",
+      label: stream[2],
+      start: Number(utc) * 1000,
+      hls: stream[1] === "hls",
+    });
+    return true;
+  }
+  const fs = url.pathname.match(
+    /^\/fs\/([\w-]+)\/(index\.m3u8|mpegts|index-(\d+)-(\d+)\.m3u8|timeshift_abs-(\d+)\.ts)$/,
+  );
+  if (!fs || !STREAMS.some(one => one.id === fs[1])) return false;
+  const [, id, file, from, seconds, absolute] = fs;
+  if (file === "mpegts") return (serveStream(req, res, `/ts/${id}.ts`), true);
+  if (file === "index.m3u8") {
+    // The live playlist, with segment paths that reach the test stream's.
+    const live = path.join(hlsRoot, id, "index.m3u8");
+    if (!existsSync(live)) return (send(res, 404, "Not found\n"), true);
+    const text = readFileSync(live, "utf8").replace(/^(seg\d+\.ts)$/gm, `/hls/${id}/$1`);
+    send(res, 200, text, "application/vnd.apple.mpegurl");
+    return true;
+  }
+  if (from) {
+    archive(req, res, {
+      style: "flussonic",
+      label: id,
+      start: Number(from) * 1000,
+      durationMs: Number(seconds) * 1000,
+      hls: true,
+    });
+  } else {
+    archive(req, res, { style: "flussonic", label: id, start: Number(absolute) * 1000 });
+  }
+  return true;
+};
+
 const hlsOutput = (stream, dir) => {
   const segments = [
     "-f",
@@ -233,12 +522,15 @@ const index = host => {
     },
     sources: {
       playlist: `${base}/playlist.m3u${query}`,
+      playlistWithVod: `${base}/playlist.m3u${query}&vod=1`,
       guide: `${base}/guide.xml${query}`,
       guideGzip: `${base}/guide.xml.gz${query}`,
       xtream: { server: base, accounts: ["test/test", `small/small (${SMALL} channels)`] },
       stalker: { portal: `${base}/c/`, macs: ["00:1A:79:00:00:01", `00:1A:79:00:00:02 (${SMALL} channels)`] },
     },
     backup: { sample: `${base}/backup/sample.json`, yours: `${base}/backup/<name>.json` },
+    film: ["mp4", "mkv", "ts", "m3u8"].map(ext => `${base}/vod/film.${ext}`),
+    catchupLog: `${base}/catchup/log`,
   };
 };
 
@@ -386,10 +678,20 @@ const serveSource = (req, res, url, base) => {
   const settings = sourceSettings(url);
   const query = `?channels=${settings.count}&days=${settings.days}`;
   if (url.pathname === "/playlist.m3u") {
+    // With ?vod=1, films and episodes as video files, which only their
+    // extension tells from channels; raw TS ones would pass for channels.
+    const extra =
+      url.searchParams.get("vod") === "1"
+        ? vodLines(vodLibrary(settings.count), base, (kind, id, ext) => {
+            const file = ext === "mkv" ? "mkv" : "mp4";
+            return `${base}/vod/film.${file}?${kind}=${id}`;
+          })
+        : [];
     const body = m3u({
       base,
       channels: catalog(settings.count).channels,
       guideUrl: `${base}/guide.xml.gz${query}`,
+      extra,
     });
     send(res, 200, body, "audio/x-mpegurl");
     return true;
@@ -413,8 +715,11 @@ const serveSource = (req, res, url, base) => {
 };
 
 const accounts = new Map([
-  ["test:test", { username: "test", password: "test", catalog: catalog(CHANNELS) }],
-  ["small:small", { username: "small", password: "small", catalog: catalog(SMALL) }],
+  [
+    "test:test",
+    { username: "test", password: "test", catalog: catalog(CHANNELS), vod: vodLibrary(CHANNELS) },
+  ],
+  ["small:small", { username: "small", password: "small", catalog: catalog(SMALL), vod: vodLibrary(SMALL) }],
 ]);
 const macs = new Map([
   ["00:1A:79:00:00:01", { id: 1, name: "Test", mac: "00:1A:79:00:00:01", catalog: catalog(CHANNELS) }],
@@ -485,7 +790,8 @@ const handle = (req, res) => {
   const base = `http://${req.headers.host ?? "localhost"}`;
   if (serveBackup(req, res, url, base)) return;
   if (serveSource(req, res, url, base)) return;
-  const ctx = { base, send, sendChunks, accounts, macs, now: Date.now(), window: guideWindow(DAYS) };
+  if (serveFilm(req, res, url) || serveCatchup(req, res, url)) return;
+  const ctx = { base, send, sendChunks, accounts, macs, archive, now: Date.now(), window: guideWindow(DAYS) };
   if (handleXtream(req, res, url, ctx) || handleStalker(req, res, url, ctx)) return;
 
   const referer = url.pathname.match(/^\/need-referer(\/.*)$/);
@@ -553,6 +859,7 @@ for (const file of readdirSync(cacheDir)) {
   if (!current.has(file)) rmSync(path.join(cacheDir, file), { force: true });
 }
 for (const stream of STREAMS) await encodeClip(stream);
+await encodeFilm();
 for (const stream of STREAMS) startHls(stream);
 
 http.createServer(handle).listen(PORT, () => {

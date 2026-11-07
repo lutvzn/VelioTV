@@ -12,7 +12,7 @@ import {
   type SourceDraft,
   type SourceKind,
 } from "../../data/sources";
-import { edits, library } from "../../library";
+import { edits, library, watched } from "../../library";
 import { $t } from "../../translate";
 import { statusLines } from "./status";
 
@@ -111,6 +111,7 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
     void library.remove(existing.id);
     // Its channels' favourites, hiding, locks and moves go with it.
     edits.forgetSource(existing.id);
+    watched.forgetSource(existing.id);
     props.onClose();
   };
 

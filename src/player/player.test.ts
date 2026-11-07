@@ -18,6 +18,8 @@ const fakeEngine = () => {
   const windows: DisplayRect[] = [];
   let stops = 0;
   let position = 0;
+  const duration = 360_000;
+  const calls: string[] = [];
   // Each stream gets a fresh copy, with its first tracks selected.
   let streamTracks: Track[] = [];
   let tracks: Track[] = [];
@@ -32,6 +34,9 @@ const fakeEngine = () => {
     stop: () => stops++,
     setWindow: rect => windows.push(rect),
     position: () => position,
+    duration: () => duration,
+    setPaused: value => calls.push(value ? "pause" : "play"),
+    seek: ms => calls.push(`seek ${ms}`),
     formats: () => [],
     tracks: () => tracks.map(track => ({ ...track })),
     selectTrack: (kind, id) => {
@@ -47,6 +52,7 @@ const fakeEngine = () => {
     windows,
     stops: () => stops,
     setPosition: (ms: number) => void (position = ms),
+    calls,
     setTracks: (list: Track[]) => void (streamTracks = list),
     /** Tracks the open stream lists only now. */
     addTracks: (list: Track[]) => void tracks.push(...list.map(track => ({ ...track }))),
@@ -220,6 +226,22 @@ describe("the player", () => {
     expect(fake.windows).toHaveLength(2);
     expect(videoWindow()?.width).toBe(1920);
     player.stop();
+  });
+
+  it("leaves the shared video window alone for a second player", async () => {
+    const fake = fakeEngine();
+    const shown: (typeof PREVIEW | null)[] = [];
+    const player = createPlayer(() => Promise.resolve(fake.engine), {
+      afterPaint,
+      showVideo: rect => shown.push(rect),
+    });
+    player.setWindow(PREVIEW);
+    await player.play({ url: "a" });
+    expect(fake.windows).toEqual([PREVIEW]);
+    expect(shown).toEqual([PREVIEW]);
+    expect(videoWindow()).toBeNull();
+    player.stop();
+    expect(shown).toEqual([PREVIEW, null]);
   });
 
   describe("with a live stream", () => {
@@ -466,6 +488,78 @@ describe("the player", () => {
       player.setOnline(true);
       await wait(0);
       expect(fake.opened).toHaveLength(3);
+    });
+  });
+
+  describe("films and recordings", () => {
+    const film = { url: "film" };
+
+    it("pauses, plays on and seeks, without taking a pause for a stall", async () => {
+      const { fake, player } = liveSetup();
+      void player.play({ ...film, startMs: 60_000 });
+      await wait(0);
+      expect(fake.last()?.stream.startMs).toBe(60_000);
+      fake.last()?.send({ type: "playing" });
+      fake.setPosition(61_000);
+      await wait(1000);
+      player.setPaused(true);
+      expect(player.status().state).toBe("paused");
+      // AVPlay may report buffering while paused.
+      fake.last()?.send({ type: "buffering" });
+      await wait(10_000);
+      expect(player.status().state).toBe("paused");
+      player.setPaused(false);
+      expect(player.status().state).toBe("playing");
+      player.seek(120_000);
+      expect(fake.calls).toEqual(["pause", "play", "seek 120000"]);
+      expect(player.duration()).toBe(360_000);
+    });
+
+    it("doesn't seek a live stream", async () => {
+      const { fake, player } = liveSetup();
+      void player.play(live);
+      await wait(0);
+      fake.last()?.send({ type: "playing" });
+      player.seek(5000);
+      expect(fake.calls).toEqual([]);
+    });
+
+    it("opens a film that dropped again where it was, a few times", async () => {
+      const { fake, player } = liveSetup();
+      void player.play(film);
+      await wait(0);
+      fake.last()?.send({ type: "playing" });
+      fake.setPosition(90_000);
+      await wait(1000);
+      fake.last()?.send({ type: "error", error: "PLAYER_ERROR_CONNECTION_FAILED" });
+      expect(player.status()).toMatchObject({ state: "reconnecting", attempt: 1, attempts: 2 });
+      await wait(1000);
+      expect(fake.last()?.stream).toEqual({ url: "film", startMs: 90_000 });
+      fake.last()?.send({ type: "error", error: "PLAYER_ERROR_CONNECTION_FAILED" });
+      await wait(2000);
+      fake.last()?.send({ type: "error", error: "PLAYER_ERROR_CONNECTION_FAILED" });
+      expect(player.status().state).toBe("failed");
+    });
+
+    it("fails a film that never starts, at once", async () => {
+      const { fake, player } = liveSetup();
+      void player.play(film);
+      await wait(0);
+      fake.last()?.send({ type: "error", error: "PLAYER_ERROR_CONNECTION_FAILED" });
+      expect(player.status().state).toBe("failed");
+    });
+
+    it("keeps a film's place while the app is hidden", async () => {
+      const { fake, player } = liveSetup();
+      void player.play(film);
+      await wait(0);
+      fake.last()?.send({ type: "playing" });
+      fake.setPosition(42_000);
+      player.suspend();
+      expect(player.status()).toEqual({ state: "suspended", stream: { url: "film", startMs: 42_000 } });
+      player.resume();
+      await wait(0);
+      expect(fake.last()?.stream.startMs).toBe(42_000);
     });
   });
 

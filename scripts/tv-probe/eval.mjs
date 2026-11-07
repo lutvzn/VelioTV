@@ -34,8 +34,19 @@ ws.addEventListener("message", event => {
 
 ws.addEventListener("open", async () => {
   await call("Runtime.enable");
-  // Lets the app finish starting.
-  await new Promise(resolve => setTimeout(resolve, 2500));
+  // Lets the app finish starting. The debug port opens before the app's
+  // page loads, and a probe run in the page before it reads and writes a
+  // different storage, so this waits for the app's probe hooks (at most
+  // 20 s), then a little longer for the start to settle.
+  for (let waited = 0; waited < 20_000; waited += 200) {
+    const ready = await call("Runtime.evaluate", {
+      expression: "document.readyState === 'complete' && window.tiviplayer !== undefined",
+      returnByValue: true,
+    });
+    if (ready.result?.result?.value === true) break;
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  await new Promise(resolve => setTimeout(resolve, 1500));
   const { result } = await call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (result?.exceptionDetails) {
     console.error(

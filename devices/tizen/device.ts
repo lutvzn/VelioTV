@@ -71,4 +71,20 @@ export class TizenDevice extends DeviceCommon {
   protected _getPlayer() {
     return typeof webapis === "undefined" ? super._getPlayer() : new AvplayEngine(webapis.avplay);
   }
+
+  // Samsung's avplaystore (Tizen 6+) gives further players; the sub video
+  // scaler plays a second stream (PLAN.md, Phase 0, test 5, and Phase 7).
+  hasSecondPlayer() {
+    return typeof webapis !== "undefined" && Boolean(webapis.avplaystore);
+  }
+
+  protected _getSecondPlayer() {
+    if (typeof webapis === "undefined" || !webapis.avplaystore) return undefined;
+    try {
+      return new AvplayEngine(webapis.avplaystore.getPlayer(), { second: true });
+    } catch (error) {
+      console.warn("No second player:", error);
+      return undefined;
+    }
+  }
 }

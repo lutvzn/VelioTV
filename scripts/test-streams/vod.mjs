@@ -1,0 +1,288 @@
+// Made-up films and series for testing Movies and Series (PLAN.md, Phase 6):
+// for the mock Xtream API (xtream.mjs), its get.php playlist, and the plain
+// playlist with ?vod=1 (playlist.mjs). As with the channels, fixed seeds
+// make the same counts always give the same data.
+//
+// Every film and episode plays the same made-up film (server.mjs, /vod/),
+// so each says it lasts as long as that does.
+
+import { hash, random } from "./catalog.mjs";
+
+export const FILM_SECONDS = 360;
+
+const GENRES = [
+  "Action",
+  "Comedy",
+  "Drama",
+  "Documentary",
+  "Family",
+  "Horror",
+  "Science fiction",
+  "Thriller",
+];
+const SYLLABLES = "ka lo mi ra ven tor sil bri dun mar pel quo zan fe rin tal gor nu bel cas".split(" ");
+const capital = word => word[0].toUpperCase() + word.slice(1);
+const pick = (rand, list) => list[Math.floor(rand() * list.length)];
+const word = rand => {
+  let text = "";
+  for (let n = 1 + Math.floor(rand() * 3); n > 0; n--) text += pick(rand, SYLLABLES);
+  return text;
+};
+const title = (rand, words) => Array.from({ length: words }, () => capital(word(rand))).join(" ");
+const sentence = (rand, words) => {
+  const list = Array.from({ length: words }, () => word(rand));
+  list[0] = capital(list[0]);
+  return `${list.join(" ")}.`;
+};
+const people = rand => Array.from({ length: 3 }, () => `${capital(word(rand))} ${capital(word(rand))}`);
+// Some films have no poster, as on real servers.
+const hasPoster = id => id % 17 !== 0;
+const CONTAINERS = ["mp4", "mp4", "mkv", "mp4", "ts"];
+
+const buildFilms = (count, channels) =>
+  Array.from({ length: count }, (_, i) => {
+    const id = 10_000 + i;
+    const rand = random(hash(`film-${id}`));
+    const year = 1970 + Math.floor(rand() * 56);
+    const genreId = Math.floor(rand() * GENRES.length);
+    return {
+      id,
+      name: `${title(rand, 1 + Math.floor(rand() * 3))} (${year})`,
+      year,
+      genreId,
+      genre: GENRES[genreId],
+      rating: Math.round((4 + rand() * 5.5) * 10) / 10,
+      plot: `${sentence(rand, 12 + Math.floor(rand() * 20))} ${sentence(rand, 8 + Math.floor(rand() * 10))}`,
+      cast: people(rand),
+      director: `${capital(word(rand))} ${capital(word(rand))}`,
+      container: CONTAINERS[id % CONTAINERS.length],
+      poster: hasPoster(id) ? `/poster/${channels}/film/${id}.svg` : null,
+      added: 1_767_225_600 + i * 3600,
+    };
+  });
+
+const buildSeries = (count, channels) => {
+  let episodeId = 50_000;
+  return Array.from({ length: count }, (_, i) => {
+    const id = 1000 + i;
+    const rand = random(hash(`series-${id}`));
+    const genreId = Math.floor(rand() * GENRES.length);
+    const year = 1990 + Math.floor(rand() * 36);
+    const seasons = Array.from({ length: 1 + Math.floor(rand() * 3) }, (_season, s) =>
+      Array.from({ length: 4 + Math.floor(rand() * 5) }, (_episode, e) => ({
+        id: episodeId++,
+        season: s + 1,
+        episode: e + 1,
+        title: title(rand, 1 + Math.floor(rand() * 3)),
+        plot: sentence(rand, 10 + Math.floor(rand() * 14)),
+        container: e % 3 === 2 ? "mkv" : "mp4",
+      })),
+    );
+    return {
+      id,
+      name: title(rand, 1 + Math.floor(rand() * 2)),
+      year,
+      genreId,
+      genre: GENRES[genreId],
+      rating: Math.round((5 + rand() * 4.5) * 10) / 10,
+      plot: `${sentence(rand, 14 + Math.floor(rand() * 16))} ${sentence(rand, 8 + Math.floor(rand() * 8))}`,
+      cast: people(rand),
+      director: `${capital(word(rand))} ${capital(word(rand))}`,
+      poster: `/poster/${channels}/series/${id}.svg`,
+      seasons,
+    };
+  });
+};
+
+const libraries = new Map();
+
+/** Films and series: about one film per 8 channels and one series per 150, at least 24 and 6. */
+export const vodLibrary = channelCount => {
+  if (!libraries.has(channelCount)) {
+    const films = Math.max(24, Math.min(2000, Math.round(channelCount / 8)));
+    const series = Math.max(6, Math.min(80, Math.round(channelCount / 150)));
+    libraries.set(channelCount, {
+      films: buildFilms(films, channelCount),
+      series: buildSeries(series, channelCount),
+      genres: GENRES,
+    });
+  }
+  return libraries.get(channelCount);
+};
+
+export const findEpisode = (library, id) => {
+  for (const show of library.series) {
+    for (const season of show.seasons) {
+      const episode = season.find(one => one.id === id);
+      if (episode) return { show, episode };
+    }
+  }
+  return undefined;
+};
+
+const pad = n => String(n).padStart(2, "0");
+export const episodeCode = episode => `S${pad(episode.season)} E${pad(episode.episode)}`;
+const duration = () => `00:${pad(Math.floor(FILM_SECONDS / 60))}:${pad(FILM_SECONDS % 60)}`;
+
+// The Xtream API's answers (player_api.php actions).
+export const xtreamVod = {
+  categories: library =>
+    library.genres.map((name, id) => ({ category_id: String(id + 1), category_name: name, parent_id: 0 })),
+
+  films: (library, base, category) =>
+    library.films
+      .filter(film => !category || String(film.genreId + 1) === category)
+      .map((film, at) => ({
+        num: at + 1,
+        name: film.name,
+        stream_type: "movie",
+        stream_id: film.id,
+        stream_icon: film.poster ? `${base}${film.poster}` : "",
+        rating: String(film.rating),
+        rating_5based: Math.round(film.rating * 5) / 10,
+        added: String(film.added),
+        category_id: String(film.genreId + 1),
+        container_extension: film.container,
+        custom_sid: "",
+        direct_source: "",
+      })),
+
+  filmInfo: (library, base, id) => {
+    const film = library.films.find(one => one.id === id);
+    if (!film) return { info: [], movie_data: [] };
+    return {
+      info: {
+        movie_image: film.poster ? `${base}${film.poster}` : "",
+        name: film.name,
+        plot: film.plot,
+        cast: film.cast.join(", "),
+        director: film.director,
+        genre: film.genre,
+        releasedate: `${film.year}-06-01`,
+        duration_secs: FILM_SECONDS,
+        duration: duration(),
+        rating: String(film.rating),
+      },
+      movie_data: {
+        stream_id: film.id,
+        name: film.name,
+        added: String(film.added),
+        category_id: String(film.genreId + 1),
+        container_extension: film.container,
+      },
+    };
+  },
+
+  series: (library, base, category) =>
+    library.series
+      .filter(show => !category || String(show.genreId + 1) === category)
+      .map((show, at) => ({
+        num: at + 1,
+        name: show.name,
+        series_id: show.id,
+        cover: `${base}${show.poster}`,
+        plot: show.plot,
+        cast: show.cast.join(", "),
+        director: show.director,
+        genre: show.genre,
+        releaseDate: `${show.year}-01-01`,
+        last_modified: "1767225600",
+        rating: String(show.rating),
+        rating_5based: Math.round(show.rating * 5) / 10,
+        category_id: String(show.genreId + 1),
+      })),
+
+  seriesInfo: (library, base, id) => {
+    const show = library.series.find(one => one.id === id);
+    if (!show) return { seasons: [], info: [], episodes: [] };
+    return {
+      seasons: show.seasons.map((episodes, at) => ({
+        season_number: at + 1,
+        name: `Season ${at + 1}`,
+        episode_count: String(episodes.length),
+        cover: `${base}${show.poster}`,
+      })),
+      info: {
+        name: show.name,
+        cover: `${base}${show.poster}`,
+        plot: show.plot,
+        cast: show.cast.join(", "),
+        director: show.director,
+        genre: show.genre,
+        releaseDate: `${show.year}-01-01`,
+        rating: String(show.rating),
+      },
+      episodes: Object.fromEntries(
+        show.seasons.map((episodes, at) => [
+          String(at + 1),
+          episodes.map(episode => ({
+            id: String(episode.id),
+            episode_num: episode.episode,
+            title: `${show.name} - ${episodeCode(episode)} - ${episode.title}`,
+            container_extension: episode.container,
+            season: episode.season,
+            info: { plot: episode.plot, duration_secs: FILM_SECONDS, duration: duration() },
+          })),
+        ]),
+      ),
+    };
+  },
+};
+
+const attribute = value => String(value).replaceAll('"', "'");
+
+/**
+ * The playlist lines for the films and episodes, as Xtream panels list them
+ * in get.php (`url` gives Xtream-style /movie/ and /series/ URLs), or as a
+ * plain playlist might, with video files.
+ */
+export const vodLines = (library, base, url) => {
+  const lines = [];
+  for (const film of library.films) {
+    lines.push(
+      `#EXTINF:-1 tvg-id="" tvg-name="${attribute(film.name)}" tvg-logo="${film.poster ? `${base}${film.poster}` : ""}" group-title="Movies: ${film.genre}",${film.name}`,
+      url("movie", film.id, film.container),
+    );
+  }
+  for (const show of library.series) {
+    for (const season of show.seasons) {
+      for (const episode of season) {
+        const name = `${show.name} ${episodeCode(episode)}`;
+        lines.push(
+          `#EXTINF:-1 tvg-id="" tvg-name="${attribute(name)}" tvg-logo="${base}${show.poster}" group-title="Series: ${show.genre}",${name}`,
+          url("series", episode.id, episode.container),
+        );
+      }
+    }
+  }
+  return lines;
+};
+
+const escapeXml = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+/** A poster: a coloured 2:3 card with the title on it. */
+export const posterSvg = (library, kind, id) => {
+  const item = (kind === "film" ? library.films : library.series).find(one => one.id === id);
+  if (!item) return undefined;
+  const hue = hash(item.name) % 360;
+  const words = item.name.split(" ");
+  const lines = [];
+  for (const one of words) {
+    const last = lines[lines.length - 1];
+    if (last && `${last} ${one}`.length <= 12) lines[lines.length - 1] = `${last} ${one}`;
+    else lines.push(one);
+  }
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">`,
+    `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue} 55% 45%)"/><stop offset="1" stop-color="hsl(${(hue + 40) % 360} 60% 18%)"/></linearGradient></defs>`,
+    `<rect width="400" height="600" fill="url(#g)"/>`,
+    ...lines
+      .slice(0, 4)
+      .map(
+        (line, at) =>
+          `<text x="200" y="${230 + at * 64}" font-family="sans-serif" font-size="52" font-weight="bold" fill="#fff" text-anchor="middle">${escapeXml(line)}</text>`,
+      ),
+    `<text x="200" y="560" font-family="sans-serif" font-size="30" fill="#ffffffcc" text-anchor="middle">${kind === "film" ? "Film" : "Series"} ${id}</text>`,
+    `</svg>`,
+  ].join("");
+};

@@ -2,6 +2,7 @@
 // `window.tiviplayer`, so a probe can run the real import, read back what it
 // stored, add sources without typing them on the remote, and play streams.
 
+import { activeElement, type ElementNode } from "@solidtv/solid";
 import { onCleanup } from "solid-js";
 import { channelKeys } from "./data/channelKey";
 import * as db from "./data/db";
@@ -16,10 +17,14 @@ import {
   library,
   lineup,
   liveView,
+  reminders,
   restoreFrom,
   settings,
+  vod,
+  watched,
 } from "./library";
-import { player } from "./player";
+import { handPlay } from "./play/session";
+import { player, secondPlayer } from "./player";
 
 const hooks: Record<string, unknown> = {
   importSource,
@@ -27,6 +32,7 @@ const hooks: Record<string, unknown> = {
   library,
   lineup,
   player,
+  secondPlayer,
   guide,
   guideReader,
   createGuideClient,
@@ -37,6 +43,18 @@ const hooks: Record<string, unknown> = {
   currentBackup,
   backUpTo,
   restoreFrom,
+  vod,
+  watched,
+  reminders,
+  handPlay,
+  /** What has the keys, as the path to it: each node's name or id, and its kind. */
+  focusPath: () => {
+    const path: string[] = [];
+    for (let at: ElementNode | undefined = activeElement(); at; at = at.parent) {
+      path.push(at.id ?? at.componentName ?? at._type);
+    }
+    return path;
+  },
 };
 
 export const installDevHooks = () => Object.assign(globalThis, { tiviplayer: hooks });

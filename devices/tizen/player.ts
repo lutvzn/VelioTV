@@ -42,12 +42,17 @@ export interface Avplay {
   setDisplayMethod(method: string): void;
   setBufferingParam(when: string, unit: string, amount: number): void;
   setStreamingProperty(name: string, value: string): void;
+  pause(): void;
+  seekTo(ms: number, onSuccess?: () => void, onError?: (error: unknown) => void): void;
   getState(): string;
   getCurrentTime(): number;
+  getDuration(): number;
   getCurrentStreamInfo(): AvplayTrack[];
   getTotalTrackInfo(): AvplayTrack[];
   setSelectTrack(type: string, index: number): void;
   setSilentSubtitle(silent: boolean): void;
+  /** Plays without sound, for a second player. */
+  disableAudioStream?(): void;
 }
 
 const extraInfo = (info: AvplayTrack) => {
@@ -71,6 +76,12 @@ export interface AvplayOptions {
    * took about 10 s to start raw TS on the TV; 1-3 s took about 3.4 s.
    */
   bufferSeconds?: number;
+  /**
+   * A second player, beside the main one (PLAN.md, Phase 7): it plays on the
+   * TV's sub video scaler, without sound. Samsung's avplaystore gives the
+   * player; with the main one from webapis.avplay, both play at once.
+   */
+  second?: boolean;
 }
 
 const FULL_SCREEN: DisplayRect = { x: 0, y: 0, width: 1920, height: 1080 };
@@ -99,14 +110,21 @@ export class AvplayEngine implements PlaybackEngine {
     const { av } = this;
     av.open(stream.url);
     if (stream.userAgent) av.setStreamingProperty("USER_AGENT", stream.userAgent);
+    if (this.options.second) {
+      av.disableAudioStream?.();
+      av.setStreamingProperty("IN_APP_MULTIVIEW", "VIDEO_VIEW_RESOURCE_SUB");
+    }
     try {
       av.setDisplayMethod("PLAYER_DISPLAY_MODE_LETTER_BOX");
     } catch {
       // Older TVs may not have it; video then fills the window.
     }
     this.applyRect();
+    // A file on the TV, such as a recording: AVPlay doesn't buffer it, and
+    // stays at its start if told how much to buffer (PLAN.md, Phase 7, step 4).
+    const local = stream.url.startsWith("file:");
     const seconds = this.options.bufferSeconds ?? 2;
-    for (const when of ["PLAYER_BUFFER_FOR_PLAY", "PLAYER_BUFFER_FOR_RESUME"]) {
+    for (const when of local ? [] : ["PLAYER_BUFFER_FOR_PLAY", "PLAYER_BUFFER_FOR_RESUME"]) {
       av.setBufferingParam(when, "PLAYER_BUFFER_SIZE_IN_SECOND", seconds);
     }
     av.setListener({
@@ -137,13 +155,26 @@ export class AvplayEngine implements PlaybackEngine {
       // Not every stream has subtitles to hide.
     }
     send({ type: "buffering" });
+    const play = () => {
+      if (session !== this.session) return;
+      try {
+        av.play();
+        // No buffering events come for a file.
+        if (local) send({ type: "playing" });
+      } catch (error) {
+        send({ type: "error", error: errorText(error) });
+      }
+    };
     av.prepareAsync(
       () => {
         if (session !== this.session) return;
+        // A film carried on from before: AVPlay can seek once prepared,
+        // before it plays (PLAN.md, Phase 6, step 1).
+        if (!stream.startMs) return play();
         try {
-          av.play();
-        } catch (error) {
-          send({ type: "error", error: errorText(error) });
+          av.seekTo(stream.startMs, play, play);
+        } catch {
+          play();
         }
       },
       error => send({ type: "error", error: errorText(error) }),
@@ -172,6 +203,35 @@ export class AvplayEngine implements PlaybackEngine {
       return this.av.getCurrentTime();
     } catch {
       return 0;
+    }
+  }
+
+  duration() {
+    try {
+      const ms = this.av.getDuration();
+      return Number.isFinite(ms) && ms > 0 ? ms : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  setPaused(paused: boolean) {
+    const state = this.av.getState();
+    try {
+      if (paused && state === "PLAYING") this.av.pause();
+      else if (!paused && state === "PAUSED") this.av.play();
+    } catch {
+      // Not in a state that pauses, such as while it opens.
+    }
+  }
+
+  seek(ms: number) {
+    const state = this.av.getState();
+    if (state !== "PLAYING" && state !== "PAUSED" && state !== "READY") return;
+    try {
+      this.av.seekTo(Math.max(0, Math.round(ms)));
+    } catch {
+      // Live streams and some recordings can't seek.
     }
   }
 
