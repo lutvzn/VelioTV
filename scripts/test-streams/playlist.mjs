@@ -3,6 +3,18 @@
 import { REQUIRED_REFERER, REQUIRED_USER_AGENT } from "./streams.mjs";
 import { guideChannels, programmes } from "./catalog.mjs";
 
+// The path under /fail/ (server.mjs) for a channel that fails on purpose.
+const FAULT_PATHS = {
+  cut: "/fail/cut/40",
+  stall: "/fail/stall/40",
+  missing: "/fail/status/404",
+  outage: "/fail/outage",
+};
+
+// A channel's stream path, as raw TS or HLS, failing if the channel should.
+export const streamPath = (channel, hls = channel.hls) =>
+  `${FAULT_PATHS[channel.fault] ?? ""}${hls ? `/hls/${channel.stream}/index.m3u8` : `/ts/${channel.stream}.ts`}`;
+
 // The URL that plays a channel's test stream.
 export const streamUrl = (base, channel) => {
   const prefix =
@@ -11,8 +23,7 @@ export const streamUrl = (base, channel) => {
       : channel.header === "user-agent"
         ? "/need-user-agent"
         : "";
-  const path = channel.hls ? `/hls/${channel.stream}/index.m3u8` : `/ts/${channel.stream}.ts`;
-  return `${base}${prefix}${path}`;
+  return `${base}${prefix}${streamPath(channel)}`;
 };
 
 export const logoUrl = (base, channel) => (channel.logo ? `${base}${channel.logo}` : "");

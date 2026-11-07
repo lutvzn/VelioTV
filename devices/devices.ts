@@ -1,4 +1,5 @@
 import type { KeyMap, Config as LightningConfig } from "@solidtv/solid";
+import type { PlaybackEngine } from "./common/player";
 
 export enum EDevicePlatform {
   CHROME = "CHROME",
@@ -42,4 +43,5 @@ export interface Device {
 
   closeApp(): Promise<void>;
   updateApp(): Promise<void>;
+  getPlayer(): PlaybackEngine;
 }

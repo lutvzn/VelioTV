@@ -16,6 +16,8 @@ import { merge } from "lodash-es";
 import { config } from "./device";
 import { installDevHooks } from "./devHooks";
 import { library } from "./library";
+import { player } from "./player";
+import { watchLifecycle } from "./player/lifecycle";
 import {
   Rounded,
   RoundedWithShadow,
@@ -28,6 +30,7 @@ import {
 
 merge(LightningConfig, config.lightning);
 installDevHooks();
+watchLifecycle(player);
 
 const { render, renderer } = createRenderer();
 

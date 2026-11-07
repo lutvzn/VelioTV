@@ -17,6 +17,10 @@ declare module "@solidtv/solid/primitives" {
     Text: string | number | (string | number)[];
     Escape: string | number | (string | number)[];
     Backspace: string | number | (string | number)[];
+    ChannelUp: string | number | (string | number)[];
+    ChannelDown: string | number | (string | number)[];
+    Info: string | number | (string | number)[];
+    ChannelList: string | number | (string | number)[];
   }
 }
 

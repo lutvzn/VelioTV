@@ -54,7 +54,28 @@ export const STREAMS = [
     audio: AAC,
   },
   { id: "mpeg2-mp2", label: "MPEG-2 1080i + MP2 stereo", video: MPEG2, audio: MP2, interlaced: true },
+  // Two audio tracks, English (one beep a second) and German (two higher
+  // beeps), and subtitles in both, as WebVTT over HLS only (server.mjs).
+  {
+    id: "h264-tracks",
+    label: "H.264 1080p + AAC eng, deu + subtitles",
+    video: H264,
+    audio: AAC,
+    tracks: true,
+  },
 ];
+
+// The English subtitles of a "tracks" stream's clip, as SRT: one a second,
+// saying which second of the clip it is. The German ones are made from
+// these as they are served (server.mjs).
+export const subtitles = seconds =>
+  Array.from({ length: seconds }, (_, second) => {
+    const at = `00:00:${String(second).padStart(2, "0")}`;
+    return `${second + 1}\n${at},000 --> ${at},800\nEnglish subtitle, second ${second}\n`;
+  }).join("\n");
+
+export const germanSubtitle = text =>
+  text.replaceAll("English subtitle, second", "Deutscher Untertitel, Sekunde");
 
 // A 0.1-second beep at the start of each second, as an aevalsrc expression.
 const beep = freq => `0.3*sin(2*PI*${freq}*t)*lt(mod(t\\,1)\\,0.1)`;
@@ -78,6 +99,9 @@ export const sources = stream => {
   const freqs = stream.surround ? [440, 550, 660, 0, 330, 880] : [440, 660];
   const layout = stream.surround ? "5.1" : "stereo";
   const audio = `aevalsrc=${freqs.map(beep).join("|")}:s=48000:c=${layout}`;
+  if (!stream.tracks) return { video, audio };
 
-  return { video, audio };
+  // Two short beeps at 880 Hz each second, on both channels.
+  const twice = "0.3*sin(2*PI*880*t)*(lt(mod(t\\,1)\\,0.08)+between(mod(t\\,1)\\,0.2\\,0.28))";
+  return { video, audio, audio2: `aevalsrc=${twice}|${twice}:s=48000:c=stereo` };
 };

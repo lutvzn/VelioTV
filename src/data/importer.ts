@@ -14,9 +14,9 @@ import {
   readImport,
   request,
   sourceRange,
+  writeChannels,
   writeTransaction,
   type ImportState,
-  type StoredChannel,
   type StoredGuideChannel,
 } from "./db";
 import { GuideWriter } from "./guideWriter";
@@ -33,7 +33,8 @@ import {
 } from "./xtream";
 
 const MB = 1_048_576;
-const CHANNEL_BATCH = 2000;
+// Guide channels per write.
+const GUIDE_CHANNEL_BATCH = 2000;
 const PROGRESS_EVERY_MS = 250;
 /**
  * The guide's share of the TV's 80 MB. The rest leaves room for channel
@@ -111,12 +112,10 @@ const putState = async (db: IDBDatabase, state: ImportState) => {
 const deleteStale = async (
   db: IDBDatabase,
   source: string,
-  channels: number,
   guideChannels: Set<string>,
   writer: GuideWriter,
 ) => {
-  const transaction = writeTransaction(db, ["channels", "guideChannels", "guide"]);
-  transaction.objectStore("channels").delete(IDBKeyRange.bound([source, channels], [source, []]));
+  const transaction = writeTransaction(db, ["guideChannels", "guide"]);
   const guideChannelStore = transaction.objectStore("guideChannels");
   const guideStore = transaction.objectStore("guide");
   const [guideChannelKeys, guideKeys] = await Promise.all([
@@ -176,16 +175,10 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     const guideIds = new Map<string, string>();
     let guideUrls = input.guideUrls ?? [];
 
-    let batch: StoredChannel[] = [];
-    const writeChannels = async () => {
-      const transaction = writeTransaction(db, "channels");
-      const store = transaction.objectStore("channels");
-      for (const channel of batch) store.put(channel);
-      batch = [];
-      await finished(transaction);
-    };
+    // Kept until the channel stage ends, then stored as one record.
+    let channels: PlaylistChannel[] = [];
     const addChannel = (channel: PlaylistChannel) => {
-      batch.push({ ...channel, source });
+      channels.push(channel);
       if (channel.guideId && !guideIds.has(channel.guideId.toLowerCase())) {
         guideIds.set(channel.guideId.toLowerCase(), channel.guideId);
       }
@@ -199,13 +192,9 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       progress = { ...progress, url: normalizeServer(input.server) };
       const account = await xtreamAccount(input, fetcher);
       state.account = account;
-      const channels = await xtreamLiveChannels(input, account, fetcher, countBytes);
-      for (const channel of channels) {
+      for (const channel of await xtreamLiveChannels(input, account, fetcher, countBytes))
         addChannel(channel);
-        if (batch.length >= CHANNEL_BATCH) await writeChannels();
-      }
-      await writeChannels();
-      state.channels = progress.channels = channels.length;
+      progress.channels = channels.length;
       report(true);
       if (!input.guideUrls) guideUrls = [xtreamGuideUrl(input)];
     } else if (input.playlistUrl) {
@@ -214,16 +203,19 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       const parser = new M3uParser(addChannel);
       for await (const text of readText(body, bytes => (progress.bytes += bytes))) {
         parser.push(text);
-        if (batch.length >= CHANNEL_BATCH) await writeChannels();
         progress.channels = parser.count;
         report();
       }
       parser.end();
-      await writeChannels();
-      state.channels = progress.channels = parser.count;
+      progress.channels = parser.count;
       report(true);
       if (!input.guideUrls) guideUrls = parser.guideUrls;
     }
+
+    // Written even when empty (a guide-only import), replacing the last list.
+    await writeChannels(db, source, channels);
+    state.channels = channels.length;
+    channels = [];
 
     // Without a channel list, keep the whole guide.
     const keepAll = input.kind !== "xtream" && !input.playlistUrl;
@@ -275,7 +267,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
           writer.expectedChannels = kept.size;
           await writer.flush();
         }
-        if (guideChannels.length >= CHANNEL_BATCH) await writeGuideChannels();
+        if (guideChannels.length >= GUIDE_CHANNEL_BATCH) await writeGuideChannels();
         progress.programmes = read;
         report();
         // Reading on would only skip everything; stop the download.
@@ -286,7 +278,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       report(true);
     }
     await writer.finish();
-    await deleteStale(db, source, state.channels, kept, writer);
+    await deleteStale(db, source, kept, writer);
 
     const finishedAt = Date.now();
     Object.assign(state, {

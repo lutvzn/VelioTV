@@ -1,88 +1,201 @@
-import shaka from "shaka-player";
+// One playback backend per TV, behind one interface (PLAN.md, Key decisions):
+// AVPlay on Samsung (devices/tizen/player.ts) and, for now, a <video> element
+// everywhere else, for the desktop browser. The app plays through
+// src/player/player.ts, which sits on top of whichever engine the TV has.
 
-export interface Player {
-  isPaused(): boolean;
-  getDuration(): number;
-  getCurrentPosition(): number;
-  play(): Promise<void>;
-  pause(): void;
-  stop(): Promise<void>;
-  /** Jumps to a position, in seconds from the start. */
-  seek(position: number): void;
-  /** Moves by a number of seconds. A negative number goes back. */
-  skip(seconds: number): void;
+/** Where video shows, in pixels of the 1920x1080 app. */
+export interface DisplayRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
-export class CommonPlayer implements Player {
-  private readonly _player: shaka.Player;
-  private readonly _videoElement: HTMLVideoElement;
+export interface Stream {
+  url: string;
+  /** Sent as the User-Agent, on engines that can. */
+  userAgent?: string;
+  /**
+   * The Referer the server wants. No engine can send one (PLAN.md, Phase 0),
+   * so the app's player refuses such streams.
+   */
+  referer?: string;
+  /**
+   * A live channel, which never ends: the app's player reconnects when it
+   * drops, stalls or fails to start, rather than stopping.
+   */
+  live?: boolean;
+}
 
-  constructor(videoElement?: HTMLVideoElement) {
-    this._videoElement = videoElement || this.createVideoElement();
-    this._player = new shaka.Player(this._videoElement);
-    this._player.addEventListener("error", event => console.error("Shaka Player error:", event));
+/** An audio or subtitle track of the stream playing. */
+export interface Track {
+  /** The engine's own name for it, to give back to selectTrack(). */
+  id: string;
+  kind: TrackKind;
+  /** As the stream gives it, such as "en" or "deu". */
+  language?: string;
+  /** A name the stream gives it, if any. */
+  label?: string;
+  /** Playing, or for subtitles, showing. */
+  selected: boolean;
+}
+
+export type TrackKind = "audio" | "text";
+
+export type EngineEvent =
+  /** Waiting for data: before the first picture, or after a stall. */
+  | { type: "buffering" }
+  /** Showing pictures. */
+  | { type: "playing" }
+  /** The stream finished, or the server closed it. */
+  | { type: "ended" }
+  | { type: "error"; error: string }
+  /**
+   * Subtitle text to show now, for `durationMs`, from engines that leave the
+   * drawing to the app. Empty text clears it.
+   */
+  | { type: "subtitle"; text: string; durationMs: number };
+
+export interface PlaybackEngine {
+  readonly name: string;
+  /**
+   * Stops whatever is playing and starts `stream`. Events go to `onEvent`
+   * until the next open() or stop(). It may throw if the stream can't be
+   * opened at all.
+   */
+  open(stream: Stream, onEvent: (event: EngineEvent) => void): void;
+  stop(): void;
+  setWindow(rect: DisplayRect): void;
+  /** How far the stream has played, in milliseconds. */
+  position(): number;
+  /** The stream's formats, such as "VIDEO H264 1920x1080", to show when diagnosing. */
+  formats(): string[];
+  /** The stream's audio and subtitle tracks, once it has started. */
+  tracks(): Track[];
+  /** Plays an audio track, or shows a subtitle track; `undefined` hides subtitles. */
+  selectTrack(kind: TrackKind, id: string | undefined): void;
+}
+
+/** An error's message. TV APIs throw objects that aren't Errors but have a name and message. */
+export const errorText = (error: unknown) => {
+  if (typeof error === "object" && error !== null) {
+    const { message, name } = error as { message?: unknown; name?: unknown };
+    if (typeof message === "string" && message) return message;
+    if (typeof name === "string" && name) return name;
+  }
+  return typeof error === "string" || typeof error === "number" ? String(error) : "unknown error";
+};
+
+import type shaka from "shaka-player";
+
+const shakaTrack = (kind: TrackKind, track: shaka.extern.AudioTrack | shaka.extern.TextTrack): Track => ({
+  id: kind === "audio" ? `${track.language}|${track.label ?? ""}` : String(track.id),
+  kind,
+  language: track.language || undefined,
+  label: track.label || undefined,
+  selected: track.active,
+});
+
+const percent = (value: number, of: number) => `${(value / of) * 100}%`;
+
+/**
+ * A <video> element behind the app's canvas, which shows it through the
+ * background's hole. Shaka Player plays HLS and DASH; raw MPEG-TS needs
+ * AVPlay. Shaka is loaded on first use, so TV builds that never use this
+ * engine don't load it.
+ */
+export class VideoElementEngine implements PlaybackEngine {
+  readonly name = "video";
+  private readonly video: HTMLVideoElement;
+  private shaka?: Promise<shaka.Player>;
+  /** Shaka, once a stream has loaded. */
+  private loaded?: shaka.Player;
+  private session = 0;
+  /** The current stream's listener. */
+  private send?: (event: EngineEvent) => void;
+
+  constructor() {
+    this.video = document.createElement("video");
+    // Behind the canvas; setWindow() places it.
+    this.video.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;z-index:-1";
+    this.video.addEventListener("waiting", () => this.send?.({ type: "buffering" }));
+    this.video.addEventListener("playing", () => this.send?.({ type: "playing" }));
+    this.video.addEventListener("ended", () => this.send?.({ type: "ended" }));
   }
 
-  private createVideoElement(): HTMLVideoElement {
-    const video = document.createElement("video");
-    video.style.position = "absolute";
-    video.style.top = "0";
-    video.style.left = "0";
-    video.style.width = "100%";
-    video.style.height = "100%";
-    // Behind the app's canvas, which shows the video through transparent
-    // areas such as the holePunch shader.
-    video.style.zIndex = "-1";
-    document.body.appendChild(video);
-    return video;
+  private player() {
+    this.shaka ??= import("shaka-player").then(({ default: library }) => {
+      document.body.appendChild(this.video);
+      return new library.Player(this.video);
+    });
+    return this.shaka;
   }
 
-  async load(streamUrl: string, autoPlay = false, startTime?: number): Promise<void> {
-    try {
-      await this._player.load(streamUrl, startTime);
-      if (autoPlay) await this._videoElement.play();
-      console.log("Stream loaded successfully");
-    } catch (error) {
-      console.error("Failed to load stream:", error);
-      throw error;
+  open(stream: Stream, onEvent: (event: EngineEvent) => void) {
+    const session = ++this.session;
+    const send = (event: EngineEvent) => {
+      if (session === this.session) onEvent(event);
+    };
+    this.send = send;
+    this.loaded = undefined;
+    send({ type: "buffering" });
+    void (async () => {
+      try {
+        const player = await this.player();
+        if (session !== this.session) return;
+        await player.load(stream.url);
+        if (session !== this.session) return;
+        this.loaded = player;
+        await this.video.play();
+      } catch (error) {
+        send({ type: "error", error: errorText(error) });
+      }
+    })();
+  }
+
+  stop() {
+    this.session++;
+    this.send = undefined;
+    this.loaded = undefined;
+    void this.shaka?.then(player => player.unload()).catch(() => {});
+  }
+
+  setWindow(rect: DisplayRect) {
+    Object.assign(this.video.style, {
+      left: percent(rect.x, 1920),
+      top: percent(rect.y, 1080),
+      width: percent(rect.width, 1920),
+      height: percent(rect.height, 1080),
+    });
+  }
+
+  position() {
+    return Math.round(this.video.currentTime * 1000);
+  }
+
+  formats() {
+    const { videoWidth, videoHeight } = this.video;
+    return videoWidth ? [`VIDEO ${videoWidth}x${videoHeight}`] : [];
+  }
+
+  tracks() {
+    const player = this.loaded;
+    if (!player) return [];
+    return [
+      ...player.getAudioTracks().map(track => shakaTrack("audio", track)),
+      ...player.getTextTracks().map(track => shakaTrack("text", track)),
+    ];
+  }
+
+  // Shaka draws the subtitles itself, over the video.
+  selectTrack(kind: TrackKind, id: string | undefined) {
+    const player = this.loaded;
+    if (!player) return;
+    if (kind === "audio") {
+      const track = player.getAudioTracks().find(one => shakaTrack("audio", one).id === id);
+      if (track) player.selectAudioTrack(track);
+      return;
     }
-  }
-
-  isPaused(): boolean {
-    return this._videoElement.paused;
-  }
-
-  getDuration(): number {
-    return this._videoElement.duration;
-  }
-
-  getCurrentPosition(): number {
-    return this._videoElement.currentTime;
-  }
-
-  async togglePlayPause(): Promise<void> {
-    if (this._videoElement.paused) await this.play();
-    else this.pause();
-  }
-
-  play(): Promise<void> {
-    return this._videoElement.play();
-  }
-
-  // Keeps the same Shaka player, ready for the next load().
-  async stop(): Promise<void> {
-    await this._player.unload();
-  }
-
-  pause(): void {
-    this._videoElement.pause();
-  }
-
-  seek(position: number): void {
-    this._videoElement.currentTime = position;
-  }
-
-  skip(seconds: number): void {
-    this._videoElement.currentTime += seconds;
+    player.selectTextTrack(player.getTextTracks().find(one => String(one.id) === id) ?? null);
   }
 }

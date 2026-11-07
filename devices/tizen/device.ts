@@ -1,8 +1,9 @@
 import { EDeviceType } from "#devices/devices";
 import { DeviceCommon } from "#devices/common/device";
-import { TizenPlayer } from "./player";
+import { AvplayEngine } from "./player";
 
 declare const tizen: any;
+declare const webapis: any;
 
 // Tizen only sends these remote keys to apps that register them. Arrows,
 // Enter and Back always arrive.
@@ -15,6 +16,10 @@ const REMOTE_KEYS = [
   "MediaRewind",
   "MediaTrackNext",
   "MediaTrackPrevious",
+  "ChannelUp",
+  "ChannelDown",
+  "Info",
+  "ChannelList",
   "0",
   "1",
   "2",
@@ -51,8 +56,8 @@ export class TizenDevice extends DeviceCommon {
 
   static async initialize() {
     TizenDevice.registerRemoteKeys();
-    // Samsung's product APIs, such as AVPlay. Nothing uses them yet, so a
-    // failure here shouldn't stop the app.
+    // Samsung's product APIs, such as AVPlay. Without them the app still
+    // runs, with the <video> engine.
     await TizenDevice.addScript().catch(error => console.warn(error));
     return new TizenDevice(EDeviceType.TIZEN);
   }
@@ -62,6 +67,6 @@ export class TizenDevice extends DeviceCommon {
   }
 
   protected _getPlayer() {
-    return new TizenPlayer();
+    return typeof webapis === "undefined" ? super._getPlayer() : new AvplayEngine(webapis.avplay);
   }
 }

@@ -12,11 +12,13 @@
 #
 # The result is printed as JSON; progress goes to stderr. It restarts the app
 # in debug mode, because the TV only opens its debug port when the app starts.
+# A probe is stopped after 15 minutes; set PROBE_TIMEOUT (in seconds) for a
+# longer one.
 
 set -euo pipefail
 
 [[ $# -ge 2 ]] || {
-  sed -n '3,15p' "$0" >&2
+  sed -n '3,17p' "$0" >&2
   exit 1
 }
 
@@ -56,4 +58,4 @@ trap '"$sdb" -s "$target" forward --remove "tcp:$local_port" >/dev/null 2>&1 || 
 sleep 1
 ws_url="$(curl -fsS "http://127.0.0.1:$local_port/json" | grep -o 'ws://[^"]*' | head -n 1)"
 
-node "$(dirname "${BASH_SOURCE[0]}")/eval.mjs" "$ws_url" "$probe" "$input"
+node "$(dirname "${BASH_SOURCE[0]}")/eval.mjs" "$ws_url" "$probe" "$input" "${PROBE_TIMEOUT:-900}"

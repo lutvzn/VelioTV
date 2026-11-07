@@ -165,6 +165,87 @@ Phase 1 is done: the starter fixes, Tizen packaging, CI, deploy, app shell and k
    - **Days kept:** a source this big keeps only yesterday, today and tomorrow. If that's too little, leave yesterday out unless the source has catch-up, which would give one more day ahead.
    - `navigator.storage.estimate()` reported 125 MB used of an 80 MB quota after the probe deleted the import, so it counts space that deleted records still hold. Don't use it to judge free space.
 
+## Phase 3 plan: live player
+
+Done when hours of playback and repeated zapping stay stable on the Samsung TV.
+
+1. **Player engine:** done. One `PlaybackEngine` interface (`devices/common/player.ts`) has AVPlay behind it on Samsung (`devices/tizen/player.ts`) and a `<video>` element with Shaka for the desktop browser, loaded only when used. The app's player (`src/player/`) sits on top: one stream at a time, its state as a signal (starting, playing, buffering, ended, failed, with the time to first picture), a 20 s limit for a stream to start, and the video window's hole in the background. A stream it has left can't change its state, so channels can change faster than they start. The developer video page uses it, and still holds 50 fps over video (`video-ui` probe).
+
+   **Switching blocks the UI.** AVPlay's calls are synchronous, and closing a playing stream is the slow one: `stop()` then `close()` took 140–750 ms, and up to 1.9 s once when leaving an H.264 stream for HEVC over TS, while `close()` alone took 150–270 ms. Opening, the window and the buffer settings each take under 10 ms (the first `open()` after starting takes about 200 ms). So the engine only calls `close()`, and the player switches after the UI has drawn the new state: the screen changes first, then pauses for a frame or so. Requests that arrive before that replace each other, so only the last one opens.
+
+   On the TV (the `zap` probe, all 8 test streams as raw TS and HLS, watched for 3 s each):
+
+   | Measure                                       | Result                                                |
+   | --------------------------------------------- | ----------------------------------------------------- |
+   | Played                                        | 16 of 16                                              |
+   | First picture                                 | HLS 0.46–0.73 s; raw TS 2.98–3.63 s                   |
+   | Longest pause in the UI's drawing at a switch | 150–250 ms; 517 ms for the first stream               |
+   | Frame rate                                    | 57 fps on average, lowest 31 (at a switch)            |
+   | 12 switches 300 ms apart                      | The last stream asked for plays; longest pause 300 ms |
+   | Free memory                                   | 323 MB before, lowest 285 MB, 322 MB after            |
+
+   Raw TS spends about 3 s in AVPlay's prepare, against 0.4 s for HLS, so most of a TS start is AVPlay reading the stream before it plays. Real providers' streams may differ from the test server's, which starts an encoder per request.
+
+2. **Channels in memory:** done, and checked on the TV.
+   - **Storage:** a source's channel list is now one record holding a column per field (`src/data/channelList.ts`), written once at the end of the channel stage, instead of one record per channel. The database moved to version 3, which clears older data, so sources import again at the next start. A scratch probe compared layouts for 10,000 channels on the TV:
+
+     | Layout                                     | Read       | Write  |
+     | ------------------------------------------ | ---------- | ------ |
+     | One record per channel (before)            | 730 ms     | 4.4 s  |
+     | One record holding the channel objects     | 114–125 ms | 226 ms |
+     | One record of JSON text, parsed after      | 96–121 ms  | 194 ms |
+     | One record of columns (an array per field) | 43 ms      | 123 ms |
+
+     With the test source's real fields, the 10,000-channel list reads in 108–125 ms: 78–108 ms from IndexedDB and about 30 ms to rebuild the channels. Rebuilding first took 115 ms more, because fields added one by one make slow objects in V8, so every channel is now built in one literal with the same fields. The channel stage of a 10,000-channel import takes 0.3 s.
+
+   - **The lineup** (`src/data/lineup.ts`, `lineup` in `src/library.ts`) holds every source's channels in memory: all of them in source order, by group, and by id (`<source>/<index>`). It reads a source's list at startup and again when an import of it finishes, and keeps the old list while an import runs. On the TV, a 1,000-channel test source showed up with its 100 groups as soon as its import ended.
+   - **Font:** the app now uses Noto Sans, regular and bold, instead of Roboto, whose atlas had 98 characters. Its atlases (`scripts/fonts/build.mjs`) hold 1,630 characters each: Latin with its extensions (Vietnamese included), modern Greek, Cyrillic, the small capitals and superscripts providers use in names ("ᴴᴰ"), punctuation such as "•", "–" and "…", currency, and "№". Each is 2048×1024, 8 MB of texture memory. Noto Sans has no "★", "●" or "✓". Left out: polytonic Greek; CJK, which would need thousands of glyphs; and Arabic, Hebrew and Indic scripts, which the renderer can't lay out (right to left, shaping). Missing characters show as spaces. Checked on the TV: a source named "Prüfung – Ελληνικά – Кино ᴴᴰ • №1 «€» …" shows in full in Settings, and text still sits right in the side menu, the source list and the form. The script has its own `package.json`, because its image tools bring Node's types, which clash with the browser's in the app's type check. UI text no longer has to keep to ASCII. The Roboto atlases (4.5 MB) are gone, and the Noto Sans TTFs moved out of `public/` to `scripts/fonts/`.
+   - **Storage filled up again:** before this step's probes, the app had no sources, but IndexedDB counted 88 MB against the 80 MB quota, left by the step 6 import that was deleted. Reinstalling the app reset it. Users who remove a large source and add another could hit the same; Phase 8 should look at whether the database compacts over time.
+3. **Live TV page:** done; the user's look at it on the TV is still to come. `src/pages/LiveTv.tsx`, with the zapper (`src/live/zapper.ts`), the guide cache (`src/data/guideCache.ts`), the banner and the channel list (`src/pages/live/`).
+   - **Layout:** at app start the page goes full screen on the last channel watched (or the first). From the menu, the channel plays in a 1024×576 window with its name and now and next under it; Right watches it full screen. Back closes whatever is open (number entry, then the list, a zap not yet played, the banner) and then returns to the menu, with the channel still playing in the window.
+   - **Zapping:** Up, Down and the channel keys zap, wrapping round at the ends, through the group the channel was picked from, or every channel. The banner changes at once on each press; the stream changes 400 ms after the last one, so a run of presses opens only the last channel. Number keys pick a channel by number (`tvg-chno`, or else the position from 1), on OK or 2 s after the last digit; a number with no channel says so. The last channel's id is kept in `localStorage`.
+   - **Banner:** the number, name, group and a clock, the programme on now with its time and progress, and the next one. It shows for 5 s after each change; Info shows or hides it. The guide is read only for the banner's channel and the list's highlighted one, once it stays put for 250 or 400 ms, and days read are kept in memory (200 channel-days, cleared when the lineup reloads).
+   - **Channel list:** OK or the channel-list key opens it over the left of the video, 12 rows drawn into fixed slots, so its size doesn't depend on how many channels there are. Left and Right change group ("All channels" first), the channel keys move a page, OK plays the highlighted channel.
+   - **Referer streams** fail with a message saying the TV can't send the header the stream needs.
+   - **On the TV** (`live` probe, 1,000-channel test source): the app started full screen and playing; 8 Up presses 150 ms apart opened one stream, 426 ms after the last press; scrolling the list 30 rows at 10 a second held 60 fps (longest frame 17 ms); picking from a group, number 12, Back to the menu (2 presses, playing on in the window) and Right back to full screen all worked. A zap takes 3.4–3.5 s from press to picture on these raw TS streams: the 400 ms pause, then about 3 s to start (Phase 0). The UI drops to 46–49 fps for about a second around each switch (frames of 200–220 ms, AVPlay's `close()`), and once froze for 2 s, as seen in step 1 when leaving H.264 for HEVC over TS.
+   - Test channels share a few stream URLs, so the probe reads the channel from the page (`window.tiviplayer.live`, put there with `exposeToProbes()`), not from the stream.
+4. **Reconnect and errors:** done, and checked with a probe on the TV; how the messages look is still to be seen.
+   - **The player** (`src/player/player.ts`) reopens a live stream (`live: true`, which Live TV sets) that fails, ends, shows nothing within 20 s, or stalls. It waits 1, 2, 4, 8, 15 and then 30 s before each try, and gives up after the sixth. After 30 s of playing again, the count starts over. A stream has stalled when it has buffered for 15 s, or has stopped moving for 15 s once its position had moved. Errors that reopening can't fix (a Referer, a format the TV can't play) fail at once. While it waits, the status is `reconnecting`, with the error and which try it is. Live TV says what failed in words ("Couldn't reach the stream.", "The stream stopped.") and "Reconnecting (2 of 6)…".
+   - **Test streams:** the test server serves raw TS that fails on purpose under `/fail/`: cut off after a time, stalled with the connection left open, answered with an HTTP status, or caught in an outage that a probe starts (`/fail/outage?seconds=n`, refused with 503, or with `&hang=1` left unanswered). In the test sources, channels 125, 375, 625 and 875 of every 1,000 cut off every 40 s, stall every 40 s, answer 404, and go down in an outage; their names say so. A source imported before has them only after it updates.
+   - **On the TV** (`reconnect` probe), AVPlay deals with much of this itself, on raw TS:
+     - Cut off: it asks for the stream again by itself, buffering for 0.4–2 s each time, with no error.
+     - Stalled with the connection open: it asks again by itself about 11 s later. The player's stall limit is 15 s so as not to get in its way.
+     - 404 and 503: `PLAYER_ERROR_CONNECTION_FAILED` about 3 s after opening, then the player's tries.
+     - An 8 s outage (cut off, then 503): AVPlay's own retry fails, the player tries twice, and the channel plays again 4 s after the outage ends.
+     - HLS through the same outage: AVPlay buffers for 0.5 s once and plays on, as it had segments buffered.
+     - A server that stops sending and leaves new requests unanswered for 25 s: AVPlay buffers without an error. The player's stall check reopens the stream 15.5 s later, and it plays again once the server answers.
+5. **Audio and subtitle tracks:** done, and checked with a probe on the TV; how the panel and subtitles look is still to be seen.
+   - **Engines** list a stream's audio and subtitle tracks (`tracks()`) and pick one (`selectTrack()`, with no id for subtitles off). AVPlay lists them with `getTotalTrackInfo()`, picks them with `setSelectTrack()`, and hides subtitles with `setSilentSubtitle()`. It doesn't draw subtitles: it sends their text, with how long to show it, to `onsubtitlechange`, and the app draws it. On the desktop, Shaka picks the tracks and draws its own subtitles (not checked yet).
+   - **The player** keeps the tracks and the subtitle text as signals, and remembers the languages chosen in `localStorage`. It picks them again on every stream that has them, so German audio carries over from one channel to the next. Two- and three-letter codes count as one language ("de", "deu", "ger"). Subtitles stay off unless a language was chosen.
+   - **Live TV:** Right in full screen opens a panel down the right of the screen, with Audio and Subtitles (with Off); OK picks, and Back, Left or Right closes it. Subtitles show at the bottom of the screen, centred on a dark box.
+   - **Test stream:** `h264-tracks` has English and German audio (one beep a second, or two higher ones). Over HLS it also has English and German WebVTT subtitles that say which second of the clip it is. Raw TS has the two audio tracks only.
+   - **On the TV** (`tracks` probe):
+     - AVPlay lists the tracks about 1.1 s after the first picture on HLS, and at once on raw TS. The player tries again at each 1 s check until they're listed.
+     - Audio languages come as "eng" and "deu", and subtitle languages as "en" and "de". Raw TS lists the tracks out of order.
+     - Changing audio blocks the UI for 110–135 ms (one frame of 117 ms). Changing subtitles takes 10–13 ms.
+     - Each subtitle arrives on time, once a second, with its 800 ms duration. The text ends in a NUL character, which the engine drops.
+     - Off stops them. The German audio chosen on HLS was picked by itself on the raw TS stream.
+6. **App lifecycle:** done, and checked with a probe on the TV; a real network drop is still to be tried.
+   - **Hidden:** `src/player/lifecycle.ts` listens for `visibilitychange`, which Tizen and webOS both send when the app goes behind Home or another app. The player closes the stream (`suspend()`, state `suspended`) and opens it again when the app comes back (`resume()`), as a fresh start. A live stream would be stale after a pause anyway, and closing frees the decoder for the other app.
+   - **Network:** it also listens for `online` and `offline`. A live stream that fails while the TV is offline waits for the network, with "No network connection. The channel comes back with it." on screen, instead of using up its tries; it opens again as soon as the network is back.
+   - **Waiting for a frame:** the player opens a stream after the UI has drawn (step 1). A hidden page draws no frames, so that wait now stops after 100 ms.
+   - **On the TV** (`lifecycle` probe; the dev machine brought the app back with `tizen run`, as the remote's app list would):
+     - `hide()` → the page says it is hidden 0.4–0.7 s later; the stream was closed 1.0–1.1 s after `hide()` (`close()` took 370 ms).
+     - Timers and frames stop while the app is hidden, and start again when it is shown: the first frame came 1–94 ms after it was visible.
+     - Shown again 29 s later: the same channel played 0.7–1.0 s after the app was visible, on HLS.
+     - A pretend network drop (the page sent `offline`, the server refused the stream for 15 s): the stream buffered, then went to waiting for the network at 6 s without counting a try. After `online` at 20 s, it played again 0.4 s later.
+   - **Not known yet:** whether Tizen sends the page `offline` and `online` when the cable or Wi-Fi really goes; `navigator.onLine` is true while connected. Without them, a real drop falls back to the normal reconnect tries (step 4). Samsung's `webapis.network` would say more, but it needs the `network.get` privilege: without it, `isConnectedToGateway()` throws a `SecurityError` (`getActiveConnectionType()` works, and says 1, wired). Called while the app was still loading its channels, it kept them from loading in three runs out of three, so the probe now calls it only once a channel plays.
+7. **Done check:** a long run of playback and zapping on the TV, recording memory, errors and start times. Its length is agreed before it runs. Ready, not run yet.
+   - **The probe:** `soak` zaps up through the channels with the Up key, as a viewer would: 15 s on each channel and 2 minutes on every 10th (`zapSeconds`, `watchEvery`, `watchSeconds`; `minutes` sets the length). It records each channel's start time, errors and end state, and counts the test server's failing channels (`/fail/` URLs) separately. Each minute it logs the TV's free memory, the JS heap, the frame rate and the longest frame. At the end it summarises start times (median, 90th percentile, max) for raw TS and HLS, the errors, and memory first, lowest or highest, and last.
+   - **To run:** in the box, with the test server running and the app full screen on Live TV, run `PROBE_TIMEOUT=<seconds> ./scripts/tv-probe/run.sh <tv-ip> soak '{"minutes": 120}' > soak.json 2> soak.log`. The time limit must be longer than the run, for example 7500 for 2 hours. `soak.log` gets a line a minute, so a run cut short still leaves its trend. About 140 zaps an hour.
+   - **Length:** proposed at 2 hours (about 280 zaps), not agreed yet. Samsung's auto power-off (about 4 h without a real remote press) can end a longer run, as the probe's key presses don't count.
+   - **Smoke run** (1 minute, 8 s per channel): 7 of 7 channels played. Start times were 3.0–5.0 s on raw TS and 0.6 s on HLS. Free memory stayed at about 290 MB and the JS heap at 20 MB. Frame rate was 58–60 fps, apart from one 1.95 s freeze at a switch (the H.264 to HEVC raw TS close, steps 1 and 3).
+
 ## What you need before starting
 
 - **TVs:** at least one Samsung in developer mode now, and an LG in developer mode by Phase 9. The oldest models you own set the realistic support floor.

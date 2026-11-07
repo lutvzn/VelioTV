@@ -6,20 +6,25 @@
 // only 80 MB (PLAN.md, Phase 2). If a refresh fails partway, a source has a
 // mix of old and new data, which is still usable.
 //
+// A source's channel list is one record, with a column per field
+// (channelList.ts), which reads about 17 times faster than a record per
+// channel.
+//
 // The guide is stored as one record per guide channel per day (UTC), holding
 // that day's programmes compressed (guideCodec.ts), written with relaxed
 // durability, which was about 20 times faster on the TV than one record per
 // programme.
 
+import { type ChannelColumns, fromColumns, type StoredChannel, toColumns } from "./channelList";
 import { DAY, decodeDay, type StoredProgramme } from "./guideCodec";
 import type { GuideChannel, PlaylistChannel } from "./types";
 import type { XtreamAccount } from "./xtream";
 
-export { DAY, type StoredProgramme };
+export { DAY, type StoredChannel, type StoredProgramme };
 
 export const DB_NAME = "tiviplayer";
-const VERSION = 2;
-const STORES = ["imports", "channels", "guideChannels", "guide"];
+const VERSION = 3;
+const STORES = ["imports", "channelLists", "guideChannels", "guide"];
 
 /** How a source's last import went. */
 export interface ImportState {
@@ -49,8 +54,9 @@ export interface ImportState {
   account?: XtreamAccount;
 }
 
-export interface StoredChannel extends PlaylistChannel {
+export interface StoredChannelList {
   source: string;
+  columns: ChannelColumns;
 }
 
 export interface StoredGuideChannel extends GuideChannel {
@@ -95,10 +101,12 @@ export const openDb = (name = DB_NAME): Promise<IDBDatabase> => {
   const r = indexedDB.open(name, VERSION);
   r.addEventListener("upgradeneeded", () => {
     const db = r.result;
-    // Version 1 keyed records by import id; nothing in it needs keeping.
+    // Earlier versions (records keyed by import id, then a record per
+    // channel) hold nothing that can't be imported again, and without their
+    // import states the app imports every source again at its next check.
     for (const store of Array.from(db.objectStoreNames)) db.deleteObjectStore(store);
     db.createObjectStore("imports", { keyPath: "source" });
-    db.createObjectStore("channels", { keyPath: ["source", "index"] });
+    db.createObjectStore("channelLists", { keyPath: "source" });
     db.createObjectStore("guideChannels", { keyPath: ["source", "id"] });
     db.createObjectStore("guide", { keyPath: ["source", "channel", "day"] });
   });
@@ -117,8 +125,20 @@ export const readImport = (db: IDBDatabase, source: string) =>
 export const readImports = (db: IDBDatabase) =>
   request<ImportState[]>(db.transaction("imports").objectStore("imports").getAll());
 
-export const readChannels = (db: IDBDatabase, source: string) =>
-  request<StoredChannel[]>(db.transaction("channels").objectStore("channels").getAll(sourceRange(source)));
+/** Replaces a source's channel list. */
+export const writeChannels = async (db: IDBDatabase, source: string, channels: PlaylistChannel[]) => {
+  const transaction = writeTransaction(db, "channelLists");
+  const list: StoredChannelList = { source, columns: toColumns(channels) };
+  transaction.objectStore("channelLists").put(list);
+  await finished(transaction);
+};
+
+/** A source's channels, in playlist order. */
+export const readChannels = async (db: IDBDatabase, source: string): Promise<StoredChannel[]> => {
+  const store = db.transaction("channelLists").objectStore("channelLists");
+  const list = await request<StoredChannelList | undefined>(store.get(source));
+  return list ? fromColumns(list.columns, source) : [];
+};
 
 export const readGuideChannels = (db: IDBDatabase, source: string) =>
   request<StoredGuideChannel[]>(
@@ -147,9 +167,10 @@ export const readGuide = async (
 /** Deletes a source's data and import state. */
 export const deleteSource = async (db: IDBDatabase, source: string) => {
   const transaction = writeTransaction(db, STORES);
-  for (const store of ["channels", "guideChannels", "guide"]) {
+  for (const store of ["guideChannels", "guide"]) {
     transaction.objectStore(store).delete(sourceRange(source));
   }
+  transaction.objectStore("channelLists").delete(source);
   transaction.objectStore("imports").delete(source);
   await finished(transaction);
 };

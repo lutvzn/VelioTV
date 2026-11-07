@@ -15,7 +15,7 @@ export const config = {
   lightning: {
     debug: false,
     focusDebug: false,
-    fontSettings: { fontFamily: "Roboto", color: 0xffffffff, fontSize: 40 },
+    fontSettings: { fontFamily: "NotoSans", color: 0xffffffff, fontSize: 40 },
     animationSettings: { easing: "ease-out", duration: 300 },
     rendererOptions: {
       appHeight: 1080,
@@ -54,6 +54,10 @@ export const config = {
     Rewind: ["r", 82],
     Rewind10: ["e", 69],
     Stop: ["s", 83],
+    ChannelUp: ["PageUp", 33],
+    ChannelDown: ["PageDown", 34],
+    Info: ["i", 73],
+    ChannelList: ["l", 76],
     Key0: ["0", 96, 48],
     Key1: ["1", 97, 49],
     Key2: ["2", 98, 50],

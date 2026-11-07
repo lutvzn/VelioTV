@@ -10,7 +10,7 @@
 // another host. Catch-up plays the live stream.
 
 import { programmesBetween } from "./catalog.mjs";
-import { logoUrl, m3u, xmltv } from "./playlist.mjs";
+import { logoUrl, m3u, streamPath, xmltv } from "./playlist.mjs";
 
 const HOUR = 3_600_000;
 
@@ -178,7 +178,7 @@ export const handleXtream = (req, res, url, ctx) => {
   if (!owner) return denied();
   const channel = owner.catalog.channels.find(c => c.id === Number(live[3]));
   if (!channel) return send(404, "Unknown stream\n");
-  const target = live[4] === "m3u8" ? `/hls/${channel.stream}/index.m3u8` : `/ts/${channel.stream}.ts`;
+  const target = streamPath(channel, live[4] === "m3u8");
   res.writeHead(302, { Location: `${ctx.base}${target}`, "Access-Control-Allow-Origin": "*" });
   res.end();
   return true;

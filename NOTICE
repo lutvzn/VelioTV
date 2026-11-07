@@ -5,3 +5,7 @@ You may not use the component except in compliance with the License.
 This component contains software that is Copyright (c) 2023 Comcast.
 The component is licensed to you under the Apache License, Version 2.0 (the "License").
 You may not use the component except in compliance with the License.
+
+The text atlases in public/fonts are made from Noto Sans (scripts/fonts),
+Copyright 2015-2021 Google LLC, licensed under the SIL Open Font License,
+Version 1.1 (https://openfontlicense.org).

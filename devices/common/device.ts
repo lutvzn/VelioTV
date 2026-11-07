@@ -1,9 +1,9 @@
 import { EDevicePlatform, EDeviceType } from "#devices/devices";
 import { createUniqueId } from "solid-js";
-import { CommonPlayer } from "./player";
+import { type PlaybackEngine, VideoElementEngine } from "./player";
 
 export class DeviceCommon {
-  _player?: CommonPlayer;
+  _player?: PlaybackEngine;
   type: EDeviceType;
   platform: string;
   macAddress: string;
@@ -45,12 +45,13 @@ export class DeviceCommon {
     console.log("should update the app");
   }
 
-  getPlayer() {
-    if (!this._player) this._player = this._getPlayer();
+  /** The TV's playback engine; there is one per app. */
+  getPlayer(): PlaybackEngine {
+    this._player ??= this._getPlayer();
     return this._player;
   }
 
-  protected _getPlayer() {
-    return new CommonPlayer();
+  protected _getPlayer(): PlaybackEngine {
+    return new VideoElementEngine();
   }
 }

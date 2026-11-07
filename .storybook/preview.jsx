@@ -21,7 +21,7 @@ Config.rendererOptions = {
   devicePhysicalPixelRatio: 1,
 };
 
-Config.fontSettings.fontFamily = "Roboto";
+Config.fontSettings.fontFamily = "NotoSans";
 
 let startRenderer = true;
 const solidRoot = document.createElement("div");

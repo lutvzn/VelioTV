@@ -3,9 +3,8 @@ import { type ElementNode, Text, View } from "@solidtv/solid";
 import { Column } from "@solidtv/solid/primitives";
 import { createEffect, createSignal, For, onCleanup, onMount } from "solid-js";
 import { MENU_WIDTH } from "../../components/SideMenu";
-import { FULL_SCREEN, type Rect, setVideoWindow } from "../../videoWindow";
-
-declare const webapis: any;
+import { player } from "../../player";
+import { FULL_SCREEN, type Rect } from "../../videoWindow";
 
 declare global {
   interface Window {
@@ -14,8 +13,9 @@ declare global {
 }
 
 // Developer page for PLAN.md's Phase 0 test 2: whether the UI stays smooth
-// over video. It plays a stream through Samsung's AVPlay behind the UI, shows
-// it through a hole in the app's background, and keeps the UI moving on top.
+// over video. It plays a stream behind the UI through the app's player
+// (src/player/), shows it through a hole in the app's background, and keeps
+// the UI moving on top.
 //
 // Open #/dev/video?url=<stream URL>. Enter switches between a preview window
 // and full screen, where the app hides its menu; Back leaves full screen. Up
@@ -69,10 +69,15 @@ const ListItem = (props: { label: string }) => {
   );
 };
 
+const describeStatus = () => {
+  const { state, error, startMs } = player.status();
+  if (error) return `${state}: ${error}`;
+  return startMs === undefined ? state : `${state}, started in ${startMs} ms`;
+};
+
 const VideoTest = () => {
   const [params] = useSearchParams();
   const [full, setFull] = createSignal(false);
-  const [state, setState] = createSignal("starting");
   const [fps, setFps] = createSignal(0);
   const [minFps, setMinFps] = createSignal(0);
   let bar: ElementNode | undefined;
@@ -81,21 +86,7 @@ const VideoTest = () => {
   // In page pixels: the page sits to the right of the menu.
   const pageRect = () => ({ ...screenRect(), x: screenRect().x - MENU_WIDTH });
 
-  const player = typeof webapis === "undefined" ? undefined : webapis.avplay;
-  const videoObject = document.createElement("object");
-  videoObject.type = "application/avplayer";
-  // Out of the page layout: AVPlay draws the video at setDisplayRect, not here.
-  videoObject.style.cssText = "position:absolute;left:0;top:0;width:1px;height:1px";
-
-  createEffect(() => {
-    const rect = screenRect();
-    setVideoWindow(rect);
-    try {
-      player?.setDisplayRect(rect.x, rect.y, rect.width, rect.height);
-    } catch {
-      // Not open yet; onMount sets it.
-    }
-  });
+  createEffect(() => player.setWindow(screenRect()));
 
   onMount(() => {
     bar?.animate({ x: 1300 }, { duration: 2000, loop: true, stopMethod: "reverse" }).start();
@@ -112,7 +103,7 @@ const VideoTest = () => {
         if (lowest !== Infinity || value > 5) lowest = Math.min(lowest, value);
         setFps(value);
         setMinFps(lowest);
-        window.videoTestStats = { fps: value, minFps: lowest, state: state() };
+        window.videoTestStats = { fps: value, minFps: lowest, state: player.status().state };
         frames = 0;
         since = now;
       }
@@ -120,46 +111,10 @@ const VideoTest = () => {
     });
     onCleanup(() => cancelAnimationFrame(frame));
 
-    const url = typeof params.url === "string" ? params.url : undefined;
-    if (!player) {
-      setState("needs a Samsung TV");
-      return;
-    }
-    if (!url) {
-      setState("add ?url=<stream URL> to the page address");
-      return;
-    }
-
-    document.body.appendChild(videoObject);
-    const rect = screenRect();
-    try {
-      player.open(url);
-      player.setBufferingParam("PLAYER_BUFFER_FOR_PLAY", "PLAYER_BUFFER_SIZE_IN_SECOND", 2);
-      player.setDisplayRect(rect.x, rect.y, rect.width, rect.height);
-      player.setListener({
-        onbufferingcomplete: () => setState("playing"),
-        onerror: (error: unknown) => setState(`error: ${String(error)}`),
-      });
-      player.prepareAsync(
-        () => player.play(),
-        (error: unknown) => setState(`error: ${String(error)}`),
-      );
-    } catch (error) {
-      setState(`error: ${String(error)}`);
-    }
+    if (typeof params.url === "string") void player.play({ url: params.url });
   });
 
-  onCleanup(() => {
-    for (const step of [() => player?.stop(), () => player?.close()]) {
-      try {
-        step();
-      } catch {
-        // Already stopped or closed.
-      }
-    }
-    videoObject.remove();
-    setVideoWindow(null);
-  });
+  onCleanup(() => player.stop());
 
   return (
     <>
@@ -167,7 +122,7 @@ const VideoTest = () => {
         Video behind the UI
       </Text>
       <Text x={80} y={115} fontSize={28} color="#ffffffb3">
-        {`${state()} | ${fps()} fps, lowest ${minFps()} | Enter: ${full() ? "preview" : "full screen"}`}
+        {`${params.url ? describeStatus() : "add ?url=<stream URL> to the page address"} | ${fps()} fps, lowest ${minFps()} | Enter: ${full() ? "preview" : "full screen"}`}
       </Text>
       <Frame rect={pageRect()} />
       <Column

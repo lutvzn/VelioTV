@@ -77,7 +77,7 @@ export const editText = (entry: TextEntry) => {
     outline: "none",
     background: "#0b1d33",
     color: "#ffffff",
-    font: `${px(entry.fontSize ?? 34)} Roboto, sans-serif`,
+    font: `${px(entry.fontSize ?? 34)} sans-serif`,
     zIndex: "10",
   });
 

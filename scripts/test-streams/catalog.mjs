@@ -98,6 +98,16 @@ const channelName = (number, category, rand) => {
   return `${capital(word(rand))} ${category}`;
 };
 
+// Channels 125, 375, 625 and 875 of every 1,000 play streams that fail on
+// purpose (server.mjs, /fail/), named for what they do, raw TS only.
+const FAULTS = {
+  cut: "cuts off every 40 s",
+  stall: "stalls every 40 s",
+  missing: "answers 404",
+  outage: "goes down in an outage",
+};
+const faultOf = number => (number % 250 === 125 ? Object.keys(FAULTS)[Math.floor(number / 250) % 4] : null);
+
 const buildChannels = count => {
   // About one group per 10 channels, up to 120.
   const groups = REGIONS.flatMap(region => CATEGORIES.map(category => ({ region, category }))).slice(
@@ -124,7 +134,9 @@ const buildChannels = count => {
       channels.push({
         number,
         id: number,
-        name: copy ? name : name + pick(rand, VARIANTS),
+        name:
+          (copy ? name : name + pick(rand, VARIANTS)) +
+          (faultOf(number) ? ` (${FAULTS[faultOf(number)]})` : ""),
         groupId,
         group: usedGroups.at(-1).name,
         category: group.category,
@@ -132,8 +144,9 @@ const buildChannels = count => {
         timeZone: TIME_ZONES[number % TIME_ZONES.length],
         logo: number % 33 === 0 ? null : `/logo/${count}/${number}.svg`,
         stream: STREAMS[number % STREAMS.length].id,
-        hls: number % 4 === 0,
+        hls: number % 4 === 0 && !faultOf(number),
         header: number % 500 === 250 ? "referer" : number % 500 === 499 ? "user-agent" : null,
+        fault: faultOf(number),
         archiveDays: number % 10 === 0 ? 3 : 0,
       });
     }

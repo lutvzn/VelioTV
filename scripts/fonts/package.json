@@ -1,0 +1,13 @@
+{
+  "name": "tiviplayer-fonts",
+  "private": true,
+  "description": "Builds the app's text atlases (build.mjs). Kept apart from the app, so its image tools and their Node types stay out of the app's dependencies.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "msdf-bmfont-xml": "2.8.0",
+    "opentype.js": "1.3.4"
+  }
+}
