@@ -9,7 +9,8 @@
 
 import type { StoredProgramme } from "../data/guideCodec";
 
-export type CellKind = "programme" | "gap" | "loading" | "none";
+/** "locked" stands for a locked channel's programmes until the PIN is entered. */
+export type CellKind = "programme" | "gap" | "loading" | "none" | "locked";
 
 export interface Cell {
   kind: CellKind;
@@ -69,7 +70,12 @@ export const rowCells = (programmes: readonly StoredProgramme[], from: number, t
  * cells a `step` long, so the focus moves along it as along any other row.
  * The page draws it as one bar.
  */
-export const wholeRow = (kind: "loading" | "none", from: number, to: number, step: number): Cell[] => {
+export const wholeRow = (
+  kind: "loading" | "none" | "locked",
+  from: number,
+  to: number,
+  step: number,
+): Cell[] => {
   const cells: Cell[] = [];
   for (let start = alignDown(from, step); start < to; start += step) {
     cells.push({ kind, start, stop: start + step });

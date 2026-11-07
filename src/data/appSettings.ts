@@ -1,0 +1,105 @@
+// The app's own settings (PLAN.md, Phase 5, steps 5 and 6), kept in
+// localStorage like the sources and edits, and backed up with them: what the
+// app opens on, how times show, and the parental PIN.
+//
+// The PIN is four digits, kept as typed: it keeps children out of locked
+// channels, not anyone who can read the TV's storage. Once entered, locked
+// channels stay open until the app closes.
+
+import { createRoot, createSignal } from "solid-js";
+
+const STORAGE_KEY = "tiviplayer.settings";
+const STORAGE_VERSION = 1;
+export const PIN_LENGTH = 4;
+
+/** Full screen on the last channel watched, or the guide. */
+export type StartOn = "last" | "guide";
+export type ClockFormat = "24h" | "12h";
+
+export interface AppSettings {
+  startOn: StartOn;
+  clock: ClockFormat;
+  /** The parental PIN, if one is set. */
+  pin?: string;
+}
+
+export const defaultSettings = (): AppSettings => ({ startOn: "last", clock: "24h" });
+
+export const isPin = (value: unknown): value is string =>
+  typeof value === "string" && value.length === PIN_LENGTH && /^\d+$/.test(value);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Reads saved or restored settings, leaving out what doesn't fit. */
+export const readSettings = (value: unknown): AppSettings => {
+  const settings = defaultSettings();
+  if (!isRecord(value)) return settings;
+  const record = value;
+  if (record.startOn === "last" || record.startOn === "guide") settings.startOn = record.startOn;
+  if (record.clock === "24h" || record.clock === "12h") settings.clock = record.clock;
+  if (isPin(record.pin)) settings.pin = record.pin;
+  return settings;
+};
+
+const load = (storage: Storage) => {
+  try {
+    return readSettings(JSON.parse(storage.getItem(STORAGE_KEY) ?? "null"));
+  } catch (error) {
+    console.error("Couldn't read the settings:", error);
+    return defaultSettings();
+  }
+};
+
+export const createAppSettings = (options: { storage: Storage }) =>
+  createRoot(() => {
+    const [settings, setSettings] = createSignal(load(options.storage));
+    const [unlocked, setUnlocked] = createSignal(false);
+
+    const save = (next: AppSettings) => {
+      setSettings(next);
+      try {
+        options.storage.setItem(STORAGE_KEY, JSON.stringify({ version: STORAGE_VERSION, ...next }));
+      } catch (error) {
+        console.error("Couldn't save the settings:", error);
+      }
+    };
+    const set = (change: Partial<AppSettings>) => save({ ...settings(), ...change });
+
+    return {
+      /** Everything, as stored and backed up. */
+      all: settings,
+      replace: (next: unknown) => {
+        save(readSettings(next));
+        setUnlocked(false);
+      },
+      startOn: () => settings().startOn,
+      setStartOn: (startOn: StartOn) => set({ startOn }),
+      clock: () => settings().clock,
+      setClock: (clock: ClockFormat) => set({ clock }),
+
+      hasPin: () => settings().pin !== undefined,
+      /** Sets a new PIN, or with undefined removes it. Setting one leaves locks open this session. */
+      setPin: (pin: string | undefined) => {
+        if (pin !== undefined && !isPin(pin)) return false;
+        const next = { ...settings() };
+        if (pin === undefined) delete next.pin;
+        else next.pin = pin;
+        save(next);
+        setUnlocked(pin !== undefined);
+        return true;
+      },
+      /** Whether `pin` is the PIN; a right one opens locked channels until the app closes. */
+      checkPin: (pin: string) => {
+        const right = settings().pin !== undefined && pin === settings().pin;
+        if (right) setUnlocked(true);
+        return right;
+      },
+      /** Locked channels play without asking: the PIN was entered, or none is set. */
+      unlocked: () => unlocked() || settings().pin === undefined,
+      /** Asks for the PIN again, as at the next start. */
+      lock: () => setUnlocked(false),
+    };
+  });
+
+export type AppSettingsStore = ReturnType<typeof createAppSettings>;

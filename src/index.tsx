@@ -15,7 +15,7 @@ import fonts from "./fonts";
 import { merge } from "lodash-es";
 import { config } from "./device";
 import { installDevHooks } from "./devHooks";
-import { library } from "./library";
+import { library, settings } from "./library";
 import { player } from "./player";
 import { watchLifecycle } from "./player/lifecycle";
 import {
@@ -48,9 +48,9 @@ shaders.registerShaderType("holePunch", HolePunch);
 // Imports sources whose data is old or missing, now and on a schedule.
 library.start().catch(error => console.error("Couldn't start the source schedule:", error));
 
-// The app opens full screen on the last channel watched; Live TV, the
-// guide, is a Back away.
-if (!location.hash || location.hash === "#/") location.replace("#/watch");
+// The app opens full screen on the last channel watched, with Live TV, the
+// guide, a Back away, or on the guide if Settings says so.
+if ((!location.hash || location.hash === "#/") && settings.startOn() === "last") location.replace("#/watch");
 
 loadFonts(fonts).catch(error => console.error("Fonts failed to load:", error));
 render(() => {

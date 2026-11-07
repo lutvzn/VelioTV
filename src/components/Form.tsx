@@ -143,6 +143,19 @@ export const ChoiceField = <T,>(props: ChoiceFieldProps<T>) => {
   );
 };
 
+export interface ToggleFieldProps {
+  /** What it is, and its state, above it: "Group · Hidden". */
+  label: string;
+  value: string;
+  hint: string;
+  onEnter: () => void;
+}
+
+/** A row that switches something about an item on and off, such as hiding it. */
+export const ToggleField = (props: ToggleFieldProps) => (
+  <Field label={props.label} value={props.value} hint={props.hint} onEnter={props.onEnter} />
+);
+
 export const BUTTON_HEIGHT = 72;
 
 export interface ButtonProps {
@@ -151,6 +164,8 @@ export interface ButtonProps {
   onEnter: () => void;
   /** For actions that delete something. */
   danger?: boolean;
+  /** Fainter, for an action that does nothing now, such as moving the first item up. */
+  dim?: boolean;
   children?: JSX.Element;
 }
 
@@ -167,6 +182,7 @@ export const FormButton = (props: ButtonProps) => {
       height={BUTTON_HEIGHT}
       borderRadius={12}
       color={color()}
+      alpha={props.dim ? 0.5 : 1}
       onFocusChanged={setFocused}
       onEnter={() => {
         props.onEnter();

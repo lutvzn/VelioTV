@@ -15,7 +15,7 @@ import {
 } from "solid-js";
 import { MENU_WIDTH } from "../components/SideMenu";
 import { DAY } from "../data/guideCodec";
-import type { Channel } from "../data/lineup";
+import type { Channel, ChannelGroup } from "../data/lineup";
 import { exposeToProbes } from "../devHooks";
 import { createGuideDays } from "../guide/guideDays";
 import { searchChannels } from "../guide/search";
@@ -32,14 +32,24 @@ import { clockTime, dayLabel } from "../live/format";
 import { handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../live/handoff";
 import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow";
 import { createNumberEntry } from "../live/numberEntry";
-import { channelNumbers, rememberedChannel } from "../live/zapper";
-import { guide, lineup } from "../library";
+import { rememberedChannel } from "../live/zapper";
+import { edits, groupTitle, guide, isBlocked, lineup, liveGroups, liveNumbers, liveView } from "../library";
+import { askPin } from "../pin";
+import { FAVOURITES } from "../live/groups";
 import { player } from "../player";
 import { editText } from "../textEntry";
 import { $t } from "../translate";
 import type { Rect } from "../videoWindow";
 import { GuideDetails } from "./guide/GuideDetails";
-import { ChannelOptions, HOLD_MS, OPTIONS_WIDTH } from "./live/ChannelOptions";
+import {
+  ChannelOptions,
+  OptionsPanel,
+  HOLD_MS,
+  HOLD_REQUIRES_REPEAT,
+  OPTIONS_WIDTH,
+  OVERLAY_Z,
+} from "./live/ChannelOptions";
+import { groupMenu } from "./live/menus";
 import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
 
 // Live TV: the TV guide (PLAN.md, Phase 4). Channels run down and time
@@ -94,6 +104,15 @@ interface Filter {
   channels: Channel[];
 }
 
+const groupFilter = (group: ChannelGroup): Filter => ({
+  id: `group:${group.name}`,
+  label: groupTitle(group.name),
+  group: group.name,
+  channels: group.channels,
+});
+
+const numberOf = (channel: Channel) => liveNumbers().byId.get(channel.id) ?? channel.index + 1;
+
 export default () => {
   const navigate = useNavigate();
   let root: ElementNode | undefined;
@@ -108,24 +127,23 @@ export default () => {
 
   const days = createGuideDays(guide);
   createEffect(on(lineup.channels, () => days.reset(), { defer: true }));
-  const numbers = createMemo(() => channelNumbers(lineup.channels()));
-  const numberOf = (channel: Channel) => numbers().byId.get(channel.id) ?? channel.index + 1;
 
   // Which channels show: every one, the search results, or a group.
   const [query, setQuery] = createSignal("");
-  const results = createMemo(() => searchChannels(lineup.channels(), query()));
-  const filters = createMemo((): Filter[] => [
-    { id: ALL, label: $t("live.allChannels"), channels: lineup.channels() },
-    ...(query()
-      ? [{ id: SEARCH, label: $t("guide.searchResults", { query: query() }), channels: results() }]
-      : []),
-    ...lineup.groups().map(group => ({
-      id: `group:${group.name}`,
-      label: group.name || $t("live.noGroup"),
-      group: group.name,
-      channels: group.channels,
-    })),
-  ]);
+  const results = createMemo(() => searchChannels(liveView().channels, query()));
+  // Every channel, then Favourites, the search results, and the playlists' groups.
+  const filters = createMemo((): Filter[] => {
+    const [first, ...rest] = liveGroups();
+    const favourites = first?.name === FAVOURITES ? [groupFilter(first)] : [];
+    return [
+      { id: ALL, label: $t("live.allChannels"), channels: liveView().channels },
+      ...favourites,
+      ...(query()
+        ? [{ id: SEARCH, label: $t("guide.searchResults", { query: query() }), channels: results() }]
+        : []),
+      ...(favourites.length > 0 ? rest : liveGroups()).map(groupFilter),
+    ];
+  });
   const [filterId, setFilterId] = createSignal(handoff?.group === undefined ? ALL : `group:${handoff.group}`);
   const filter = createMemo(() => filters().find(f => f.id === filterId()) ?? filters()[0]);
   const list = createMemo(() => filter().channels);
@@ -143,12 +161,18 @@ export default () => {
   createEffect(
     on(list, channels => {
       if (channels.length === 0) return;
-      placeCursor(
-        Math.max(
-          0,
-          channels.findIndex(channel => channel.id === cursorId),
-        ),
+      const index = Math.max(
+        0,
+        channels.findIndex(channel => channel.id === cursorId),
       );
+      // A favourite moved within the rows shown: keep them where they are.
+      if (index >= top() && index < top() + GUIDE_ROWS) {
+        setCursor(index);
+        setTop(scrollTop(index, top(), GUIDE_ROWS, channels.length));
+        cursorId = channels[index]?.id;
+      } else {
+        placeCursor(index);
+      }
     }),
   );
   const moveCursor = (index: number) => {
@@ -187,6 +211,7 @@ export default () => {
     createMemo(() => {
       const channel = list()[top() + slot] as Channel | undefined;
       if (!channel) return undefined;
+      if (isBlocked(channel)) return { channel, cells: wholeRow("locked", from(), to(), STEP) };
       if (!channel.guideId) return { channel, cells: wholeRow("none", from(), to(), STEP) };
       const programmes = days.programmes(channel, from() - SPAN, to() + SPAN);
       if (!programmes) return { channel, cells: wholeRow("loading", from(), to(), STEP) };
@@ -210,17 +235,27 @@ export default () => {
   });
 
   // The preview plays the cursor's channel once it stays put, and at once
-  // when the page opens. A channel already playing carries on.
+  // when the page opens. A channel already playing carries on. A locked
+  // channel plays once the PIN is entered.
   const [previewId, setPreviewId] = createSignal<string>();
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
   let firstPreview = true;
+  const cursorBlocked = () => {
+    const channel = cursorChannel();
+    return channel !== undefined && isBlocked(channel);
+  };
   createEffect(
-    on(cursorChannel, channel => {
+    on([cursorChannel, cursorBlocked], ([channel, blocked]) => {
       clearTimeout(previewTimer);
       if (!channel) return;
       const delay = firstPreview ? 0 : PREVIEW_DELAY_MS;
       firstPreview = false;
       previewTimer = setTimeout(() => {
+        if (blocked) {
+          player.stop();
+          setPreviewId(undefined);
+          return;
+        }
         playChannel(channel);
         setPreviewId(channel.id);
       }, delay);
@@ -231,7 +266,7 @@ export default () => {
 
   const entry = createNumberEntry({
     onNumber: number => {
-      const channel = numbers().byNumber.get(number);
+      const channel = liveNumbers().byNumber.get(number);
       if (!channel) return false;
       const index = list().findIndex(c => c.id === channel.id);
       if (index >= 0) placeCursor(index);
@@ -274,6 +309,10 @@ export default () => {
   const watch = () => {
     const channel = cursorChannel();
     if (!channel) return;
+    if (isBlocked(channel)) {
+      void askPin().then(right => right && watch());
+      return;
+    }
     handOff({ channelId: channel.id, group: filter().group });
     navigate("/watch", { replace: true });
   };
@@ -289,16 +328,56 @@ export default () => {
     entry.dispose();
   });
 
-  // The highlighted channel's options, from holding OK or the Tools key.
+  // Moving a channel within Favourites: Up and Down carry it, OK or Back ends.
+  const [moving, setMoving] = createSignal<Channel>();
+  const inFavourites = () => filter().group === FAVOURITES;
+  const moveBy = (step: number) => {
+    const channel = moving();
+    const channels = list();
+    const at = channels.findIndex(other => other.id === channel?.id);
+    if (!channel || at < 0) return;
+    const target = channels[Math.max(0, Math.min(channels.length - 1, at + step))];
+    // By position among the stored ids, which may hold channels no source has now.
+    if (target) edits.moveFavourite(channel.id, edits.favourites().indexOf(target.id));
+  };
+  const movingKey = (key: string | undefined) => {
+    if (key === "Up") moveBy(-1);
+    else if (key === "Down") moveBy(1);
+    else if (key === "ChannelUp") moveBy(-GUIDE_ROWS);
+    else if (key === "ChannelDown") moveBy(GUIDE_ROWS);
+    else if (key === "Enter" || key === "Back") setMoving(undefined);
+    // Other keys do nothing until the move ends.
+    return true;
+  };
+  // A move ends if the channel leaves Favourites.
+  createEffect(() => {
+    const channel = moving();
+    if (channel && (!inFavourites() || !list().some(other => other.id === channel.id))) setMoving(undefined);
+  });
+
+  // The highlighted channel's options, or on the group line the group's,
+  // from holding OK or the Tools key.
   const [optionsFor, setOptionsFor] = createSignal<Channel>();
+  const [groupOptionsFor, setGroupOptionsFor] = createSignal<string>();
   const openOptions = () => {
+    if (entry.active()) return false;
+    if (area() === "filters") {
+      const key = filter().group;
+      // Every channel, search results and Favourites have no group options.
+      if (key === undefined || key === FAVOURITES) return false;
+      setGroupOptionsFor(key);
+      return true;
+    }
     const channel = cursorChannel();
-    if (area() !== "grid" || entry.active() || !channel) return false;
+    if (!channel) return false;
     setOptionsFor(channel);
     return true;
   };
   const closeOptions = () => {
-    setOptionsFor(undefined);
+    batch(() => {
+      setOptionsFor(undefined);
+      setGroupOptionsFor(undefined);
+    });
     root?.setFocus();
   };
   const pressEnter = () => {
@@ -312,10 +391,14 @@ export default () => {
       if (!openOptions()) pressEnter();
     },
     holdThreshold: HOLD_MS,
+    holdRequiresRepeat: HOLD_REQUIRES_REPEAT,
   });
 
   exposeToProbes("guidePage", {
     optionsFor,
+    groupOptionsFor,
+    filters,
+    moving,
     cursor,
     top,
     from,
@@ -344,6 +427,8 @@ export default () => {
       width={PAGE_WIDTH}
       height={1080}
       onFocusChanged={setFocused}
+      // While a favourite moves, it has every key.
+      onCaptureKey={(_event, _element, _focused, key) => (moving() ? movingKey(key) : false)}
       onUp={() => {
         if (area() === "filters") return true;
         if (cursor() === 0 || list().length === 0) setArea("filters");
@@ -418,7 +503,7 @@ export default () => {
       onKey9={digit(9)}
     >
       <Show
-        when={lineup.channels().length > 0}
+        when={liveView().channels.length > 0}
         fallback={
           <>
             <Text x={LEFT} y={50} fontSize={56}>
@@ -433,7 +518,7 @@ export default () => {
           </>
         }
       >
-        <Show when={previewId() ? statusText() : undefined}>
+        <Show when={cursorBlocked() ? $t("live.locked") : previewId() ? statusText() : undefined}>
           {text => (
             <Text
               x={LEFT + 20}
@@ -492,9 +577,11 @@ export default () => {
             fontSize={24}
             color="#ffffffb3"
           >
-            {focused() && area() === "filters"
-              ? $t("guide.filterHint")
-              : $t("live.channelCount", { count: list().length })}
+            {moving()
+              ? $t("guide.moveHint")
+              : focused() && area() === "filters"
+                ? $t("guide.filterHint")
+                : $t("live.channelCount", { count: list().length })}
           </Text>
         </View>
 
@@ -539,6 +626,7 @@ export default () => {
                     gridX={GRID_X - LEFT}
                     now={now()}
                     current={top() + slot === cursor()}
+                    moving={moving()?.id === row().channel.id}
                     focused={
                       focused() && area() === "grid" && top() + slot === cursor() ? focusedCell() : undefined
                     }
@@ -566,6 +654,7 @@ export default () => {
 
       <Show when={entry.active()}>
         <View
+          zIndex={OVERLAY_Z}
           x={PAGE_WIDTH - 40}
           y={40}
           mountX={1}
@@ -587,9 +676,31 @@ export default () => {
         </View>
       </Show>
 
+      <Show when={groupOptionsFor()}>
+        {key => (
+          <OptionsPanel menu={groupMenu(key())} x={PAGE_WIDTH - OPTIONS_WIDTH} onClose={closeOptions} />
+        )}
+      </Show>
       <Show when={optionsFor()}>
         {channel => (
-          <ChannelOptions channel={channel()} x={PAGE_WIDTH - OPTIONS_WIDTH} onClose={closeOptions} />
+          <ChannelOptions
+            channel={channel()}
+            x={PAGE_WIDTH - OPTIONS_WIDTH}
+            onClose={closeOptions}
+            extra={
+              inFavourites()
+                ? [
+                    {
+                      id: "move",
+                      label: $t("options.move"),
+                      run: () => {
+                        setMoving(channel());
+                      },
+                    },
+                  ]
+                : []
+            }
+          />
         )}
       </Show>
     </View>

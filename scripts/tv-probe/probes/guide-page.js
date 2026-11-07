@@ -17,8 +17,6 @@
 
 async function probe(input) {
   const app = window.tiviplayer;
-  if (!app?.live || !app?.lineup)
-    return { error: "window.tiviplayer.live is missing: is the app full screen?" };
   const { rows = 60, everyMs = 100, pages = 10, pageEveryMs = 300 } = input;
   const { player, lineup } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -93,14 +91,25 @@ async function probe(input) {
   const results = {};
 
   // From full screen: Back (once for the banner) to the guide, which takes the focus.
-  await waitFor(() => lineup.channels().length > 0 && live()?.zapper.playing());
+  // Right after the restart, the page may not be up yet.
+  if ((await waitFor(() => app.live, 30_000)) === undefined) {
+    return { error: "window.tiviplayer.live is missing: is the app full screen?" };
+  }
+  await waitFor(() => lineup.channels().length > 0 && live()?.zapper.playing(), 30_000);
   await sleep(1000);
   const backStart = performance.now();
+  const startBacks = [];
   for (let i = 0; i < 5 && live()?.watching(); i++) {
     press(KEYS.back);
     await sleep(400);
+    startBacks.push({
+      hash: location.hash,
+      banner: live()?.bannerShown(),
+      pending: live()?.zapper.pending(),
+    });
   }
-  await waitFor(() => page());
+  if ((await waitFor(() => page())) === undefined)
+    return { error: "Back didn't open the guide", backs: startBacks };
   const opened = Math.round(performance.now() - backStart);
   await sleep(500);
   results.open = {

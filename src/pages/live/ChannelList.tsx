@@ -1,5 +1,6 @@
 import { Text, View } from "@solidtv/solid";
 import { FavouriteDot } from "../../components/FavouriteDot";
+import { OVERLAY_Z } from "./ChannelOptions";
 import { For, Show } from "solid-js";
 import type { NowAndNext } from "../../data/guideCache";
 import type { Channel } from "../../data/lineup";
@@ -35,7 +36,7 @@ export const ChannelList = (props: ChannelListProps) => {
   const at = (slot: number) => props.channels[props.top + slot] as Channel | undefined;
   const current = () => props.guide.now;
   return (
-    <View width={LIST_WIDTH} height={1080} color="#071423f2">
+    <View width={LIST_WIDTH} height={1080} color="#071423f2" zIndex={OVERLAY_Z}>
       <Text x={40} y={40} width={LIST_WIDTH - 260} maxLines={1} contain="width" fontSize={36}>
         {`‹  ${props.title}  ›`}
       </Text>

@@ -25,6 +25,8 @@ export interface Source {
   guideUrls?: string[];
   /** How often to import the source again. */
   refreshHours: number;
+  /** Turned off: kept, with its data, but out of the lineup and not refreshed. */
+  disabled?: boolean;
 }
 
 /** A source's settings, as the form edits them. */
@@ -60,6 +62,7 @@ const readSource = (value: unknown): Source | undefined => {
     const text = optionalText(value[key]);
     if (text !== undefined) source[key] = text;
   }
+  if (value.disabled === true) source.disabled = true;
   if (Array.isArray(value.guideUrls)) {
     const urls = value.guideUrls.filter((url): url is string => typeof url === "string" && url !== "");
     if (urls.length > 0) source.guideUrls = urls;
@@ -67,11 +70,21 @@ const readSource = (value: unknown): Source | undefined => {
   return source;
 };
 
+/** Reads saved or restored sources, leaving out any that don't fit. */
+export const readSources = (list: unknown): Source[] => {
+  if (!Array.isArray(list)) return [];
+  const ids = new Set<string>();
+  return list.map(readSource).filter((source): source is Source => {
+    if (!source || ids.has(source.id)) return false;
+    ids.add(source.id);
+    return true;
+  });
+};
+
 export const loadSources = (storage: Storage): Source[] => {
   try {
     const saved: unknown = JSON.parse(storage.getItem(STORAGE_KEY) ?? "null");
-    if (!isRecord(saved) || !Array.isArray(saved.sources)) return [];
-    return saved.sources.map(readSource).filter((source): source is Source => source !== undefined);
+    return isRecord(saved) ? readSources(saved.sources) : [];
   } catch (error) {
     console.error("Couldn't read the saved sources:", error);
     return [];

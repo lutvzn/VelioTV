@@ -28,6 +28,7 @@ export const GuideDetails = (props: GuideDetailsProps) => {
     const kind = props.cell?.kind;
     if (kind === "none") return $t("live.noGuide");
     if (kind === "gap") return $t("guide.noInformation");
+    if (kind === "locked") return $t("pin.lockedHint");
     return "";
   };
   const extra = () => {

@@ -23,6 +23,7 @@ const COLORS = {
   dim: "#ffffffb3",
   faint: "#ffffff66",
   playing: "#7fb2ffff",
+  moving: "#f2c14e59",
 };
 
 export interface GuideRowProps {
@@ -38,6 +39,8 @@ export interface GuideRowProps {
   now: number;
   /** Whether the cursor is on this row. */
   current: boolean;
+  /** Whether the channel is being moved in Favourites. */
+  moving?: boolean;
   /** The focused cell, when the guide has focus and the cursor is here. */
   focused?: Cell;
 }
@@ -57,7 +60,7 @@ export const GuideRow = (props: GuideRowProps) => {
   // A row without programmes is one bar; its cells only move the focus.
   const whole = () => {
     const kind = props.cells[0]?.kind;
-    return kind === "loading" || kind === "none" ? kind : undefined;
+    return kind === "loading" || kind === "none" || kind === "locked" ? kind : undefined;
   };
 
   const placed = createMemo((): Placed[] => {
@@ -82,7 +85,7 @@ export const GuideRow = (props: GuideRowProps) => {
       <View
         width={CHANNEL_WIDTH}
         height={INNER}
-        color={props.current ? COLORS.cursorChannel : COLORS.channel}
+        color={props.moving ? COLORS.moving : props.current ? COLORS.cursorChannel : COLORS.channel}
         borderRadius={8}
       >
         <Text x={78} mountX={1} height={INNER} lineHeight={INNER} fontSize={26} color={COLORS.dim}>
@@ -133,7 +136,7 @@ export const GuideRow = (props: GuideRowProps) => {
             color={props.focused ? COLORS.focused : COLORS.empty}
           >
             <Text x={14} height={INNER} lineHeight={INNER} fontSize={26} color={COLORS.faint}>
-              {kind() === "none" ? $t("live.noGuide") : ""}
+              {kind() === "none" ? $t("live.noGuide") : kind() === "locked" ? $t("live.locked") : ""}
             </Text>
           </View>
         )}

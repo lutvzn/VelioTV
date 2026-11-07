@@ -15,6 +15,7 @@ import {
   importRequest,
   loadSources,
   newSourceId,
+  readSources,
   refreshDue,
   saveSources,
   type Source,
@@ -22,6 +23,14 @@ import {
 } from "./sources";
 
 const CHECK_EVERY_MS = 15 * 60_000;
+/**
+ * Sources removed whose data may not be deleted yet, as the app can close
+ * mid-delete. Only these are deleted at the next start: data of a source
+ * missing from the list is kept, as on the TV the list once read as empty at
+ * a start (PLAN.md, Phase 5, step 8), and deleting what it didn't name
+ * wiped every source's data.
+ */
+const REMOVED_KEY = "tiviplayer.removedSources";
 
 export type Importer = (
   request: ImportRequest,
@@ -88,7 +97,7 @@ export const createSourceManager = (options: SourceManagerOptions) => {
   };
 
   const budgetFor = (id: string) => {
-    const others = sources().filter(source => source.id !== id);
+    const others = sources().filter(source => source.id !== id && !source.disabled);
     const othersBytes = others.reduce((sum, source) => sum + (states()[source.id]?.guideBytes ?? 0), 0);
     return guideBudget(totalBudget, others.length + 1, othersBytes);
   };
@@ -141,10 +150,44 @@ export const createSourceManager = (options: SourceManagerOptions) => {
     if (current()?.id === id) controller?.abort();
   };
 
+  // The removals not finished yet (REMOVED_KEY).
+  const pendingRemovals = (): string[] => {
+    try {
+      const saved: unknown = JSON.parse(options.storage.getItem(REMOVED_KEY) ?? "[]");
+      return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : [];
+    } catch {
+      return [];
+    }
+  };
+  const setPendingRemovals = (ids: string[]) => {
+    try {
+      if (ids.length > 0) options.storage.setItem(REMOVED_KEY, JSON.stringify(ids));
+      else options.storage.removeItem(REMOVED_KEY);
+    } catch (error) {
+      console.error("Couldn't save the sources being removed:", error);
+    }
+  };
+  const deleteData = async (id: string) => {
+    try {
+      await deleteSource(await db(), id);
+      setPendingRemovals(pendingRemovals().filter(other => other !== id));
+    } catch (error) {
+      console.error("Couldn't delete the source's data:", error);
+    }
+  };
+
+  const remove = async (id: string) => {
+    cancel(id);
+    setPendingRemovals([...new Set([...pendingRemovals(), id])]);
+    save(sources().filter(source => source.id !== id));
+    setState(id, undefined);
+    await deleteData(id);
+  };
+
   /** Queues every source whose data is old, missing or failed. */
   const check = () => {
     for (const source of sources()) {
-      if (current()?.id === source.id) continue;
+      if (source.disabled || current()?.id === source.id) continue;
       if (refreshDue(source, states()[source.id], now())) enqueue(source.id);
     }
   };
@@ -181,15 +224,15 @@ export const createSourceManager = (options: SourceManagerOptions) => {
       } finally {
         setLoaded(true);
       }
-      // Data left by a source removed while the app was closing.
-      for (const id of Object.keys(states())) {
-        if (!find(id)) {
-          setState(id, undefined);
-          void db()
-            .then(database => deleteSource(database, id))
-            .catch((error: unknown) => console.error("Couldn't delete a removed source's data:", error));
-        }
+      // Data of a source removed while the app was closing.
+      for (const id of pendingRemovals()) {
+        if (find(id)) continue;
+        setState(id, undefined);
+        void deleteData(id);
       }
+      // Data of any other source not in the list is kept, unshown.
+      const unknown = Object.keys(states()).filter(id => !find(id));
+      if (unknown.length > 0) console.warn("Keeping the data of sources not in the list:", unknown);
       check();
       const timer = setInterval(check, CHECK_EVERY_MS);
       const onVisible = () => {
@@ -215,22 +258,60 @@ export const createSourceManager = (options: SourceManagerOptions) => {
     update: (id: string, draft: SourceDraft) => {
       const before = find(id);
       if (!before) return;
-      save(sources().map(source => (source.id === id ? { ...draft, id } : source)));
+      // The form doesn't edit whether the source is on.
+      const next: Source = { ...draft, id };
+      if (before.disabled) next.disabled = true;
+      else delete next.disabled;
+      save(sources().map(source => (source.id === id ? next : source)));
       if (changesData(before, draft)) {
         cancel(id);
         enqueue(id, true);
       }
     },
 
-    remove: async (id: string) => {
-      cancel(id);
-      save(sources().filter(source => source.id !== id));
-      setState(id, undefined);
-      try {
-        await deleteSource(await db(), id);
-      } catch (error) {
-        console.error("Couldn't delete the source's data:", error);
-      }
+    remove,
+
+    /** Moves a source `step` places in the order, which is the lineup's. */
+    move: (id: string, step: number) => {
+      const list = sources().slice();
+      const from = list.findIndex(source => source.id === id);
+      const to = Math.max(0, Math.min(list.length - 1, from + step));
+      if (from < 0 || from === to) return;
+      const [source] = list.splice(from, 1);
+      list.splice(to, 0, source);
+      save(list);
+    },
+
+    /** Turns a source off, keeping it and its data, or on again (importing it if due). */
+    setDisabled: (id: string, disabled: boolean) => {
+      const before = find(id);
+      if (!before || Boolean(before.disabled) === disabled) return;
+      save(
+        sources().map(source => {
+          if (source.id !== id) return source;
+          const next = { ...source };
+          if (disabled) next.disabled = true;
+          else delete next.disabled;
+          return next;
+        }),
+      );
+      if (disabled) cancel(id);
+      else check();
+    },
+
+    /**
+     * Puts a restored list in place of the sources (PLAN.md, Phase 5,
+     * step 7): sources not in it are removed with their data, and the rest
+     * import if they're due, as new ones are.
+     */
+    replaceAll: async (list: unknown) => {
+      const next = readSources(list);
+      const keep = new Set(next.map(source => source.id));
+      const gone = sources().filter(source => !keep.has(source.id));
+      save(next);
+      await Promise.all(gone.map(source => remove(source.id)));
+      check();
+      return next;
     },
 
     /** Imports a source now, or after the import running now. */

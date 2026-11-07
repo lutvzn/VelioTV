@@ -23,6 +23,8 @@ export interface ZapperOptions {
   channels: () => Channel[];
   groups: () => ChannelGroup[];
   find: (id: string) => Channel | undefined;
+  /** Channel numbers, when they come from more than `channels`. */
+  numbers?: () => ChannelNumbers;
   /** Starts a channel's stream. */
   play: (channel: Channel) => void;
   storage?: Pick<Storage, "getItem" | "setItem">;
@@ -31,7 +33,12 @@ export interface ZapperOptions {
 }
 
 /** Channel numbers both ways: the playlist's, or else the position from 1. */
-export const channelNumbers = (channels: readonly Channel[]) => {
+export interface ChannelNumbers {
+  byId: Map<string, number>;
+  byNumber: Map<number, Channel>;
+}
+
+export const channelNumbers = (channels: readonly Channel[]): ChannelNumbers => {
   const byId = new Map<string, number>();
   const byNumber = new Map<number, Channel>();
   channels.forEach((channel, index) => {
@@ -64,7 +71,7 @@ export const createZapper = (options: ZapperOptions) => {
   let zapTimer: ReturnType<typeof setTimeout> | undefined;
   let numberTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const numbers = createMemo(() => channelNumbers(options.channels()));
+  const numbers = options.numbers ?? createMemo(() => channelNumbers(options.channels()));
 
   const groupChannels = (name: string | undefined) =>
     name === undefined ? options.channels() : (options.groups().find(g => g.name === name)?.channels ?? []);
@@ -133,7 +140,9 @@ export const createZapper = (options: ZapperOptions) => {
       const channels = options.channels();
       if (channels.length === 0) return false;
       const last = rememberedChannel(storage);
-      const remembered = last === undefined ? undefined : options.find(last);
+      const found = last === undefined ? undefined : options.find(last);
+      // A channel hidden since isn't played.
+      const remembered = found && channels.includes(found) ? found : undefined;
       if (!remembered && last !== undefined && stillLoading) return false;
       play(remembered ?? channels[0]);
       return true;

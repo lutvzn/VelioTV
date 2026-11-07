@@ -35,7 +35,11 @@
 //                                00:1A:79:00:00:01, or 00:1A:79:00:00:02
 //                                for 50 channels
 // /echo answers with the request's method and headers, to see which headers
-// a TV really sends. The index at / lists every URL as JSON.
+// a TV really sends.
+// /backup/<name>.json keeps an app backup (PLAN.md, Phase 5, step 7): PUT
+// stores it, in memory until the server stops, and GET answers with it.
+// /backup/sample.json is a made-up one, with a 50-channel playlist from
+// this server. The index at / lists every URL as JSON.
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -234,7 +238,74 @@ const index = host => {
       xtream: { server: base, accounts: ["test/test", `small/small (${SMALL} channels)`] },
       stalker: { portal: `${base}/c/`, macs: ["00:1A:79:00:00:01", `00:1A:79:00:00:02 (${SMALL} channels)`] },
     },
+    backup: { sample: `${base}/backup/sample.json`, yours: `${base}/backup/<name>.json` },
   };
+};
+
+// Backups the app sent, by name.
+const backups = new Map();
+const MAX_BACKUP_BYTES = 1_000_000;
+
+// The app's id for a sample channel: its source, then its name (src/data/channelKey.ts).
+const sampleId = channel => `sample/n:${channel.name.toLowerCase()}`;
+
+// A made-up backup: one playlist from this server, some edits and settings.
+const sampleBackup = base => ({
+  app: "tiviplayer",
+  version: 1,
+  savedAt: Date.now(),
+  sources: [
+    {
+      id: "sample",
+      name: "Sample playlist",
+      kind: "m3u",
+      url: `${base}/playlist.m3u?channels=${SMALL}`,
+      refreshHours: 24,
+    },
+  ],
+  edits: (() => {
+    const [first, second] = catalog(SMALL).channels;
+    return { favourites: [sampleId(second), sampleId(first)], groupNames: { [first.group]: "Renamed news" } };
+  })(),
+  settings: { startOn: "guide", clock: "24h" },
+});
+
+const serveBackup = (req, res, url, base) => {
+  const name = url.pathname.match(/^\/backup\/([\w-]+)\.json$/)?.[1];
+  if (!name) return false;
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, PUT",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    res.end();
+    return true;
+  }
+  if (req.method === "PUT") {
+    const chunks = [];
+    let size = 0;
+    req.on("data", chunk => {
+      size += chunk.length;
+      if (size <= MAX_BACKUP_BYTES) chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (size > MAX_BACKUP_BYTES) return send(res, 413, "Too large\n");
+      const text = Buffer.concat(chunks).toString("utf8");
+      try {
+        JSON.parse(text);
+      } catch {
+        return send(res, 400, "Not JSON\n");
+      }
+      backups.set(name, text);
+      send(res, 204, "");
+    });
+    return true;
+  }
+  const body = name === "sample" ? JSON.stringify(sampleBackup(base), null, 2) : backups.get(name);
+  if (body === undefined) send(res, 404, "No such backup\n");
+  else send(res, 200, body, "application/json");
+  return true;
 };
 
 const send = (res, status, body, type = "text/plain") => {
@@ -412,6 +483,7 @@ const handle = (req, res) => {
     return send(res, 200, JSON.stringify({ method: req.method, headers: req.headers }), "application/json");
   }
   const base = `http://${req.headers.host ?? "localhost"}`;
+  if (serveBackup(req, res, url, base)) return;
   if (serveSource(req, res, url, base)) return;
   const ctx = { base, send, sendChunks, accounts, macs, now: Date.now(), window: guideWindow(DAYS) };
   if (handleXtream(req, res, url, ctx) || handleStalker(req, res, url, ctx)) return;

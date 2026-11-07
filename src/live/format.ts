@@ -1,10 +1,20 @@
-// Times as Live TV shows them: 24-hour clock, in the TV's time zone.
+// Times as Live TV shows them, in the TV's time zone: a 24-hour clock, or a
+// 12-hour one if the user picks it in Settings (PLAN.md, Phase 5, step 6).
+
+import { createSignal } from "solid-js";
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
-export const clockTime = (ms: number) => {
+const [twelveHour, setTwelveHour] = createSignal(false);
+/** Picks the clock every time shown uses; the library follows the setting. */
+export { setTwelveHour };
+
+export const clockTime = (ms: number, twelve = twelveHour()) => {
   const date = new Date(ms);
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const minutes = pad(date.getMinutes());
+  if (!twelve) return `${pad(date.getHours())}:${minutes}`;
+  const hours = date.getHours();
+  return `${hours % 12 || 12}:${minutes} ${hours < 12 ? "AM" : "PM"}`;
 };
 
 export const timeRange = (start: number, stop: number) => `${clockTime(start)}–${clockTime(stop)}`;

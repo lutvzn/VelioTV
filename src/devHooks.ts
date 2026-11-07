@@ -7,7 +7,18 @@ import { channelKeys } from "./data/channelKey";
 import * as db from "./data/db";
 import { createGuideClient } from "./data/guideClient";
 import { importSource } from "./data/importClient";
-import { edits, guide, guideReader, library, lineup } from "./library";
+import {
+  backUpTo,
+  currentBackup,
+  edits,
+  guide,
+  guideReader,
+  library,
+  lineup,
+  liveView,
+  restoreFrom,
+  settings,
+} from "./library";
 import { player } from "./player";
 
 const hooks: Record<string, unknown> = {
@@ -21,6 +32,11 @@ const hooks: Record<string, unknown> = {
   createGuideClient,
   edits,
   channelKeys,
+  settings,
+  liveView,
+  currentBackup,
+  backUpTo,
+  restoreFrom,
 };
 
 export const installDevHooks = () => Object.assign(globalThis, { tiviplayer: hooks });

@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from "@solidjs/router";
 import { View, ElementNode } from "@solidtv/solid";
 import { useAnnouncer, useMouse } from "@solidtv/solid/primitives";
 import type { JSX } from "solid-js";
+import { PinPrompt } from "../components/PinPrompt";
 import { MENU_WIDTH, SideMenu } from "../components/SideMenu";
 import { device } from "../device";
 import { library } from "../library";
@@ -112,6 +113,7 @@ const App = (props: { children?: JSX.Element }) => {
         onRight={focusContent}
         onBack={closeApp}
       />
+      <PinPrompt />
     </View>
   );
 };

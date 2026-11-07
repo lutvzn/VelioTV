@@ -10,13 +10,20 @@ import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow
 import { firstChoice, nextChoice, trackRows } from "../live/trackRows";
 import { createNowNext } from "../live/nowNext";
 import { createZapper } from "../live/zapper";
-import { guide, library, lineup } from "../library";
+import { groupTitle, guide, isBlocked, library, lineup, liveGroups, liveNumbers, liveView } from "../library";
+import { askPin } from "../pin";
 import { player } from "../player";
 import { $t } from "../translate";
 import { FULL_SCREEN } from "../videoWindow";
 import { Banner } from "./live/Banner";
 import { ChannelList, LIST_ROWS } from "./live/ChannelList";
-import { ChannelOptions, HOLD_MS, OPTIONS_WIDTH } from "./live/ChannelOptions";
+import {
+  ChannelOptions,
+  HOLD_MS,
+  HOLD_REQUIRES_REPEAT,
+  OPTIONS_WIDTH,
+  OVERLAY_Z,
+} from "./live/ChannelOptions";
 import { TrackPanel } from "./live/TrackPanel";
 
 // Live TV full screen (PLAN.md, Phase 3, step 3, and Phase 4). The app
@@ -36,10 +43,8 @@ const BANNER_MS = 5000;
 const MISSING_MS = 2000;
 const CLOCK_MS = 10_000;
 
-const groupTitle = (name: string | undefined) => {
-  if (name === undefined) return $t("live.allChannels");
-  return name || $t("live.noGroup");
-};
+// A locked channel's programmes don't show until the PIN is entered.
+const unblocked = (channel: Channel | undefined) => (channel && !isBlocked(channel) ? channel : undefined);
 
 export default () => {
   const navigate = useNavigate();
@@ -50,17 +55,34 @@ export default () => {
   // From the guide: the channel to watch.
   let handoff = takeHandoff();
 
-  // The first channel may be one the guide left playing; it carries on.
+  // The first channel may be one the guide left playing; it carries on. A
+  // locked channel waits for the PIN (PLAN.md, Phase 5, step 5): OK asks.
   let first = true;
+  const [lockedChannel, setLockedChannel] = createSignal<Channel>();
   const zapper = createZapper({
-    channels: lineup.channels,
-    groups: lineup.groups,
+    channels: () => liveView().channels,
+    groups: liveGroups,
     find: lineup.find,
+    numbers: liveNumbers,
     play: channel => {
-      playChannel(channel, { keep: first });
+      const keep = first;
       first = false;
+      if (isBlocked(channel)) {
+        player.stop();
+        setLockedChannel(channel);
+        return;
+      }
+      setLockedChannel(undefined);
+      playChannel(channel, { keep });
     },
     storage: localStorage,
+  });
+  // Plays it once the PIN is entered, or the lock comes off.
+  createEffect(() => {
+    const channel = lockedChannel();
+    if (!channel || isBlocked(channel)) return;
+    setLockedChannel(undefined);
+    playChannel(channel);
   });
 
   const watching = () => zapper.shown() !== undefined;
@@ -108,7 +130,7 @@ export default () => {
   // says so and leads to the menu. A moment's wait lets a list being read
   // show up first.
   createEffect(() => {
-    if (zapper.shown() || lineup.loading() || !library.loaded() || lineup.channels().length > 0) return;
+    if (zapper.shown() || lineup.loading() || !library.loaded() || liveView().channels.length > 0) return;
     const timer = setTimeout(() => openGuide(), 500);
     onCleanup(() => clearTimeout(timer));
   });
@@ -129,7 +151,7 @@ export default () => {
   const [cursor, setCursor] = createSignal(0);
   const [top, setTop] = createSignal(0);
   const listChannels = createMemo(() => zapper.groupChannels(listGroup()));
-  const groupNames = createMemo(() => [undefined, ...lineup.groups().map(group => group.name)]);
+  const groupNames = createMemo(() => [undefined, ...liveGroups().map(group => group.name)]);
 
   const showInList = (channels: Channel[]) => {
     const id = zapper.shown()?.id;
@@ -199,6 +221,10 @@ export default () => {
 
   // OK: a tap acts at once; a hold opens the options.
   const pressEnter = () => {
+    if (lockedChannel() && !listOpen() && !tracksOpen() && !zapper.digits() && !zapper.pending()) {
+      void askPin();
+      return;
+    }
     if (tracksOpen()) chooseTrack();
     else if (zapper.digits()) {
       zapper.enterNumber();
@@ -218,6 +244,7 @@ export default () => {
       if (!openOptions()) pressEnter();
     },
     holdThreshold: HOLD_MS,
+    holdRequiresRepeat: HOLD_REQUIRES_REPEAT,
   });
 
   exposeToProbes("live", {
@@ -229,10 +256,11 @@ export default () => {
     rows,
     trackCursor,
     optionsFor,
+    lockedChannel,
   });
 
-  const nowNext = createNowNext(zapper.shown, { guide, clock });
-  const listGuide = createNowNext(() => (listOpen() ? listChannels()[cursor()] : undefined), {
+  const nowNext = createNowNext(() => unblocked(zapper.shown()), { guide, clock });
+  const listGuide = createNowNext(() => (listOpen() ? unblocked(listChannels()[cursor()]) : undefined), {
     guide,
     clock,
     delayMs: 400,
@@ -350,6 +378,21 @@ export default () => {
           </Text>
         }
       >
+        <Show when={lockedChannel() && !zapper.pending() && !listOpen()}>
+          <View x={460} y={470} width={1000} height={110} borderRadius={16} color="#071423d9">
+            <Text
+              width={1000}
+              height={110}
+              lineHeight={110}
+              maxLines={1}
+              contain="width"
+              textAlign="center"
+              fontSize={32}
+            >
+              {$t("pin.lockedHint")}
+            </Text>
+          </View>
+        </Show>
         <Show when={statusText() && !zapper.pending()}>
           <View x={560} y={470} width={800} height={110} borderRadius={16} color="#071423d9">
             <Text
@@ -404,7 +447,16 @@ export default () => {
           <TrackPanel rows={rows()} cursor={trackCursor()} />
         </Show>
         <Show when={zapper.digits() || zapper.missing()}>
-          <View x={1840} y={60} mountX={1} width={420} height={110} borderRadius={16} color="#071423e6">
+          <View
+            zIndex={OVERLAY_Z}
+            x={1840}
+            y={60}
+            mountX={1}
+            width={420}
+            height={110}
+            borderRadius={16}
+            color="#071423e6"
+          >
             <Text
               width={420}
               height={110}

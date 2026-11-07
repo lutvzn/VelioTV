@@ -1,6 +1,7 @@
 import { Text, View } from "@solidtv/solid";
 import { For } from "solid-js";
 import type { TrackRow } from "../../live/trackRows";
+import { OVERLAY_Z } from "./ChannelOptions";
 
 export const PANEL_WIDTH = 640;
 const ROW_HEIGHT = 66;
@@ -18,7 +19,7 @@ export interface TrackPanelProps {
  * playing or showing.
  */
 export const TrackPanel = (props: TrackPanelProps) => (
-  <View x={1920 - PANEL_WIDTH} width={PANEL_WIDTH} height={1080} color="#071423f2">
+  <View x={1920 - PANEL_WIDTH} width={PANEL_WIDTH} height={1080} color="#071423f2" zIndex={OVERLAY_Z}>
     <For each={props.rows}>
       {(row, at) => (
         <View

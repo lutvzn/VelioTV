@@ -22,20 +22,16 @@ async function probe(input) {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));
   const KEYS = { down: 40, enter: 13, back: 10009, tools: 10135 };
-  const send = (type, keyCode, repeat = false) =>
-    document.dispatchEvent(new KeyboardEvent(type, { keyCode, repeat, bubbles: true }));
+  const send = (type, keyCode) => document.dispatchEvent(new KeyboardEvent(type, { keyCode, bubbles: true }));
   const press = keyCode => {
     send("keydown", keyCode);
     send("keyup", keyCode);
   };
-  // As the remote does when OK is held: a key-down, auto-repeats, a key-up.
+  // As a Samsung remote does when OK is held: one key-down, and one key-up
+  // when it's let go, with no repeats between (see the `keys` probe).
   const hold = async keyCode => {
     send("keydown", keyCode);
-    const start = performance.now();
-    while (performance.now() - start < holdMs) {
-      await sleep(50);
-      send("keydown", keyCode, true);
-    }
+    await sleep(holdMs);
     send("keyup", keyCode);
   };
   const waitFor = async (test, ms = 15_000) => {

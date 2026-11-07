@@ -1,15 +1,30 @@
 import { Text, View } from "@solidtv/solid";
 import { Column } from "@solidtv/solid/primitives";
-import { createSignal, For, onCleanup, Show } from "solid-js";
+import { createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
 import { FormButton } from "../components/Form";
 import type { Source } from "../data/sources";
+import { exposeToProbes } from "../devHooks";
 import { library } from "../library";
 import { $t } from "../translate";
+import { AppPage } from "./settings/AppPage";
+import { BackupPage } from "./settings/BackupPage";
+import { HiddenPage } from "./settings/HiddenPage";
+import { PinPage } from "./settings/PinPage";
 import { SourceForm } from "./settings/SourceForm";
 import { progressFraction, statusLines } from "./settings/status";
 
-// Settings: the sources for now. Parental PIN, backup and the rest come in
-// Phase 5 (PLAN.md).
+// Settings: the sources, in the order the lineup takes them, then pages for
+// hidden channels and groups, the parental PIN, the app's own settings, and
+// backup and restore (PLAN.md, Phase 5). Each opens in the list's place, and
+// Back comes back to the row it was opened from.
+
+type Page = "hidden" | "pin" | "app" | "backup";
+const PAGES: { page: Page; label: string }[] = [
+  { page: "hidden", label: "settings.hidden" },
+  { page: "pin", label: "settings.pin" },
+  { page: "app", label: "settings.app" },
+  { page: "backup", label: "settings.backup" },
+];
 
 const LIST_WIDTH = 1200;
 const ROW_HEIGHT = 124;
@@ -26,6 +41,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
       height={ROW_HEIGHT}
       borderRadius={12}
       color={focused() ? "#2e6bd6ff" : "#ffffff14"}
+      alpha={props.source.disabled ? 0.6 : 1}
       onFocusChanged={setFocused}
       onEnter={() => {
         props.onEnter();
@@ -36,7 +52,8 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
         {props.source.name}
       </Text>
       <Text x={LIST_WIDTH - 28} y={22} mountX={1} fontSize={24} color="#ffffffb3">
-        {props.source.kind === "xtream" ? $t("source.kind.xtream") : $t("source.kind.m3u")}
+        {(props.source.kind === "xtream" ? $t("source.kind.xtream") : $t("source.kind.m3u")) +
+          (props.source.disabled ? `  ·  ${$t("source.off")}` : "")}
       </Text>
       <Text
         x={28}
@@ -79,6 +96,7 @@ const SourceList = (props: {
   selected: number;
   autofocus: boolean;
   onOpen: (index: number, id?: string) => void;
+  onPage: (index: number, page: Page) => void;
 }) => {
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), 30_000);
@@ -109,6 +127,18 @@ const SourceList = (props: {
               {$t("settings.noSources")}
             </Text>
           </Show>
+          <Text width={LIST_WIDTH} height={60} marginTop={24} fontSize={34} color="#ffffffb3" skipFocus>
+            {$t("settings.more")}
+          </Text>
+          <For each={PAGES}>
+            {(entry, at) => (
+              <FormButton
+                label={$t(entry.label)}
+                width={LIST_WIDTH}
+                onEnter={() => props.onPage(library.sources().length + 1 + at(), entry.page)}
+              />
+            )}
+          </For>
         </Column>
       </View>
       <Text x={80} y={50} fontSize={56}>
@@ -125,35 +155,56 @@ export default () => {
   // The form shows over the list's place: undefined for the list, null to
   // add a source, or the id of the source to edit.
   const [editing, setEditing] = createSignal<string | null | undefined>();
+  const [page, setPage] = createSignal<Page>();
   const [selected, setSelected] = createSignal(0);
   const [returning, setReturning] = createSignal(false);
+  const close = () => {
+    setReturning(true);
+    setEditing(undefined);
+    setPage(undefined);
+  };
+  exposeToProbes("settingsPage", { editing, page, selected });
 
   return (
     // Right from the side menu focuses the page; this passes it on to the
-    // list or the form, whichever is showing.
+    // list or the page open, whichever is showing.
     <View forwardFocus={0}>
       <Show
-        when={editing() !== undefined}
+        when={editing() !== undefined || page() !== undefined}
         fallback={
           <SourceList
             selected={selected()}
-            // Only coming back from the form; opening Settings from the menu
+            // Only coming back from a page; opening Settings from the menu
             // leaves focus in the menu.
             autofocus={returning()}
             onOpen={(index, id) => {
               setSelected(index);
               setEditing(id ?? null);
             }}
+            onPage={(index, next) => {
+              setSelected(index);
+              setPage(next);
+            }}
           />
         }
       >
-        <SourceForm
-          id={editing() ?? undefined}
-          onClose={() => {
-            setReturning(true);
-            setEditing(undefined);
-          }}
-        />
+        <Switch>
+          <Match when={page() === "hidden"}>
+            <HiddenPage onClose={close} />
+          </Match>
+          <Match when={page() === "pin"}>
+            <PinPage onClose={close} />
+          </Match>
+          <Match when={page() === "app"}>
+            <AppPage onClose={close} />
+          </Match>
+          <Match when={page() === "backup"}>
+            <BackupPage onClose={close} />
+          </Match>
+          <Match when={editing() !== undefined}>
+            <SourceForm id={editing() ?? undefined} onClose={close} />
+          </Match>
+        </Switch>
       </Show>
     </View>
   );

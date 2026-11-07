@@ -110,8 +110,10 @@ describe("the source manager", () => {
     saveSources(storage, [fresh, old, never]);
     await runImport({ source: "fresh", playlistUrl: `${BASE}/a.m3u` }, { dbName: DB, fetch: serve });
     await runImport({ source: "old", playlistUrl: `${BASE}/b.m3u` }, { dbName: DB, fetch: serve });
-    // Data from a source no longer in the list.
+    // Data from a source being removed as the app closed, and from one the list doesn't name.
     await runImport({ source: "gone", playlistUrl: `${BASE}/b.m3u` }, { dbName: DB, fetch: serve });
+    await runImport({ source: "unnamed", playlistUrl: `${BASE}/b.m3u` }, { dbName: DB, fetch: serve });
+    storage.setItem("tiviplayer.removedSources", JSON.stringify(["gone"]));
 
     const { importer, requests } = recording();
     // A day and a bit later, the old one is due; the fresh one has a week.
@@ -122,9 +124,13 @@ describe("the source manager", () => {
     stop();
     expect(requests.map(r => r.source)).toEqual(["old", "never"]);
 
+    await manager.close();
     const db = await openDb(DB);
     expect(await readImport(db, "gone")).toBeUndefined();
     expect(await readChannels(db, "gone")).toEqual([]);
+    expect(storage.getItem("tiviplayer.removedSources")).toBeNull();
+    // A list that lost a source, as one read empty on the TV once, deletes nothing.
+    expect(await readImport(db, "unnamed")).toMatchObject({ status: "done" });
     db.close();
   });
 
@@ -183,6 +189,50 @@ describe("the source manager", () => {
       channels: 20,
       lastDoneAt: before?.lastDoneAt,
     });
+  });
+
+  it("orders sources, turns one off without importing it, and on again", async () => {
+    const storage = memoryStorage();
+    const { importer, requests } = recording();
+    manager = createSourceManager({ dbName: DB, storage, importer });
+    const a = manager.add(draft("A", `${BASE}/b.m3u`));
+    const b = manager.add(draft("B", `${BASE}/b.m3u`));
+    await manager.whenIdle();
+    manager.move(b.id, -1);
+    manager.move(b.id, -1);
+    expect(manager.sources().map(s => s.name)).toEqual(["B", "A"]);
+    manager.setDisabled(a.id, true);
+    manager.update(a.id, { ...draft("A2", `${BASE}/b.m3u`) });
+    expect(loadSources(storage)).toMatchObject([{ name: "B" }, { name: "A2", disabled: true }]);
+    manager.check();
+    await manager.whenIdle();
+    expect(requests).toHaveLength(2);
+
+    // Due again: only the one on imports.
+    manager.update(b.id, draft("B", `${BASE}/a.m3u`));
+    manager.update(a.id, draft("A2", `${BASE}/a.m3u`));
+    await manager.whenIdle();
+    expect(requests.slice(2).map(r => r.source)).toEqual([b.id, a.id]);
+  });
+
+  it("puts a restored list in place of the sources", async () => {
+    const storage = memoryStorage();
+    const { importer, requests } = recording();
+    manager = createSourceManager({ dbName: DB, storage, importer });
+    const old = manager.add(draft("Old", `${BASE}/b.m3u`));
+    await manager.whenIdle();
+    const restored = await manager.replaceAll([
+      { id: "r1", ...draft("R1", `${BASE}/b.m3u`) },
+      { id: "r2", ...draft("R2", `${BASE}/b.m3u`), disabled: true },
+      { id: "r1", ...draft("Twice", `${BASE}/b.m3u`) },
+      { nonsense: true },
+    ]);
+    await manager.whenIdle();
+    expect(restored.map(s => s.name)).toEqual(["R1", "R2"]);
+    expect(requests.map(r => r.source)).toEqual([old.id, "r1"]);
+    const db = await openDb(DB);
+    expect(await readChannels(db, old.id)).toEqual([]);
+    db.close();
   });
 
   it("removes a source and its data", async () => {

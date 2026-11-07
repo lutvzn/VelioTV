@@ -12,7 +12,7 @@ import {
   type SourceDraft,
   type SourceKind,
 } from "../../data/sources";
-import { library } from "../../library";
+import { edits, library } from "../../library";
 import { $t } from "../../translate";
 import { statusLines } from "./status";
 
@@ -109,10 +109,17 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
       return;
     }
     void library.remove(existing.id);
+    // Its channels' favourites, hiding, locks and moves go with it.
+    edits.forgetSource(existing.id);
     props.onClose();
   };
 
   const status = () => (existing ? statusLines(library.statusOf(existing.id), now()) : undefined);
+  const current = () => library.sources().find(source => source.id === existing?.id);
+  const place = () => {
+    const at = library.sources().findIndex(source => source.id === existing?.id);
+    return { first: at <= 0, last: at === library.sources().length - 1 };
+  };
 
   return (
     <View
@@ -197,6 +204,26 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
             </>
           </Show>
         </Row>
+        <Show when={existing}>
+          {source => (
+            <Row width={FIELD_WIDTH} height={BUTTON_HEIGHT} gap={24} scroll="none">
+              <FormButton
+                label={current()?.disabled ? $t("source.turnOn") : $t("source.turnOff")}
+                onEnter={() => library.setDisabled(source().id, !current()?.disabled)}
+              />
+              <FormButton
+                label={$t("source.moveUp")}
+                dim={place().first}
+                onEnter={() => library.move(source().id, -1)}
+              />
+              <FormButton
+                label={$t("source.moveDown")}
+                dim={place().last}
+                onEnter={() => library.move(source().id, 1)}
+              />
+            </Row>
+          )}
+        </Show>
       </Column>
 
       <Text x={80} y={50} fontSize={56}>
