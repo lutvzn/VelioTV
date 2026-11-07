@@ -4,8 +4,8 @@ import { useFocusManager } from "@solidtv/solid/primitives";
 import { HashRouter } from "@solidtv/solid/primitives/router";
 import type { RendererMain } from "@solidtv/renderer";
 import App from "./pages/App";
-import LiveTv from "./pages/LiveTv";
 import Guide from "./pages/Guide";
+import Watch from "./pages/Watch";
 import Movies from "./pages/Movies";
 import Series from "./pages/Series";
 import Settings from "./pages/Settings";
@@ -48,13 +48,17 @@ shaders.registerShaderType("holePunch", HolePunch);
 // Imports sources whose data is old or missing, now and on a schedule.
 library.start().catch(error => console.error("Couldn't start the source schedule:", error));
 
+// The app opens full screen on the last channel watched; Live TV, the
+// guide, is a Back away.
+if (!location.hash || location.hash === "#/") location.replace("#/watch");
+
 loadFonts(fonts).catch(error => console.error("Fonts failed to load:", error));
 render(() => {
   useFocusManager(config.keys);
   return (
     <HashRouter root={App}>
-      <Route path="/" component={LiveTv} />
-      <Route path="/guide" component={Guide} />
+      <Route path="/" component={Guide} />
+      <Route path="/watch" component={Watch} />
       <Route path="/movies" component={Movies} />
       <Route path="/series" component={Series} />
       <Route path="/settings" component={Settings} />

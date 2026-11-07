@@ -1,13 +1,12 @@
 // A channel's programmes for a day, read from the guide store once and kept
-// in memory. Reading a channel's guide takes 60-100 ms on the TV (PLAN.md,
-// Phase 2), so the Live TV page reads it only for the channel it shows, and
-// coming back to a channel costs nothing.
+// in memory, so coming back to a channel costs nothing. The app reads them
+// through the guide worker (guideClient.ts).
 
 import { DAY, type StoredProgramme } from "./guideCodec";
 
 export interface GuideCacheOptions {
-  /** A guide channel's programmes that overlap `from`..`to`, as readGuide() gives them. */
-  read: (source: string, guideId: string, from: number, to: number) => Promise<StoredProgramme[]>;
+  /** A guide channel's programmes that overlap a UTC day (days since 1970). */
+  read: (source: string, guideId: string, day: number) => Promise<StoredProgramme[]>;
   /** How many channel-days to keep. */
   size?: number;
 }
@@ -40,7 +39,7 @@ export const createGuideCache = (options: GuideCacheOptions) => {
       days.delete(key);
     } else {
       found = options
-        .read(source, guideId, dayNumber * DAY, (dayNumber + 1) * DAY)
+        .read(source, guideId, dayNumber)
         .then(programmes => {
           // toSorted() needs Chromium 110; older TVs are still targets.
           // oxlint-disable-next-line unicorn/no-array-sort

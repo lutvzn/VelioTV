@@ -25,9 +25,9 @@ describe("the guide cache", () => {
     const reads: string[] = [];
     const cache = createGuideCache({
       size: 2,
-      read: async (source, guideId, from) => {
-        reads.push(`${guideId}@${from / DAY}`);
-        if (from === base) return [show("Late", 23), show("Early", 0, 23)];
+      read: async (source, guideId, d) => {
+        reads.push(`${guideId}@${d}`);
+        if (d === day) return [show("Late", 23), show("Early", 0, 23)];
         return [show("Tomorrow", 24)];
       },
     });

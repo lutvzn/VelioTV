@@ -1,66 +1,37 @@
+import { useNavigate } from "@solidjs/router";
 import { type ElementNode, Text, View } from "@solidtv/solid";
-import { createEffect, createMemo, createSignal, on, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js";
 import { MENU_WIDTH } from "../components/SideMenu";
 import { exposeToProbes } from "../devHooks";
 import type { Channel } from "../data/lineup";
+import { handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../live/handoff";
 import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow";
 import { firstChoice, nextChoice, trackRows } from "../live/trackRows";
 import { createNowNext } from "../live/nowNext";
 import { createZapper } from "../live/zapper";
-import { guide, lineup } from "../library";
+import { guide, library, lineup } from "../library";
 import { player } from "../player";
-import { DROPPED, NEEDS_REFERER, OFFLINE, STALLED, TIMEOUT } from "../player/player";
 import { $t } from "../translate";
-import { FULL_SCREEN, type Rect } from "../videoWindow";
+import { FULL_SCREEN } from "../videoWindow";
 import { Banner } from "./live/Banner";
 import { ChannelList, LIST_ROWS } from "./live/ChannelList";
 import { TrackPanel } from "./live/TrackPanel";
-import { clockTime, timeRange } from "../live/format";
 
-// Live TV (PLAN.md, Phase 3, step 3). With the side menu focused, the channel
-// plays in a preview window; Right from the menu watches it full screen. At
-// app start it goes straight to full screen with the last channel watched.
+// Live TV full screen (PLAN.md, Phase 3, step 3, and Phase 4). The app
+// starts here, on the last channel watched; OK in the guide (src/pages/
+// Guide.tsx, the Live TV page) opens a channel here.
 //
-// Full screen: Up and Down (and the channel keys) zap, with the banner
-// following each press and the stream changing once they stop; OK or the
-// channel-list key opens the list over the video, where Left and Right
-// change group; Right opens the audio and subtitle choices (step 5); Info
-// shows the banner; number keys pick a channel by number. Back closes
-// whatever is open, and then returns to the menu.
+// Up and Down (and the channel keys) zap, with the banner following each
+// press and the stream changing once they stop; OK or the channel-list key
+// opens the list over the video, where Left and Right change group; Right
+// opens the audio and subtitle choices (step 5); Info shows the banner;
+// number keys pick a channel by number. Back closes whatever is open, and
+// then goes to the guide, on the channel playing; the Guide key goes there
+// at once, and Back there comes back (src/live/handoff.ts).
 
-// In screen pixels; the page sits to the right of the menu.
-const PREVIEW: Rect = { x: MENU_WIDTH + 80, y: 150, width: 1024, height: 576 };
-const INFO_X = PREVIEW.x;
 const BANNER_MS = 5000;
 const MISSING_MS = 2000;
 const CLOCK_MS = 10_000;
-
-// Full screen happens by itself once, at app start; after that only on Right.
-let launched = false;
-
-/** What went wrong, in words. */
-const errorText = (error: string | undefined) => {
-  if (error === NEEDS_REFERER) return $t("live.error.referer");
-  if (error === TIMEOUT) return $t("live.error.timeout");
-  if (error === STALLED) return $t("live.error.stalled");
-  if (error === DROPPED) return $t("live.error.dropped");
-  if (error && /CONNECTION|NETWORK/i.test(error)) return $t("live.error.connection");
-  if (error && /NOT_SUPPORTED|UNSUPPORTED/i.test(error)) return $t("live.error.format");
-  return error ?? "";
-};
-
-const statusText = () => {
-  const { state, error, attempt, attempts } = player.status();
-  if (state === "starting") return $t("live.starting");
-  if (state === "buffering") return $t("live.buffering");
-  if (state === "ended") return $t("live.ended");
-  if (state === "reconnecting" && error === OFFLINE) return $t("live.offline");
-  if (state === "reconnecting") {
-    return `${errorText(error)} ${$t("live.reconnecting", { attempt: attempt ?? 1, attempts: attempts ?? 1 })}`;
-  }
-  if (state !== "failed") return undefined;
-  return `${$t("live.failed")}. ${errorText(error)}`;
-};
 
 const groupTitle = (name: string | undefined) => {
   if (name === undefined) return $t("live.allChannels");
@@ -68,40 +39,35 @@ const groupTitle = (name: string | undefined) => {
 };
 
 export default () => {
+  const navigate = useNavigate();
   let watchNode: ElementNode | undefined;
-  const [focused, setFocused] = createSignal(false);
   const [clock, setClock] = createSignal(Date.now());
   const ticker = setInterval(() => setClock(Date.now()), CLOCK_MS);
+  holdPlayer();
+  // From the guide: the channel to watch.
+  let handoff = takeHandoff();
 
+  // The first channel may be one the guide left playing; it carries on.
+  let first = true;
   const zapper = createZapper({
     channels: lineup.channels,
     groups: lineup.groups,
     find: lineup.find,
-    play: channel =>
-      void player.play({
-        url: channel.url,
-        userAgent: channel.headers?.userAgent,
-        referer: channel.headers?.referer,
-        live: true,
-      }),
+    play: channel => {
+      playChannel(channel, { keep: first });
+      first = false;
+    },
     storage: localStorage,
   });
 
-  const watching = () => focused() && zapper.shown() !== undefined;
-  createEffect(() => player.setWindow(watching() ? FULL_SCREEN : PREVIEW));
+  const watching = () => zapper.shown() !== undefined;
+  player.setWindow(FULL_SCREEN);
 
-  // Plays the last channel once the lineup has it, and stops if every
-  // channel goes.
-  createEffect(() => {
-    if (zapper.shown()) return;
-    if (zapper.start(lineup.loading())) {
-      if (!launched) watchNode?.setFocus();
-      launched = true;
-    } else if (lineup.channels().length === 0 && !lineup.loading()) {
-      zapper.reset();
-      player.stop();
-    }
-  });
+  /** Goes to the guide on the channel playing; with `backTo`, Back there returns here. */
+  const openGuide = (backTo?: "/watch") => {
+    handOff({ channelId: zapper.playing()?.id, group: zapper.group(), backTo });
+    navigate("/", { replace: true });
+  };
 
   // The banner, shown for a while after each change.
   const [bannerShown, setBannerShown] = createSignal(false);
@@ -115,6 +81,34 @@ export default () => {
     clearTimeout(bannerTimer);
     setBannerShown(false);
   };
+
+  // Plays the channel handed over, or else the last one, once the lineup
+  // has it.
+  createEffect(() => {
+    if (zapper.shown()) return;
+    const handed = handoff?.channelId === undefined ? undefined : lineup.find(handoff.channelId);
+    if (handed && handoff) {
+      zapper.tune(handed, handoff.group);
+      handoff = undefined;
+      showBanner();
+    } else if (handoff?.channelId !== undefined && lineup.loading()) {
+      // Wait for the channel handed over.
+    } else if (zapper.start(lineup.loading())) {
+      handoff = undefined;
+      showBanner();
+    }
+  });
+  // The page is only ever full screen, so it always has the focus.
+  onMount(() => watchNode?.setFocus());
+
+  // With nothing to play (no sources, or their channels gone), the guide
+  // says so and leads to the menu. A moment's wait lets a list being read
+  // show up first.
+  createEffect(() => {
+    if (zapper.shown() || lineup.loading() || !library.loaded() || lineup.channels().length > 0) return;
+    const timer = setTimeout(() => openGuide(), 500);
+    onCleanup(() => clearTimeout(timer));
+  });
 
   // A number that matches no channel shows for a moment.
   createEffect(
@@ -196,14 +190,12 @@ export default () => {
   });
 
   onCleanup(() => {
-    launched = true;
     clearInterval(ticker);
     clearTimeout(bannerTimer);
     zapper.dispose();
-    player.stop();
   });
 
-  // Key handlers act only full screen; otherwise keys go on to the app.
+  // Key handlers act only once a channel shows; until then, Back goes to the guide.
   const zap = (step: number) => {
     if (!watching()) return false;
     if (tracksOpen()) {
@@ -234,10 +226,6 @@ export default () => {
       x={-MENU_WIDTH}
       width={1920}
       height={1080}
-      onFocusChanged={has => {
-        setFocused(has);
-        if (has && zapper.shown()) showBanner();
-      }}
       // Up is the next channel, as on the TV's own channel keys.
       onUp={() => zap(1)}
       onDown={() => zap(-1)}
@@ -279,6 +267,11 @@ export default () => {
         else openList();
         return true;
       }}
+      onGuide={() => {
+        if (!watching()) return false;
+        openGuide("/watch");
+        return true;
+      }}
       onInfo={() => {
         if (!watching()) return false;
         if (bannerShown()) hideBanner();
@@ -286,18 +279,16 @@ export default () => {
         return true;
       }}
       onBack={() => {
-        if (!watching()) return false;
+        if (!watching()) {
+          openGuide();
+          return true;
+        }
         if (zapper.digits() || zapper.missing()) zapper.clearDigits();
         else if (tracksOpen()) setTracksOpen(false);
         else if (listOpen()) setListOpen(false);
         else if (zapper.pending()) zapper.cancelZap();
         else if (bannerShown()) hideBanner();
-        else {
-          // Out of full screen, so that the app's own Back handler, next,
-          // finds the menu showing and moves to it.
-          player.setWindow(PREVIEW);
-          return false;
-        }
+        else openGuide();
         return true;
       }}
       onKey0={digit(0)}
@@ -314,71 +305,9 @@ export default () => {
       <Show
         when={watching()}
         fallback={
-          <>
-            <Text x={INFO_X} y={50} fontSize={56}>
-              {$t("menu.live")}
-            </Text>
-            <Show
-              when={zapper.shown()}
-              fallback={
-                <>
-                  <Text x={INFO_X} y={170} fontSize={44}>
-                    {lineup.loading() ? $t("live.loading") : $t("live.empty")}
-                  </Text>
-                  <Text x={INFO_X} y={240} width={1300} contain="width" fontSize={30} color="#ffffffb3">
-                    {lineup.loading() ? "" : $t("live.emptyHint")}
-                  </Text>
-                </>
-              }
-            >
-              {channel => (
-                <>
-                  <Text
-                    x={INFO_X}
-                    y={PREVIEW.y + PREVIEW.height + 30}
-                    width={1300}
-                    maxLines={1}
-                    contain="width"
-                    fontSize={40}
-                  >
-                    {`${zapper.numberOf(channel())}   ${channel().name}`}
-                  </Text>
-                  <Text
-                    x={INFO_X}
-                    y={PREVIEW.y + PREVIEW.height + 90}
-                    width={1300}
-                    maxLines={1}
-                    contain="width"
-                    fontSize={30}
-                  >
-                    {nowNext().now
-                      ? `${timeRange(nowNext().now?.start ?? 0, nowNext().now?.stop ?? 0)}   ${nowNext().now?.title ?? ""}`
-                      : ""}
-                  </Text>
-                  <Text
-                    x={INFO_X}
-                    y={PREVIEW.y + PREVIEW.height + 140}
-                    width={1300}
-                    maxLines={1}
-                    contain="width"
-                    fontSize={26}
-                    color="#ffffffb3"
-                  >
-                    {statusText() ??
-                      (nowNext().next
-                        ? $t("live.next", {
-                            time: clockTime(nowNext().next?.start ?? 0),
-                            title: nowNext().next?.title ?? "",
-                          })
-                        : "")}
-                  </Text>
-                  <Text x={INFO_X} y={1000} width={1300} contain="width" fontSize={26} color="#ffffff99">
-                    {$t("live.watchHint")}
-                  </Text>
-                </>
-              )}
-            </Show>
-          </>
+          <Text y={500} width={1920} textAlign="center" fontSize={40} color="#ffffffb3">
+            {lineup.loading() || !library.loaded() ? $t("live.loading") : ""}
+          </Text>
         }
       >
         <Show when={statusText() && !zapper.pending()}>

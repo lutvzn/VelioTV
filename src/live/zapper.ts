@@ -30,6 +30,28 @@ export interface ZapperOptions {
   numberDelayMs?: number;
 }
 
+/** Channel numbers both ways: the playlist's, or else the position from 1. */
+export const channelNumbers = (channels: readonly Channel[]) => {
+  const byId = new Map<string, number>();
+  const byNumber = new Map<number, Channel>();
+  channels.forEach((channel, index) => {
+    const number = channel.number ?? index + 1;
+    byId.set(channel.id, number);
+    if (!byNumber.has(number)) byNumber.set(number, channel);
+  });
+  return { byId, byNumber };
+};
+
+/** The id of the channel last played, if any. */
+export const rememberedChannel = (storage: Pick<Storage, "getItem"> | undefined) => {
+  try {
+    return storage?.getItem(LAST_CHANNEL_KEY) ?? undefined;
+  } catch {
+    // As if nothing was remembered.
+    return undefined;
+  }
+};
+
 export const createZapper = (options: ZapperOptions) => {
   const storage = options.storage;
   const [shownId, setShownId] = createSignal<string>();
@@ -42,16 +64,7 @@ export const createZapper = (options: ZapperOptions) => {
   let zapTimer: ReturnType<typeof setTimeout> | undefined;
   let numberTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const numbers = createMemo(() => {
-    const byId = new Map<string, number>();
-    const byNumber = new Map<number, Channel>();
-    options.channels().forEach((channel, index) => {
-      const number = channel.number ?? index + 1;
-      byId.set(channel.id, number);
-      if (!byNumber.has(number)) byNumber.set(number, channel);
-    });
-    return { byId, byNumber };
-  });
+  const numbers = createMemo(() => channelNumbers(options.channels()));
 
   const groupChannels = (name: string | undefined) =>
     name === undefined ? options.channels() : (options.groups().find(g => g.name === name)?.channels ?? []);
@@ -119,14 +132,9 @@ export const createZapper = (options: ZapperOptions) => {
     start: (stillLoading: boolean) => {
       const channels = options.channels();
       if (channels.length === 0) return false;
-      let last: string | null = null;
-      try {
-        last = storage?.getItem(LAST_CHANNEL_KEY) ?? null;
-      } catch {
-        // As if nothing was remembered.
-      }
-      const remembered = last === null ? undefined : options.find(last);
-      if (!remembered && last !== null && stillLoading) return false;
+      const last = rememberedChannel(storage);
+      const remembered = last === undefined ? undefined : options.find(last);
+      if (!remembered && last !== undefined && stillLoading) return false;
       play(remembered ?? channels[0]);
       return true;
     },

@@ -21,6 +21,7 @@ declare module "@solidtv/solid/primitives" {
     ChannelDown: string | number | (string | number)[];
     Info: string | number | (string | number)[];
     ChannelList: string | number | (string | number)[];
+    Guide: string | number | (string | number)[];
   }
 }
 
@@ -64,12 +65,15 @@ const App = (props: { children?: JSX.Element }) => {
   announcer.debug = false;
   announcer.enabled = false;
 
+  const startsInSection = SECTIONS.some(section => section.path === location.pathname);
   let menu: ElementNode | undefined;
   let content: ElementNode | undefined;
 
+  // The menu is hidden while video fills the screen, and on the full-screen
+  // page even before its video shows.
+  const menuHidden = () => videoFillsScreen() || location.pathname === "/watch";
   const focusMenu = () => {
-    // The menu is hidden while video fills the screen.
-    if (videoFillsScreen()) return false;
+    if (menuHidden()) return false;
     menu?.setFocus();
     return true;
   };
@@ -95,9 +99,11 @@ const App = (props: { children?: JSX.Element }) => {
       </View>
       <SideMenu
         ref={element => (menu = element)}
-        hidden={videoFillsScreen()}
-        // Pages outside the menu, such as developer pages, take focus themselves.
-        autofocus={SECTIONS.some(section => section.path === location.pathname)}
+        hidden={menuHidden()}
+        // Only when the app opens on a section. Other pages, such as full
+        // screen and developer pages, take focus themselves; and it's read
+        // once, since setting it later would take the focus from a page.
+        autofocus={startsInSection}
         sections={SECTIONS}
         currentPath={location.pathname}
         onSelect={path => navigate(path, { replace: true })}

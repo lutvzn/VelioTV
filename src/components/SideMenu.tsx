@@ -51,10 +51,12 @@ interface SideMenuProps {
 
 // The menu on the left. Moving up and down opens each section straight away.
 export const SideMenu = (props: SideMenuProps) => {
-  const initialIndex = Math.max(
-    0,
-    props.sections.findIndex(section => section.path === props.currentPath),
-  );
+  // Follows the page, which can also change from the pages themselves.
+  const currentIndex = () =>
+    Math.max(
+      0,
+      props.sections.findIndex(section => section.path === props.currentPath),
+    );
 
   return (
     <View width={MENU_WIDTH} height={1080} color="#0b1d33ff" alpha={props.hidden ? 0 : 1}>
@@ -70,7 +72,7 @@ export const SideMenu = (props: SideMenuProps) => {
         height={1080 - 200}
         gap={12}
         scroll="none"
-        selected={initialIndex}
+        selected={currentIndex()}
         // Column also reports the selection each time the menu takes focus;
         // only an actual move opens a section.
         onSelectedChanged={(index, _menu, _item, lastIndex) => {

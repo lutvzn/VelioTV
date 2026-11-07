@@ -1,6 +1,5 @@
 {
   "menu.live": "Live TV",
-  "menu.guide": "TV Guide",
   "menu.movies": "Movies",
   "menu.series": "Series",
   "menu.settings": "Settings",
@@ -66,7 +65,6 @@
   "live.loading": "Loading channels…",
   "live.empty": "No channels yet",
   "live.emptyHint": "Add an M3U playlist or an Xtream Codes account in Settings.",
-  "live.watchHint": "Right: full screen. Then OK opens the channel list, and Up and Down change channel.",
   "live.allChannels": "All channels",
   "live.noGroup": "Other channels",
   "live.channelCount": "{{ count }} channels",
@@ -91,5 +89,11 @@
   "live.tracks.off": "Off",
   "live.tracks.noAudio": "No audio tracks listed",
   "live.tracks.noSubtitles": "This channel has no subtitles",
-  "live.tracks.unnamed": "Track {{ number }}"
+  "live.tracks.unnamed": "Track {{ number }}",
+  "guide.today": "Today",
+  "guide.tomorrow": "Tomorrow",
+  "guide.noInformation": "No information",
+  "guide.searchResults": "Search: “{{ query }}”",
+  "guide.noMatches": "No channels match “{{ query }}”",
+  "guide.filterHint": "‹ ›  Change group     OK  Search channels"
 }

@@ -58,6 +58,7 @@ export const config = {
     ChannelDown: ["PageDown", 34],
     Info: ["i", 73],
     ChannelList: ["l", 76],
+    Guide: ["g", 71],
     Key0: ["0", 96, 48],
     Key1: ["1", 97, 49],
     Key2: ["2", 98, 50],

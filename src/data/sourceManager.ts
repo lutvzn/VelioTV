@@ -53,6 +53,7 @@ export const createSourceManager = (options: SourceManagerOptions) => {
   const totalBudget = options.guideBudgetBytes ?? GUIDE_BUDGET_BYTES;
   const [sources, setSources] = createSignal<Source[]>(loadSources(options.storage));
   const [states, setStates] = createSignal<Record<string, ImportState>>({});
+  const [loaded, setLoaded] = createSignal(false);
   const [queue, setQueue] = createSignal<string[]>([]);
   const [current, setCurrent] = createSignal<{ id: string; progress?: ImportProgress }>();
   let controller: AbortController | undefined;
@@ -151,6 +152,9 @@ export const createSourceManager = (options: SourceManagerOptions) => {
   return {
     sources,
 
+    /** True once `start` has read the import states, so the lineup knows which sources have channels. */
+    loaded,
+
     statusOf: (id: string): SourceStatus => {
       const running = current();
       return {
@@ -174,6 +178,8 @@ export const createSourceManager = (options: SourceManagerOptions) => {
         setStates(Object.fromEntries(all.map(state => [state.source, state])));
       } catch (error) {
         console.error("Couldn't read the import states:", error);
+      } finally {
+        setLoaded(true);
       }
       // Data left by a source removed while the app was closing.
       for (const id of Object.keys(states())) {

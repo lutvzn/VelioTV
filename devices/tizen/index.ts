@@ -35,6 +35,7 @@ export const config: DeviceConfig = merge({}, common, {
     ChannelDown: 428,
     Info: 457,
     ChannelList: 10073,
+    Guide: 458,
     Key0: 48,
     Key1: 49,
     Key2: 50,

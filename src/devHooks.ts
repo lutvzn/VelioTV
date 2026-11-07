@@ -4,11 +4,21 @@
 
 import { onCleanup } from "solid-js";
 import * as db from "./data/db";
+import { createGuideClient } from "./data/guideClient";
 import { importSource } from "./data/importClient";
-import { library, lineup } from "./library";
+import { guide, guideReader, library, lineup } from "./library";
 import { player } from "./player";
 
-const hooks: Record<string, unknown> = { importSource, db, library, lineup, player };
+const hooks: Record<string, unknown> = {
+  importSource,
+  db,
+  library,
+  lineup,
+  player,
+  guide,
+  guideReader,
+  createGuideClient,
+};
 
 export const installDevHooks = () => Object.assign(globalThis, { tiviplayer: hooks });
 
