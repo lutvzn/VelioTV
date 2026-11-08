@@ -15,6 +15,9 @@
 
 import type { PlaylistChannel, StreamHeaders } from "./types";
 import { normalizeServer, playerApiUrl, type XtreamLogin } from "./xtream";
+import { ensureFetch } from "../polyfills/fetch";
+
+ensureFetch();
 
 export interface Film {
   /** "m:<id>" */

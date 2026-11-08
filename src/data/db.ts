@@ -32,11 +32,14 @@
 
 import { type ChannelColumns, fromColumns, type StoredChannel, toColumns } from "./channelList";
 import { DAY, decodeBlock, type StoredProgramme } from "./guideCodec";
+import { ensureGetAll, keyCursor } from "../polyfills/indexedDb";
 import type { PlaylistChannel } from "./types";
 import type { StoredVod } from "./vod";
 import type { XtreamAccount } from "./xtream";
 
 export { DAY, type StoredChannel, type StoredProgramme };
+
+ensureGetAll();
 
 export const DB_NAME = "tiviplayer";
 const VERSION = 6;
@@ -350,7 +353,7 @@ export const deleteUnusedGuides = async (db: IDBDatabase) => {
   }
   // The blocks' guides, one key each: the cursor jumps past each guide's blocks.
   await new Promise<void>((resolve, reject) => {
-    const r = transaction.objectStore("guide").openKeyCursor();
+    const r = keyCursor(transaction.objectStore("guide"));
     r.addEventListener("success", () => {
       const cursor = r.result;
       if (!cursor) return resolve();

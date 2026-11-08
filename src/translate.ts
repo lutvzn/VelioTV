@@ -1,6 +1,9 @@
 import * as i18n from "@solid-primitives/i18n";
 import en_dict from "../public/assets/lang/en.json";
 import { createResource, createSignal } from "solid-js";
+import { ensureFetch } from "./polyfills/fetch";
+
+ensureFetch();
 
 const [locale, setLocale] = createSignal("en");
 // setLocale("es"); will switch to spanish

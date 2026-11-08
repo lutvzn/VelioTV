@@ -7,6 +7,7 @@
 // The UI reads it through signals; see sources() and statusOf().
 
 import { createSignal } from "solid-js";
+import { ensureAbortController, isAbortError } from "../polyfills/abort";
 import { deleteSource, openDb, readImport, readImports, type ImportState } from "./db";
 import type { GuideFilter } from "./guideWanted";
 import { GUIDE_BUDGET_BYTES, type ImportProgress, type ImportRequest, type ImportResult } from "./importer";
@@ -22,6 +23,8 @@ import {
   type Source,
   type SourceDraft,
 } from "./sources";
+
+ensureAbortController();
 
 const CHECK_EVERY_MS = 15 * 60_000;
 /**
@@ -133,7 +136,7 @@ export const createSourceManager = (options: SourceManagerOptions) => {
       await options.importer(request, progress => setCurrent({ id: source.id, progress }), controller.signal);
     } catch (error) {
       // The import state records the failure; the UI shows it from there.
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
+      if (!isAbortError(error)) {
         console.warn(`Importing ${source.name} failed:`, error);
       }
     }

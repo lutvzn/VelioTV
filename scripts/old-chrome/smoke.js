@@ -1,8 +1,7 @@
 // The old browser's smoke test, for scripts/old-chrome/run.mjs: imports a
 // test playlist and its guide (the import worker, and fflate's gunzip where
 // the browser has no DecompressionStream), then reads a channel's day and the
-// details of the programme on now (the guide worker). Written without ?. or
-// ??, which Chromium 69 can't read.
+// details of the programme on now (the guide worker).
 //
 // Input, optional:
 //   "url": "http://127.0.0.1:8090/playlist.m3u?channels=60"   the playlist

@@ -13,6 +13,10 @@
 // All of the app's storage goes through appStorage, so the copy holds
 // everything: keys starting "tiviplayer.", apart from probes' own.
 
+import { ensureGetAll } from "../polyfills/indexedDb";
+
+ensureGetAll();
+
 const DB_NAME = "tiviplayer-settings";
 const STORE = "items";
 const PREFIX = "tiviplayer.";

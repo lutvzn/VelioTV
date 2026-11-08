@@ -58,7 +58,9 @@ loadFonts(fonts).catch(error => console.error("Fonts failed to load:", error));
 render(() => {
   useFocusManager(config.keys);
   return (
-    <HashRouter root={App}>
+    // Without Proxy (the oldest TVs), the router reads only the query keys
+    // listed here; VideoTest's is the only one used.
+    <HashRouter root={App} queryParams={["url"]}>
       <Route path="/" component={Guide} />
       <Route path="/watch" component={Watch} />
       <Route path="/play" component={Play} />

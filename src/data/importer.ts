@@ -53,6 +53,9 @@ import {
   xtreamLiveChannels,
   type XtreamLogin,
 } from "./xtream";
+import { ensureFetch } from "../polyfills/fetch";
+
+ensureFetch();
 
 const MB = 1_048_576;
 const PROGRESS_EVERY_MS = 250;
@@ -224,7 +227,7 @@ const startGeneration = async (db: IDBDatabase, guide: string) => {
 };
 
 export const runImport = async (input: ImportRequest, options: ImportOptions = {}): Promise<ImportResult> => {
-  // `self` rather than globalThis, which Chromium 69 lacks; workers get no polyfills.
+  // `self` rather than globalThis, which the oldest TVs lack.
   const fetcher = options.fetch ?? fetch.bind(self);
   const started = Date.now();
   const today = Math.floor((options.now ?? started) / DAY);

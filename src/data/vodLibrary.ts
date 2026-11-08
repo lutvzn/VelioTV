@@ -18,6 +18,9 @@ import {
   type StoredVod,
 } from "./vod";
 import type { XtreamLogin } from "./xtream";
+import { ensureFetch } from "../polyfills/fetch";
+
+ensureFetch();
 
 export interface FilmEntry extends Film {
   source: string;

@@ -70,7 +70,14 @@ const partsOf = (ms: number, timeZone?: string) => {
         second: "2-digit",
       });
       const got: Record<string, string> = {};
-      for (const part of format.formatToParts(new Date(ms))) got[part.type] = part.value;
+      if (typeof format.formatToParts === "function") {
+        for (const part of format.formatToParts(new Date(ms))) got[part.type] = part.value;
+      } else {
+        // Before Chromium 57 (the oldest TVs): "11/07/2026, 21:05:09".
+        const found = /(\d+)\/(\d+)\/(\d+),?\s+(\d+):(\d+):(\d+)/.exec(format.format(new Date(ms)));
+        if (!found) throw new Error("Unexpected date format");
+        [, got.month, got.day, got.year, got.hour, got.minute, got.second] = found;
+      }
       return {
         Y: got.year ?? "",
         m: got.month ?? "",

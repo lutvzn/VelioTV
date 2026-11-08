@@ -11,6 +11,11 @@
 #   ./scripts/setup-dev.sh [--accept-tizen-license]
 #
 # This script refuses to run on the host, or in any other container.
+#
+# distrobox.ini also has an old-chrome box, only for running Chromium 47 and
+# 38 (scripts/old-chrome/run.mjs). Its packages come from distrobox.ini, so
+# it needs no setup script:
+#   distrobox assemble create --file distrobox.ini --name old-chrome
 
 set -euo pipefail
 

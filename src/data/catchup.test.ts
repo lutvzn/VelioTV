@@ -41,6 +41,26 @@ describe("catch-up", () => {
     expect(archiveUrl({ ...channel, url: "http://x.test/stream?id=42" }, request)).toBeUndefined();
   });
 
+  it("finds the time in a time zone without formatToParts, as on the oldest TVs", () => {
+    const channel = { url: "http://x.test:8080/live/u/p/42.ts", catchup: { type: "xtream", days: 3 } };
+    const prototype = Intl.DateTimeFormat.prototype;
+    const formatToParts = Object.getOwnPropertyDescriptor(prototype, "formatToParts");
+    Reflect.deleteProperty(prototype, "formatToParts");
+    try {
+      expect(typeof new Intl.DateTimeFormat().formatToParts).toBe("undefined");
+      expect(archiveUrl(channel, { ...request, timeZone: "Europe/Berlin" })).toBe(
+        "http://x.test:8080/timeshift/u/p/60/2026-11-07:15-30/42.ts",
+      );
+      // Midnight there, which some browsers write as 24.
+      const midnight = Date.UTC(2026, 10, 7, 23);
+      expect(
+        archiveUrl(channel, { from: midnight, to: midnight + 3_600_000, now, timeZone: "Europe/Berlin" }),
+      ).toBe("http://x.test:8080/timeshift/u/p/60/2026-11-08:00-00/42.ts");
+    } finally {
+      if (formatToParts) Object.defineProperty(prototype, "formatToParts", formatToParts);
+    }
+  });
+
   it("knows where a recording really starts", () => {
     const at = Date.UTC(2026, 10, 7, 13, 29, 3, 400);
     expect(archiveStart({ catchup: { type: "xc" } }, at)).toBe(Date.UTC(2026, 10, 7, 13, 29));

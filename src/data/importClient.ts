@@ -8,6 +8,7 @@ import type { WorkerMessage } from "./import.worker";
 // Vite bundles the worker; oxlint can't resolve the "?worker" import.
 // oxlint-disable-next-line import/default
 import ImportWorker from "./import.worker?worker";
+import { abortError } from "../polyfills/abort";
 
 export type { ImportProgress, ImportRequest, ImportResult };
 
@@ -22,7 +23,7 @@ export const importSource = (
 ) =>
   new Promise<ImportResult>((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new DOMException("Import cancelled", "AbortError"));
+      reject(abortError("Import cancelled"));
       return;
     }
     const worker = new ImportWorker();
@@ -32,7 +33,7 @@ export const importSource = (
     };
     const cancel = () => {
       stop();
-      reject(new DOMException("Import cancelled", "AbortError"));
+      reject(abortError("Import cancelled"));
     };
     signal?.addEventListener("abort", cancel);
     worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {

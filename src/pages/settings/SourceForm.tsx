@@ -1,7 +1,6 @@
 import { Text, View } from "@solidtv/solid";
 import { Column, Row } from "@solidtv/solid/primitives";
 import { createSignal, onCleanup, Show } from "solid-js";
-import { createStore } from "solid-js/store";
 import { BUTTON_HEIGHT, ChoiceField, FIELD_WIDTH, FormButton, TextField } from "../../components/Form";
 import {
   DEFAULT_REFRESH_HOURS,
@@ -55,7 +54,8 @@ const toDraft = (form: FormState): SourceDraft => {
 /** Adds a source (with no `id`), or edits one. Back leaves without saving. */
 export const SourceForm = (props: { id?: string; onClose: () => void }) => {
   const existing = props.id ? library.sources().find(source => source.id === props.id) : undefined;
-  const [form, setForm] = createStore<FormState>({
+  // A signal, not a store: stores need Proxy, which the oldest TVs lack.
+  const [form, setForm] = createSignal<FormState>({
     kind: existing?.kind ?? "m3u",
     name: existing?.name ?? "",
     url: existing?.url ?? "",
@@ -74,17 +74,17 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
   // A field's props; `value` is a getter so it stays reactive when spread.
   const field = <K extends keyof FormState>(key: K) => ({
     get value() {
-      return form[key];
+      return form()[key];
     },
     onChange: (value: FormState[K]) => {
-      setForm(key, value);
+      setForm(before => ({ ...before, [key]: value }));
       setProblem("");
     },
   });
 
   // Saves the form, or shows why it can't; true if saved.
   const store = () => {
-    const draft = toDraft(form);
+    const draft = toDraft(form());
     const issue = sourceProblem(draft);
     if (issue) {
       setProblem($t(issue));
@@ -138,7 +138,7 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
           {...field("kind")}
         />
         <Show
-          when={form.kind === "m3u"}
+          when={form().kind === "m3u"}
           fallback={
             <>
               <TextField
@@ -179,7 +179,7 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
           hint={$t("source.edit.hint")}
           inputMode="url"
           placeholder={
-            form.kind === "m3u"
+            form().kind === "m3u"
               ? $t("source.field.guidePlaceholderM3u")
               : $t("source.field.guidePlaceholderXtream")
           }

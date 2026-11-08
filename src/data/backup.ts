@@ -12,6 +12,11 @@ import { readEdits, type ChannelEdits } from "./channelEdits";
 import { readReminders, type Reminder } from "./reminders";
 import { readSources, type Source } from "./sources";
 import { readWatched, type WatchedEntry } from "./watched";
+import { ensureAbortController } from "../polyfills/abort";
+import { ensureFetch } from "../polyfills/fetch";
+
+ensureAbortController();
+ensureFetch();
 
 export const BACKUP_APP = "tiviplayer";
 export const BACKUP_VERSION = 1;
