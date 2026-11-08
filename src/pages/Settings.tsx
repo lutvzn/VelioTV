@@ -5,7 +5,7 @@ import { FormButton } from "../components/Form";
 import type { Source } from "../data/sources";
 import { exposeToProbes } from "../devHooks";
 import { library } from "../library";
-import { $t } from "../translate";
+import { $t, type TextKey } from "../translate";
 import { AppPage } from "./settings/AppPage";
 import { BackupPage } from "./settings/BackupPage";
 import { HiddenPage } from "./settings/HiddenPage";
@@ -20,7 +20,7 @@ import { progressFraction, statusLines } from "./settings/status";
 // Back comes back to the row it was opened from.
 
 type Page = "hidden" | "pin" | "app" | "reminders" | "backup";
-const PAGES: { page: Page; label: string }[] = [
+const PAGES: { page: Page; label: TextKey }[] = [
   { page: "hidden", label: "settings.hidden" },
   { page: "pin", label: "settings.pin" },
   { page: "app", label: "settings.app" },

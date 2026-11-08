@@ -18,7 +18,7 @@ import { vod, watched } from "../../library";
 import { duration } from "../../live/format";
 import { scrollTop } from "../../live/listWindow";
 import { episodeKey, episodeLabel, episodeToContinue } from "../../play/vodPlay";
-import { $t } from "../../translate";
+import { $t, $tn } from "../../translate";
 import { OVERLAY_Z } from "../live/ChannelOptions";
 
 const PAGE_WIDTH = 1920 - MENU_WIDTH;
@@ -101,7 +101,7 @@ export const SeriesPanel = (props: {
       props.show.year,
       props.show.rating ? `★ ${props.show.rating}` : undefined,
       details()?.genre ?? props.show.category,
-      seasons().length ? $t("vod.seasons", { count: seasons().length }) : undefined,
+      seasons().length ? $tn("vod.seasons", seasons().length) : undefined,
     ]
       .filter(Boolean)
       .join("   ·   "),

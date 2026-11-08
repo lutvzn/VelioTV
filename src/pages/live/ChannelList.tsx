@@ -5,7 +5,7 @@ import { For, Show } from "solid-js";
 import type { NowAndNext } from "../../data/guideCache";
 import type { Channel } from "../../data/lineup";
 import { timeRange } from "../../live/format";
-import { $t } from "../../translate";
+import { $t, $tn } from "../../translate";
 
 export const LIST_WIDTH = 760;
 export const LIST_ROWS = 12;
@@ -41,7 +41,7 @@ export const ChannelList = (props: ChannelListProps) => {
         {`‹  ${props.title}  ›`}
       </Text>
       <Text x={LIST_WIDTH - 40} y={48} mountX={1} fontSize={26} color="#ffffff99">
-        {$t("live.channelCount", { count: props.channels.length })}
+        {$tn("count.channels", props.channels.length)}
       </Text>
       <For each={SLOTS}>
         {slot => (

@@ -2,7 +2,7 @@ import { createSignal } from "solid-js";
 import { FIELD_WIDTH, FormButton } from "../../components/Form";
 import { edits, settings } from "../../library";
 import { askNewPin, askPin } from "../../pin";
-import { $t } from "../../translate";
+import { $t, $tn } from "../../translate";
 import { SubPage } from "./SubPage";
 
 /**
@@ -12,7 +12,10 @@ import { SubPage } from "./SubPage";
  */
 const locks = () => {
   const all = edits.all();
-  return $t("pin.locks", { channels: all.lockedChannels.length, groups: all.lockedGroups.length });
+  return $t("pin.locks", {
+    channels: $tn("count.channels", all.lockedChannels.length),
+    groups: $tn("count.groups", all.lockedGroups.length),
+  });
 };
 
 const intro = () => (settings.hasPin() ? `${$t("pin.isSet")}  ${locks()}` : $t("pin.notSet"));

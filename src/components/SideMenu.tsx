@@ -2,13 +2,13 @@ import { type ElementNode, Text, View } from "@solidtv/solid";
 import { Column, type KeyHandler } from "@solidtv/solid/primitives";
 import { createSignal, For } from "solid-js";
 import type { Section } from "../sections";
-import { $t } from "../translate";
+import { $t, type TextKey } from "../translate";
 
 export const MENU_WIDTH = 360;
 const ITEM_WIDTH = MENU_WIDTH - 48;
 const ITEM_HEIGHT = 72;
 
-const MenuItem = (props: { label: string; current: boolean }) => {
+const MenuItem = (props: { label: TextKey; current: boolean }) => {
   const [focused, setFocused] = createSignal(false);
   const color = () => {
     if (focused()) return "#2e6bd6ff";

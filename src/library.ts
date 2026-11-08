@@ -19,12 +19,14 @@ import { createLineup, type Channel } from "./data/lineup";
 import { createReminders } from "./data/reminders";
 import { createVodLibrary } from "./data/vodLibrary";
 import { createWatched } from "./data/watched";
+import { matchLanguage, tvLanguages } from "./lang/languages";
 import { setTwelveHour } from "./live/format";
 import { groupLabel } from "./live/groups";
 import { buildLiveView } from "./live/liveView";
 import { channelNumbers } from "./live/zapper";
 import { createSourceManager } from "./data/sourceManager";
 import { appStorage, settingsCopy } from "./data/settingsCopy";
+import { setLanguage } from "./translate";
 
 export const edits = createChannelEdits({ storage: appStorage });
 
@@ -56,6 +58,12 @@ export const settings = createAppSettings({ storage: appStorage });
 export const watched = createWatched({ storage: appStorage });
 export const reminders = createReminders({ storage: appStorage });
 createRoot(() => createEffect(() => setTwelveHour(settings.clock() === "12h")));
+createRoot(() =>
+  createEffect(() => {
+    const chosen = settings.language();
+    setLanguage(chosen === "auto" ? matchLanguage(tvLanguages()) : chosen);
+  }),
+);
 
 /** What Live TV shows, with the user's edits applied (src/live/liveView.ts). */
 export const liveView = createRoot(() =>

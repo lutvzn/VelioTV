@@ -51,7 +51,7 @@ import { FAVOURITES } from "../live/groups";
 import { player } from "../player";
 import { watchRecording } from "../play/start";
 import { editText } from "../textEntry";
-import { $t } from "../translate";
+import { $t, $tn } from "../translate";
 import type { Rect } from "../videoWindow";
 import { GuideDetails } from "./guide/GuideDetails";
 import {
@@ -694,7 +694,7 @@ export default () => {
               ? $t("guide.moveHint")
               : focused() && area() === "filters"
                 ? $t("guide.filterHint")
-                : $t("live.channelCount", { count: list().length })}
+                : $tn("count.channels", list().length)}
           </Text>
         </View>
 

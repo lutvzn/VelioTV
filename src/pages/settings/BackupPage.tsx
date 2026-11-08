@@ -5,7 +5,7 @@ import { appStorage } from "../../data/settingsCopy";
 import { exposeToProbes } from "../../devHooks";
 import { backUpTo, restoreFrom, settings } from "../../library";
 import { askPin } from "../../pin";
-import { $t } from "../../translate";
+import { $t, $tn, isTextKey } from "../../translate";
 import { SubPage } from "./SubPage";
 
 const URL_KEY = "tiviplayer.backupUrl";
@@ -21,7 +21,9 @@ const savedUrl = () => {
 // A failure's message: ours are translation keys.
 const problemText = (error: unknown) => {
   const text = error instanceof Error ? error.message : String(error);
-  return text.startsWith("backup.problem.") ? $t(text) : $t("backup.failed", { error: text });
+  return text.startsWith("backup.problem.") && isTextKey(text)
+    ? $t(text)
+    : $t("backup.failed", { error: text });
 };
 
 /**
@@ -75,7 +77,7 @@ export const BackupPage = (props: { onClose: () => void }) => {
     if (settings.hasPin() && !(await askPin(true))) return;
     await run(async () => {
       const backup = await restoreFrom(url());
-      return $t("backup.restored", { count: backup.sources.length });
+      return $tn("backup.restored", backup.sources.length);
     });
   };
   exposeToProbes("backupPage", { url, message, problem, busy });

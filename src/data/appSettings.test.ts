@@ -9,7 +9,12 @@ describe("app settings", () => {
     expect(settings.all()).toEqual(defaultSettings());
     settings.setStartOn("guide");
     settings.setClock("12h");
-    expect(createAppSettings({ storage }).all()).toEqual({ startOn: "guide", clock: "12h" });
+    settings.setLanguage("pt-BR");
+    expect(createAppSettings({ storage }).all()).toEqual({
+      startOn: "guide",
+      clock: "12h",
+      language: "pt-BR",
+    });
   });
 
   it("hold locked channels open once the PIN is entered, until a restart", () => {
@@ -35,10 +40,12 @@ describe("app settings", () => {
   });
 
   it("read restored settings, leaving out what doesn't fit", () => {
-    expect(readSettings({ startOn: "guide", clock: "1h", pin: "12345" })).toEqual({
+    expect(readSettings({ startOn: "guide", clock: "1h", pin: "12345", language: "fr" })).toEqual({
       startOn: "guide",
       clock: "24h",
+      language: "auto",
     });
+    expect(readSettings({ language: "pt-BR" }).language).toBe("pt-BR");
     expect(readSettings(null)).toEqual(defaultSettings());
   });
 });

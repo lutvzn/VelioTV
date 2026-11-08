@@ -1,5 +1,6 @@
 import { Text } from "@solidtv/solid";
+import { $t } from "../translate";
 
 export default () => {
-  return <Text>Not Found</Text>;
+  return <Text>{$t("notFound")}</Text>;
 };

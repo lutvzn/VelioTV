@@ -27,6 +27,7 @@ import {
 import { settingsCopy } from "./data/settingsCopy";
 import { handPlay } from "./play/session";
 import { player, secondPlayer } from "./player";
+import { $t, language } from "./translate";
 import { smallVideoWindow, videoWindow } from "./videoWindow";
 
 const hooks: Record<string, unknown> = {
@@ -54,6 +55,9 @@ const hooks: Record<string, unknown> = {
   watched,
   reminders,
   handPlay,
+  /** The app's text, and the language it shows (settings.setLanguage() picks one). */
+  text: $t,
+  language,
   /** What has the keys, as the path to it: each node's name or id, and its kind. */
   focusPath: () => {
     const path: string[] = [];

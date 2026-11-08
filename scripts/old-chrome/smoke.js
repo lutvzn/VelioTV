@@ -1,7 +1,8 @@
 // The old browser's smoke test, for scripts/old-chrome/run.mjs: imports a
 // test playlist and its guide (the import worker, and fflate's gunzip where
 // the browser has no DecompressionStream), then reads a channel's day and the
-// details of the programme on now (the guide worker).
+// details of the programme on now (the guide worker). Last it switches the
+// app to Portuguese and back, which loads that language's text (import()).
 //
 // Input, optional:
 //   "url": "http://127.0.0.1:8090/playlist.m3u?channels=60"   the playlist
@@ -44,5 +45,14 @@ async function probe(input) {
     description: Boolean(details.description),
   };
   if (!onNow || !details.description) result.error = "No programme on now, or it had no description";
+
+  const before = app.settings.language();
+  app.settings.setLanguage("pt-BR");
+  for (let waited = 0; waited < 5000 && app.language() !== "pt-BR"; waited += 100) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  result.portuguese = app.text("menu.settings");
+  app.settings.setLanguage(before);
+  if (result.portuguese !== "Configurações") result.error = "The Portuguese text didn't load";
   return result;
 }

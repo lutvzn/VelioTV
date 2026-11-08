@@ -1,12 +1,13 @@
 // The app's own settings (PLAN.md, Phase 5, steps 5 and 6), kept in
-// localStorage like the sources and edits, and backed up with them: what the
-// app opens on, how times show, and the parental PIN.
+// localStorage like the sources and edits, and backed up with them: the
+// language, what the app opens on, how times show, and the parental PIN.
 //
 // The PIN is four digits, kept as typed: it keeps children out of locked
 // channels, not anyone who can read the TV's storage. Once entered, locked
 // channels stay open until the app closes.
 
 import { createRoot, createSignal } from "solid-js";
+import { isLanguage, type LanguageSetting } from "../lang/languages";
 
 const STORAGE_KEY = "tiviplayer.settings";
 const STORAGE_VERSION = 1;
@@ -17,13 +18,15 @@ export type StartOn = "last" | "guide";
 export type ClockFormat = "24h" | "12h";
 
 export interface AppSettings {
+  /** A language, or "auto" for the TV's (PLAN.md, Phase 8, step 5). */
+  language: LanguageSetting;
   startOn: StartOn;
   clock: ClockFormat;
   /** The parental PIN, if one is set. */
   pin?: string;
 }
 
-export const defaultSettings = (): AppSettings => ({ startOn: "last", clock: "24h" });
+export const defaultSettings = (): AppSettings => ({ language: "auto", startOn: "last", clock: "24h" });
 
 export const isPin = (value: unknown): value is string =>
   typeof value === "string" && value.length === PIN_LENGTH && /^\d+$/.test(value);
@@ -36,6 +39,7 @@ export const readSettings = (value: unknown): AppSettings => {
   const settings = defaultSettings();
   if (!isRecord(value)) return settings;
   const record = value;
+  if (record.language === "auto" || isLanguage(record.language)) settings.language = record.language;
   if (record.startOn === "last" || record.startOn === "guide") settings.startOn = record.startOn;
   if (record.clock === "24h" || record.clock === "12h") settings.clock = record.clock;
   if (isPin(record.pin)) settings.pin = record.pin;
@@ -73,6 +77,8 @@ export const createAppSettings = (options: { storage: Storage }) =>
         save(readSettings(next));
         setUnlocked(false);
       },
+      language: () => settings().language,
+      setLanguage: (language: LanguageSetting) => set({ language }),
       startOn: () => settings().startOn,
       setStartOn: (startOn: StartOn) => set({ startOn }),
       clock: () => settings().clock,

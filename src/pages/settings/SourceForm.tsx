@@ -12,17 +12,19 @@ import {
   type SourceKind,
 } from "../../data/sources";
 import { edits, library, watched } from "../../library";
-import { $t } from "../../translate";
+import { $t, $tn } from "../../translate";
 import { statusLines } from "./status";
 
-const KINDS: { value: SourceKind; label: string }[] = [
+// Functions, so they follow the language.
+const kinds = (): { value: SourceKind; label: string }[] => [
   { value: "m3u", label: $t("source.kind.m3u") },
   { value: "xtream", label: $t("source.kind.xtream") },
 ];
-const REFRESH = REFRESH_CHOICES.map(hours => ({
-  value: hours,
-  label: hours === 168 ? $t("source.refresh.week") : $t("source.refresh.hours", { count: hours }),
-}));
+const refreshChoices = () =>
+  REFRESH_CHOICES.map(hours => ({
+    value: hours,
+    label: hours === 168 ? $t("source.refresh.week") : $tn("source.refresh.hours", hours),
+  }));
 
 interface FormState {
   kind: SourceKind;
@@ -133,7 +135,7 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
       <Column x={80} y={190} width={FIELD_WIDTH} gap={12} scroll="none" autofocus>
         <ChoiceField
           label={$t("source.field.kind")}
-          choices={KINDS}
+          choices={kinds()}
           hint={$t("source.change")}
           {...field("kind")}
         />
@@ -187,7 +189,7 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
         />
         <ChoiceField
           label={$t("source.field.refresh")}
-          choices={REFRESH}
+          choices={refreshChoices()}
           hint={$t("source.change")}
           {...field("refreshHours")}
         />
