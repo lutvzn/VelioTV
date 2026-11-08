@@ -133,7 +133,7 @@
       }
     },
     {
-      "files": ["scripts/tv-probe/probes/*.js"],
+      "files": ["scripts/tv-probe/probes/*.js", "scripts/old-chrome/smoke.js"],
       "globals": {
         "webapis": "readonly",
         "tizen": "readonly"

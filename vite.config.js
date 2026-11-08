@@ -8,6 +8,7 @@ import { playwright } from "@vitest/browser-playwright";
 import deviceConfigPlugin from "./devices/deviceConfigPlugin.js";
 
 const envDir = "./environments";
+const OLDEST_CHROME = "chrome >= 68";
 
 // The TV to build for, such as tizen or lg. Its folder in devices/ supplies
 // the `#device` import: that TV's keys, player and settings.
@@ -37,13 +38,15 @@ export default defineConfig(({ mode }) => {
           generate: "universal",
         },
       }),
+      // The oldest TVs supported are Tizen 5.5 (Chromium 69) and webOS 5
+      // (Chromium 68), which have modules, so they load the modern build:
+      // its syntax is lowered for Chromium 68, with the polyfills the code
+      // uses. No SystemJS build is needed. The plugin doesn't reach the
+      // workers, which avoid newer APIs themselves (PLAN.md, Phase 8, step 4).
       legacy({
-        targets: ["defaults", "Chrome >= 49"],
-        // additionalLegacyPolyfills: ["whatwg-fetch", "es6-proxy-polyfill"],
-        modernPolyfills: [
-          // Safari 11 has modules, but throws > ReferenceError: Can't find variable: globalThis
-          "es.global-this",
-        ],
+        modernTargets: [OLDEST_CHROME],
+        modernPolyfills: true,
+        renderLegacyChunks: false,
       }),
     ],
     resolve: {

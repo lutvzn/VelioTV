@@ -32,6 +32,7 @@ cd "$repo_root"
 printf '\n==> Build\n'
 rm -rf "$build_dir"
 TARGET_DEVICE=tizen pnpm build
+node scripts/check-old-tvs.mjs "$build_dir"
 cp devices/tizen/config.xml "$build_dir/"
 cp public/assets/solid.png "$build_dir/icon.png"
 # Source maps would only make the package bigger.

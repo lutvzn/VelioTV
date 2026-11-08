@@ -45,3 +45,7 @@ jobs:
         run: pnpm build
         env:
           TARGET_DEVICE: tizen
+
+      # No TV this old is at hand, so check the build reads on Chromium 68.
+      - name: Check the build for older TVs
+        run: pnpm check:old-tvs dist/tizen

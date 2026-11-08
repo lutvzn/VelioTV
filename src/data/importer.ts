@@ -224,7 +224,8 @@ const startGeneration = async (db: IDBDatabase, guide: string) => {
 };
 
 export const runImport = async (input: ImportRequest, options: ImportOptions = {}): Promise<ImportResult> => {
-  const fetcher = options.fetch ?? fetch.bind(globalThis);
+  // `self` rather than globalThis, which Chromium 69 lacks; workers get no polyfills.
+  const fetcher = options.fetch ?? fetch.bind(self);
   const started = Date.now();
   const today = Math.floor((options.now ?? started) / DAY);
   const { source } = input;
