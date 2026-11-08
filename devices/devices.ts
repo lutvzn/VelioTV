@@ -42,6 +42,8 @@ export interface Device {
   readonly canUpdate: boolean;
 
   closeApp(): Promise<void>;
+  /** Calls `changed` with whether the TV's screen reader is on, now and when it changes. */
+  watchVoiceGuide(changed: (on: boolean) => void): void;
   updateApp(): Promise<void>;
   getPlayer(): PlaybackEngine;
 }

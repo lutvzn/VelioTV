@@ -68,6 +68,31 @@ export class TizenDevice extends DeviceCommon {
     tizen.application.getCurrentApplication().exit();
   }
 
+  // Samsung's voice guide (PLAN.md, Phase 8, step 5): tvinfo says whether
+  // it's on, and calls back when it changes; it is read again when the app
+  // comes back to the front, in case the call doesn't come.
+  watchVoiceGuide(changed: (on: boolean) => void) {
+    const tvinfo = typeof webapis === "undefined" ? undefined : webapis.tvinfo;
+    if (!tvinfo) return;
+    const key = tvinfo.TvInfoMenuKey.VOICE_GUIDE_KEY;
+    const read = () => {
+      try {
+        changed(tvinfo.getMenuValue(key) === tvinfo.TvInfoMenuValue.ON);
+      } catch (error) {
+        console.warn("Couldn't read the voice guide setting:", error);
+      }
+    };
+    read();
+    try {
+      tvinfo.addCaptionChangeListener(key, read);
+    } catch (error) {
+      console.warn("No calls when the voice guide changes:", error);
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") read();
+    });
+  }
+
   protected _getPlayer() {
     return typeof webapis === "undefined" ? super._getPlayer() : new AvplayEngine(webapis.avplay);
   }

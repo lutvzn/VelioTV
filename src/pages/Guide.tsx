@@ -30,7 +30,7 @@ import {
   spanStart,
   wholeRow,
 } from "../guide/timeline";
-import { clockTime, dayLabel } from "../live/format";
+import { clockTime, dayLabel, timeRange } from "../live/format";
 import { handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../live/handoff";
 import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow";
 import { createNumberEntry } from "../live/numberEntry";
@@ -53,6 +53,7 @@ import { watchRecording } from "../play/start";
 import { editText } from "../textEntry";
 import { $t, $tn } from "../translate";
 import type { Rect } from "../videoWindow";
+import { sayWhileFocused } from "../voiceGuide";
 import { GuideDetails } from "./guide/GuideDetails";
 import {
   ChannelOptions,
@@ -532,6 +533,22 @@ export default () => {
     if (!inArchive(channel, programme.start, now())) return undefined;
     return programme.stop <= now() ? $t("guide.okPlays") : $t("guide.canStartOver");
   };
+  // What the voice guide reads: the group, or the channel, then the
+  // programme under the cursor, its day and time, and what OK does.
+  sayWhileFocused(focused, () => {
+    if (area() === "filters") return [filter().label, $tn("count.channels", list().length)];
+    const channel = cursorChannel();
+    if (!channel)
+      return filter().id === SEARCH ? $t("guide.noMatches", { query: query() }) : $t("live.groupEmpty");
+    const cell = focusedCell();
+    const heading = `${cursorNumber()} ${channel.name}`;
+    if (moving()) return [heading, $t("guide.moveHint")];
+    if (!cell || cell.kind === "loading") return [heading];
+    if (cell.kind === "none") return [heading, $t("live.noGuide")];
+    if (cell.kind === "locked") return [heading, $t("live.locked")];
+    const when = `${dayLabel(focusedDay(), now(), dayWords())}, ${timeRange(cell.start, cell.stop)}`;
+    return [heading, cell.programme?.title ?? $t("guide.noInformation"), when, detailsNote()];
+  });
   const ticks = () => Array.from({ length: SPAN / STEP }, (_, i) => from() + i * STEP);
   const nowX = () => GRID_X + (now() - from()) * PX_PER_MS;
 
@@ -540,6 +557,8 @@ export default () => {
       ref={element => (root = element)}
       width={PAGE_WIDTH}
       height={1080}
+      // Read by sayWhileFocused above, not as the page's whole text.
+      announce=""
       onFocusChanged={setFocused}
       // While a favourite moves, it has every key.
       onCaptureKey={(_event, _element, _focused, key) => (moving() ? movingKey(key) : false)}

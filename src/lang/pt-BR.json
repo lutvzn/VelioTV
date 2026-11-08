@@ -41,6 +41,8 @@
   "count.programmes.other": "{{ count }} programas",
   "count.groups.one": "{{ count }} grupo",
   "count.groups.other": "{{ count }} grupos",
+  "count.titles.one": "{{ count }} título",
+  "count.titles.other": "{{ count }} títulos",
   "time.justNow": "agora mesmo",
   "time.minutes": "há {{ count }} min",
   "time.hours": "há {{ count }} h",
@@ -177,6 +179,7 @@
   "vod.season": "Temporada {{ number }}",
   "vod.noEpisodes": "Nenhum episódio",
   "vod.watched": "Assistido",
+  "vod.watchedPart": "{{ percent }}% assistido",
   "reminder.startsAt": "Começa às {{ time }}",
   "reminder.onNow": "No ar agora",
   "reminder.hint": "OK  Assistir     Voltar  Dispensar",
@@ -233,5 +236,6 @@
   "backup.problem.url": "A URL deve começar com http:// ou https://.",
   "backup.problem.notBackup": "Esse arquivo não é um backup do TiviPlayer.",
   "backup.problem.version": "Esse backup é de um TiviPlayer mais novo.",
-  "notFound": "Página não encontrada"
+  "notFound": "Página não encontrada",
+  "a11y.selected": "Selecionado"
 }

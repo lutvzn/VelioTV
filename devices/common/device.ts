@@ -46,6 +46,12 @@ export class DeviceCommon {
     console.log("should update the app");
   }
 
+  /**
+   * Calls `changed` with whether the TV's screen reader is on, now and
+   * whenever it changes. Without one, it stays off.
+   */
+  watchVoiceGuide(_changed: (on: boolean) => void): void {}
+
   /** The TV's playback engine; there is one per app. */
   getPlayer(): PlaybackEngine {
     this._player ??= this._getPlayer();

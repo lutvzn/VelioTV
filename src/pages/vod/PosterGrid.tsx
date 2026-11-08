@@ -5,7 +5,8 @@ import { exposeToProbes } from "../../devHooks";
 import { fold } from "../../guide/search";
 import { scrollTop, wrapIndex } from "../../live/listWindow";
 import { editText } from "../../textEntry";
-import { $t } from "../../translate";
+import { $t, $tn } from "../../translate";
+import { sayWhileFocused } from "../../voiceGuide";
 
 // The Movies and Series pages' grid of posters (PLAN.md, Phase 6, step 4),
 // under a line that picks what shows: Continue watching, everything, the
@@ -152,6 +153,28 @@ export const PosterGrid = <T extends GridItem>(props: PosterGridProps<T>) => {
 
   exposeToProbes(props.probeName, { filters, filter, cursor, top, area, items, setFilterId, place });
 
+  // What the voice guide reads: the filter, then the title under the cursor.
+  sayWhileFocused(
+    () => focused() && !props.covered,
+    () => {
+      const item = items()[cursor()];
+      if (!item) {
+        const why = props.loading
+          ? $t("live.loading")
+          : filter().id === SEARCH
+            ? $t("vod.noMatches", { query: query() })
+            : props.emptyText;
+        return [filter().label, why];
+      }
+      if (area() === "filters") return [filter().label, $tn("count.titles", items().length)];
+      return [
+        filter().label,
+        item.name,
+        item.progress ? $t("vod.watchedPart", { percent: Math.round(item.progress * 100) }) : undefined,
+      ];
+    },
+  );
+
   const slotItem = (slot: number) => items()[top() * COLUMNS + slot];
   const empty = () => items().length === 0;
 
@@ -163,6 +186,8 @@ export const PosterGrid = <T extends GridItem>(props: PosterGridProps<T>) => {
       }}
       width={PAGE_WIDTH}
       height={1080}
+      // Read by sayWhileFocused above, not as the page's whole text.
+      announce=""
       onFocusChanged={setFocused}
       onUp={() => {
         if (area() === "filters") return true;

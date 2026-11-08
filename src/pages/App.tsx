@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "@solidjs/router";
 import { activeElement, View, ElementNode } from "@solidtv/solid";
-import { useAnnouncer, useMouse } from "@solidtv/solid/primitives";
+import { useMouse } from "@solidtv/solid/primitives";
 import { createEffect, on, onCleanup, type JSX } from "solid-js";
 import { PinPrompt } from "../components/PinPrompt";
 import { ReminderNotice } from "../components/ReminderNotice";
@@ -10,11 +10,11 @@ import { library } from "../library";
 import { SECTIONS } from "../sections";
 import { $t } from "../translate";
 import { smallVideoWindow, videoFillsScreen, videoWindow } from "../videoWindow";
+import { followVoiceGuide, readFocus } from "../voiceGuide";
 import { progressSummary } from "./settings/status";
 
 declare module "@solidtv/solid/primitives" {
   interface KeyMap {
-    Announcer: string | number | (string | number)[];
     Menu: string | number | (string | number)[];
     Text: string | number | (string | number)[];
     Escape: string | number | (string | number)[];
@@ -78,9 +78,11 @@ const App = (props: { children?: JSX.Element }) => {
   useMouse();
   const navigate = useNavigate();
   const location = useLocation();
-  const announcer = useAnnouncer();
-  announcer.debug = false;
-  announcer.enabled = false;
+  // The TV's voice guide reads the focus out while it's on.
+  readFocus();
+  device
+    .then(d => followVoiceGuide(changed => d.watchVoiceGuide(changed)))
+    .catch(error => console.error("Couldn't follow the voice guide:", error));
 
   const startsInSection = SECTIONS.some(section => section.path === location.pathname);
   let menu: ElementNode | undefined;
@@ -121,7 +123,7 @@ const App = (props: { children?: JSX.Element }) => {
   onCleanup(() => clearTimeout(check));
 
   return (
-    <View ref={window.APP} onAnnouncer={() => (announcer.enabled = !announcer.enabled)}>
+    <View ref={window.APP}>
       <View color={0x071423ff} shader={["holePunch", backgroundHole()]} />
       <View
         ref={element => (content = element)}

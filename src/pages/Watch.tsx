@@ -18,6 +18,7 @@ import { askPin } from "../pin";
 import { canPlaySecond, player, secondPlayer } from "../player";
 import { programmeAt, watchRecording } from "../play/start";
 import { $t } from "../translate";
+import { sayWhileFocused } from "../voiceGuide";
 import { FULL_SCREEN } from "../videoWindow";
 import { Banner } from "./live/Banner";
 import { ChannelList, LIST_ROWS } from "./live/ChannelList";
@@ -474,6 +475,39 @@ export default () => {
     delayMs: 400,
   });
 
+  // What the voice guide reads: the channel, its programme and how it plays,
+  // or what the list, the number typed or the track panel has.
+  const [focused, setFocused] = createSignal(false);
+  const quiet = new Set([$t("live.starting"), $t("live.buffering")]);
+  sayWhileFocused(focused, () => {
+    if (tracksOpen()) {
+      const row = rows()[trackCursor()];
+      if (row?.type !== "choice") return undefined;
+      const heading = row.kind === "audio" ? $t("live.tracks.audio") : $t("live.tracks.subtitles");
+      return [heading, row.text, row.selected ? $t("a11y.selected") : undefined];
+    }
+    if (zapper.digits()) return zapper.digits();
+    const missing = zapper.missing();
+    if (missing) return $t("live.noNumber", { number: missing });
+    if (listOpen()) {
+      const channel = listChannels()[cursor()] as Channel | undefined;
+      if (!channel) return [groupTitle(listGroup()), $t("live.groupEmpty")];
+      return [
+        groupTitle(listGroup()),
+        `${zapper.numberOf(channel)} ${channel.name}`,
+        isBlocked(channel) ? $t("live.locked") : listGuide().now?.title,
+      ];
+    }
+    const channel = zapper.shown();
+    if (!channel) return undefined;
+    const status = statusText();
+    return [
+      `${zapper.numberOf(channel)} ${channel.name}`,
+      lockedChannel() ? $t("pin.lockedHint") : nowNext().now?.title,
+      status && !quiet.has(status) ? status : undefined,
+    ];
+  });
+
   onCleanup(() => {
     clearInterval(ticker);
     clearTimeout(bannerTimer);
@@ -515,6 +549,9 @@ export default () => {
       x={-MENU_WIDTH}
       width={1920}
       height={1080}
+      // Read by sayWhileFocused above, not as the page's whole text.
+      announce=""
+      onFocusChanged={setFocused}
       // Up is the next channel, as on the TV's own channel keys.
       onUp={() => zap(1)}
       onDown={() => zap(-1)}

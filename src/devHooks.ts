@@ -29,6 +29,7 @@ import { handPlay } from "./play/session";
 import { player, secondPlayer } from "./player";
 import { $t, language } from "./translate";
 import { smallVideoWindow, videoWindow } from "./videoWindow";
+import { lastSaid, voiceGuideOn } from "./voiceGuide";
 
 const hooks: Record<string, unknown> = {
   importSource,
@@ -58,6 +59,8 @@ const hooks: Record<string, unknown> = {
   /** The app's text, and the language it shows (settings.setLanguage() picks one). */
   text: $t,
   language,
+  /** Whether the TV's voice guide is on, and what the app last gave it to read. */
+  voiceGuide: { on: voiceGuideOn, lastSaid },
   /** What has the keys, as the path to it: each node's name or id, and its kind. */
   focusPath: () => {
     const path: string[] = [];
