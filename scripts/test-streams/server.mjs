@@ -106,12 +106,12 @@ const MAX_DAYS = 14;
 const CLIP_SECONDS = 20;
 const cacheDir = path.join(
   process.env.XDG_CACHE_HOME || path.join(homedir(), ".cache"),
-  "tiviplayer",
+  "velio",
   "test-streams",
 );
 const guideDir = path.join(path.dirname(cacheDir), "test-guides");
 const filmDir = path.join(path.dirname(cacheDir), "test-film");
-const hlsRoot = mkdtempSync(path.join(tmpdir(), "tiviplayer-hls-"));
+const hlsRoot = mkdtempSync(path.join(tmpdir(), "velio-hls-"));
 const children = new Set();
 let stopping = false;
 
@@ -203,7 +203,7 @@ const encodeFilm = async () => {
   const partial = `${filmPath("mp4")}.partial.mp4`;
   const video = [
     "testsrc2=size=1280x720:rate=25",
-    `${filmText}:fontsize=56:x=60:y=60:text='TiviPlayer test film'`,
+    `${filmText}:fontsize=56:x=60:y=60:text='Velio test film'`,
     `${filmText}:fontsize=96:x=60:y=160:text='%{pts\\:hms}'`,
   ].join(",");
   const audio =
@@ -544,7 +544,7 @@ const sampleId = channel => `sample/n:${channel.name.toLowerCase()}`;
 
 // A made-up backup: one playlist from this server, some edits and settings.
 const sampleBackup = base => ({
-  app: "tiviplayer",
+  app: "velio",
   version: 1,
   savedAt: Date.now(),
   sources: [

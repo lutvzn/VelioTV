@@ -40,7 +40,7 @@ ws.addEventListener("open", async () => {
   // 20 s), then a little longer for the start to settle.
   for (let waited = 0; waited < 20_000; waited += 200) {
     const ready = await call("Runtime.evaluate", {
-      expression: "document.readyState === 'complete' && window.tiviplayer !== undefined",
+      expression: "document.readyState === 'complete' && window.velio !== undefined",
       returnByValue: true,
     });
     if (ready.result?.result?.value === true) break;

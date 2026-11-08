@@ -11,11 +11,11 @@
 //   "cleanup": true        only delete the junk
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   const { library, db: data } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));
-  const JUNK = "tiviplayer-probe-junk";
+  const JUNK = "velio-probe-junk";
   const mb = bytes => Math.round(bytes / 1e5) / 10;
   const estimate = async () => {
     const { usage, quota } = await navigator.storage.estimate();

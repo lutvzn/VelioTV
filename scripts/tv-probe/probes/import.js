@@ -15,8 +15,8 @@
 
 async function probe(input) {
   const log = (...args) => console.log("[probe]", ...args);
-  const app = window.tiviplayer;
-  if (!app) return { error: "window.tiviplayer is missing: deploy a build with src/devHooks.ts" };
+  const app = window.velio;
+  if (!app) return { error: "window.velio is missing: deploy a build with src/devHooks.ts" };
 
   const quota = async () => {
     const { usage, quota: total } = await navigator.storage.estimate();

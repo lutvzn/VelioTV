@@ -18,7 +18,7 @@
 //                                      writes without a drive (mind the app's 80 MB)
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!input.server) return { error: 'Give the test server\'s address as "server"' };
   if (typeof tizen === "undefined" || !tizen.filesystem) return { error: "No tizen.filesystem" };
   const { player } = app;
@@ -59,7 +59,7 @@ async function probe(input) {
   });
   if (!folder || folder.error) return { ...result, error: `Can't open the drive: ${folder?.error}` };
   result.path = folder.fullPath;
-  const name = "tiviplayer-probe.ts";
+  const name = "velio-probe.ts";
   try {
     folder.deleteFile(`${folder.fullPath}/${name}`);
   } catch {

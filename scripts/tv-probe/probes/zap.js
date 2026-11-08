@@ -19,8 +19,8 @@
 // minutes. The video shows full screen on the TV meanwhile.
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.player) return { error: "window.tiviplayer.player is missing: deploy a newer build" };
+  const app = window.velio;
+  if (!app?.player) return { error: "window.velio.player is missing: deploy a newer build" };
   const { player } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (...args) => console.log("[probe]", ...args);

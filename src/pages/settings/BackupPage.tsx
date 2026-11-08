@@ -8,7 +8,7 @@ import { askPin } from "../../pin";
 import { $t, $tn, isTextKey } from "../../translate";
 import { SubPage } from "./SubPage";
 
-const URL_KEY = "tiviplayer.backupUrl";
+const URL_KEY = "velio.backupUrl";
 
 const savedUrl = () => {
   try {

@@ -5,7 +5,7 @@
 
 import { createSignal } from "solid-js";
 
-const STORAGE_KEY = "tiviplayer.reminders";
+const STORAGE_KEY = "velio.reminders";
 const VERSION = 1;
 /** At most this many reminders. */
 export const MAX_REMINDERS = 200;

@@ -52,10 +52,10 @@ describe("saving sources", () => {
   it("copes with nothing saved, broken JSON and broken entries", () => {
     const storage = memoryStorage();
     expect(loadSources(storage)).toEqual([]);
-    storage.setItem("tiviplayer.sources", "{");
+    storage.setItem("velio.sources", "{");
     expect(loadSources(storage)).toEqual([]);
     storage.setItem(
-      "tiviplayer.sources",
+      "velio.sources",
       JSON.stringify({
         version: 1,
         sources: [{ id: "x", kind: "other" }, { kind: "m3u" }, { id: "y", kind: "m3u", refreshHours: -1 }],

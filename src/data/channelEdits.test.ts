@@ -35,9 +35,9 @@ describe("channel edits", () => {
   it("start empty when nothing, or something unreadable, is stored", () => {
     const storage = memoryStorage();
     expect(createChannelEdits({ storage }).favourites()).toEqual([]);
-    storage.setItem("tiviplayer.channelEdits", "{not json");
+    storage.setItem("velio.channelEdits", "{not json");
     expect(createChannelEdits({ storage }).favourites()).toEqual([]);
-    storage.setItem("tiviplayer.channelEdits", JSON.stringify({ favourites: [1, 2] }));
+    storage.setItem("velio.channelEdits", JSON.stringify({ favourites: [1, 2] }));
     expect(createChannelEdits({ storage }).favourites()).toEqual([]);
   });
 

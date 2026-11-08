@@ -37,7 +37,7 @@ const base64 = text => btoa(String.fromCharCode(...new TextEncoder().encode(text
 const userInfo = (account, now) => ({
   username: account.username,
   password: account.password,
-  message: "TiviPlayer test server",
+  message: "Velio test server",
   auth: 1,
   status: "Active",
   exp_date: seconds(now + 365 * 24 * HOUR),

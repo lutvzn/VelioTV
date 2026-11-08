@@ -38,7 +38,7 @@ export const DEFAULT_REFRESH_HOURS = 24;
 /** How soon to try again after an import failed or was cut short. */
 export const RETRY_HOURS = 1;
 
-const STORAGE_KEY = "tiviplayer.sources";
+const STORAGE_KEY = "velio.sources";
 const STORAGE_VERSION = 1;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

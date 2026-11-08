@@ -12,9 +12,9 @@
 // Input, all optional: { "rapid": 8, "rapidMs": 150, "single": 3, "number": "12" }
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!app?.player || !app?.lineup || !app?.live)
-    return { error: "window.tiviplayer.live is missing: deploy a newer build" };
+    return { error: "window.velio.live is missing: deploy a newer build" };
   const { player, lineup } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));

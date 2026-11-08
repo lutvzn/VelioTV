@@ -9,7 +9,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { isLanguage, type LanguageSetting } from "../lang/languages";
 
-const STORAGE_KEY = "tiviplayer.settings";
+const STORAGE_KEY = "velio.settings";
 const STORAGE_VERSION = 1;
 export const PIN_LENGTH = 4;
 

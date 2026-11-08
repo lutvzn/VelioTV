@@ -8,7 +8,7 @@
 //   "url": "http://127.0.0.1:8090/playlist.m3u?channels=60"   the playlist
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   const library = app.library;
   const started = performance.now();
   const source = library.add({

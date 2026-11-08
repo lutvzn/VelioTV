@@ -8,9 +8,9 @@
 // Input: { "server": "http://<dev-ip>:8090" }
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!app?.player || !app?.live?.rows)
-    return { error: "window.tiviplayer.live.rows is missing: deploy a newer build" };
+    return { error: "window.velio.live.rows is missing: deploy a newer build" };
   const { player, live } = app;
   const server = input.server;
   if (!server) return { error: "give the test server as `server`" };
@@ -92,8 +92,8 @@ async function probe(input) {
     };
   };
 
-  const saved = localStorage.getItem("tiviplayer.tracks");
-  localStorage.removeItem("tiviplayer.tracks");
+  const saved = localStorage.getItem("velio.tracks");
+  localStorage.removeItem("velio.tracks");
   await waitFor(() => live.watching(), 15_000);
   const results = { watching: live.watching() };
   if (!results.watching) return { error: "Live TV isn't full screen: start the app on Live TV" };
@@ -127,7 +127,7 @@ async function probe(input) {
   press(KEYS.back);
   await sleep(300);
   results.closedByBack = !live.tracksOpen();
-  results.remembered = localStorage.getItem("tiviplayer.tracks");
+  results.remembered = localStorage.getItem("velio.tracks");
 
   // The raw TS version: German audio again, by itself.
   results.ts = await play(`${server}/ts/h264-tracks.ts`);
@@ -140,8 +140,8 @@ async function probe(input) {
 
   clearInterval(watcher);
   running = false;
-  if (saved === null) localStorage.removeItem("tiviplayer.tracks");
-  else localStorage.setItem("tiviplayer.tracks", saved);
+  if (saved === null) localStorage.removeItem("velio.tracks");
+  else localStorage.setItem("velio.tracks", saved);
   const channel = live.zapper.playing();
   if (channel) live.zapper.tune(channel);
   return results;

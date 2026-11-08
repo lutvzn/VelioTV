@@ -13,7 +13,7 @@ import {
 import { createGuideClient, type GuideClient } from "./guideClient";
 import { encodeBlock, type StoredProgramme } from "./guideCodec";
 
-const DB = "tiviplayer-guide-test";
+const DB = "velio-guide-test";
 const HOUR = 3_600_000;
 const day = 20_000;
 const at = (d: number, hours: number) => d * DAY + hours * HOUR;

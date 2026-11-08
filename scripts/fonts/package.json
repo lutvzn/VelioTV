@@ -1,5 +1,5 @@
 {
-  "name": "tiviplayer-fonts",
+  "name": "velio-fonts",
   "private": true,
   "description": "Builds the app's text atlases (build.mjs). Kept apart from the app, so its image tools and their Node types stay out of the app's dependencies.",
   "type": "module",

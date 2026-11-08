@@ -16,10 +16,10 @@
 
 async function probe(input) {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const KEY = "tiviplayer.probe.kill";
+  const KEY = "velio.probe.kill";
   const openProbeDb = () =>
     new Promise((resolve, reject) => {
-      const r = indexedDB.open("tiviplayer-probe", 2);
+      const r = indexedDB.open("velio-probe", 2);
       r.addEventListener("upgradeneeded", () => {
         for (const name of ["values", "busy"]) {
           if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name);
@@ -39,7 +39,7 @@ async function probe(input) {
   // What the app itself keeps, to see whether it went too.
   const appKeys = () =>
     Object.keys(localStorage)
-      .filter(key => key.startsWith("tiviplayer.") && key !== KEY)
+      .filter(key => key.startsWith("velio.") && key !== KEY)
       .map(key => `${key} ${localStorage.getItem(key).length}`);
 
   if (input.write !== undefined) {

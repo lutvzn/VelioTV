@@ -234,8 +234,8 @@
   "backup.restored.other": "{{ count }} fontes restauradas. Elas importam agora.",
   "backup.failed": "Não funcionou: {{ error }}",
   "backup.problem.url": "A URL deve começar com http:// ou https://.",
-  "backup.problem.notBackup": "Esse arquivo não é um backup do TiviPlayer.",
-  "backup.problem.version": "Esse backup é de um TiviPlayer mais novo.",
+  "backup.problem.notBackup": "Esse arquivo não é um backup do Velio.",
+  "backup.problem.version": "Esse backup é de um Velio mais novo.",
   "notFound": "Página não encontrada",
   "a11y.selected": "Selecionado"
 }

@@ -8,7 +8,7 @@ import { createSourceManager, type Importer, type SourceManager } from "./source
 import { loadSources, saveSources, type Source, type SourceDraft } from "./sources";
 
 const BASE = "http://test.local";
-const DB = "tiviplayer-manager-test";
+const DB = "velio-manager-test";
 const HOUR = 3_600_000;
 
 // Two playlists of the test server's channels, one with a guide.
@@ -147,7 +147,7 @@ describe("the source manager", () => {
     // Data from a source being removed as the app closed, and from one the list doesn't name.
     await runImport({ source: "gone", playlistUrl: `${BASE}/b.m3u` }, { dbName: DB, fetch: serve });
     await runImport({ source: "unnamed", playlistUrl: `${BASE}/b.m3u` }, { dbName: DB, fetch: serve });
-    storage.setItem("tiviplayer.removedSources", JSON.stringify(["gone"]));
+    storage.setItem("velio.removedSources", JSON.stringify(["gone"]));
 
     const { importer, requests } = recording();
     // A day and a bit later, the old one is due; the fresh one has a week.
@@ -162,7 +162,7 @@ describe("the source manager", () => {
     const db = await openDb(DB);
     expect(await readImport(db, "gone")).toBeUndefined();
     expect(await readChannels(db, "gone")).toEqual([]);
-    expect(storage.getItem("tiviplayer.removedSources")).toBeNull();
+    expect(storage.getItem("velio.removedSources")).toBeNull();
     // A list that lost a source, as one read empty on the TV once, deletes nothing.
     expect(await readImport(db, "unnamed")).toMatchObject({ status: "done" });
     db.close();

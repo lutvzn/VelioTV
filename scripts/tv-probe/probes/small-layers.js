@@ -23,8 +23,8 @@
 //                     each ("reopen 1000 ms" for "only")
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.secondPlayer) return { error: "window.tiviplayer.secondPlayer is missing: deploy the app first" };
+  const app = window.velio;
+  if (!app?.secondPlayer) return { error: "window.velio.secondPlayer is missing: deploy the app first" };
   const { lineup, player, secondPlayer } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));

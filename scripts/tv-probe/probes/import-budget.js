@@ -15,7 +15,7 @@
 //   "enable": true         only turn the source on again
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   const { library, importSource, db: data } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));

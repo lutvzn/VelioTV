@@ -14,8 +14,8 @@
 //   "hold": 0                          seconds to hold at the end, to look
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.player) return { error: "window.tiviplayer.player is missing" };
+  const app = window.velio;
+  if (!app?.player) return { error: "window.velio.player is missing" };
   if (!input.server) return { error: 'Give the test server\'s address as "server"' };
   if (typeof webapis === "undefined" || !webapis.avplaystore) return { error: "No webapis.avplaystore" };
   const { player } = app;

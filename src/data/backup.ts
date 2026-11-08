@@ -18,7 +18,9 @@ import { ensureFetch } from "../polyfills/fetch";
 ensureAbortController();
 ensureFetch();
 
-export const BACKUP_APP = "tiviplayer";
+export const BACKUP_APP = "velio";
+/** The app's name before Phase 8, step 6; its backups read the same. */
+const OLD_BACKUP_APPS: readonly unknown[] = ["tiviplayer"];
 export const BACKUP_VERSION = 1;
 const TIMEOUT_MS = 20_000;
 
@@ -61,7 +63,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const readBackup = (value: unknown): Backup => {
   if (!isRecord(value)) throw new Error("backup.problem.notBackup");
   const record = value;
-  if (record.app !== BACKUP_APP) throw new Error("backup.problem.notBackup");
+  if (record.app !== BACKUP_APP && !OLD_BACKUP_APPS.includes(record.app))
+    throw new Error("backup.problem.notBackup");
   if (record.version !== BACKUP_VERSION) throw new Error("backup.problem.version");
   return {
     app: BACKUP_APP,

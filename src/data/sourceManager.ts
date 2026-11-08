@@ -35,7 +35,7 @@ const CHECK_EVERY_MS = 15 * 60_000;
  * (PLAN.md, Phase 5, step 8), and deleting what it didn't name wiped every
  * source's data.
  */
-const REMOVED_KEY = "tiviplayer.removedSources";
+const REMOVED_KEY = "velio.removedSources";
 
 export type Importer = (
   request: ImportRequest,

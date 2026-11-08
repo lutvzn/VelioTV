@@ -11,19 +11,19 @@
 // if the copy is newer. The app starts only after that.
 //
 // All of the app's storage goes through appStorage, so the copy holds
-// everything: keys starting "tiviplayer.", apart from probes' own.
+// everything: keys starting "velio.", apart from probes' own.
 
 import { ensureGetAll } from "../polyfills/indexedDb";
 
 ensureGetAll();
 
-const DB_NAME = "tiviplayer-settings";
+const DB_NAME = "velio-settings";
 const STORE = "items";
-const PREFIX = "tiviplayer.";
+const PREFIX = "velio.";
 // Keys probes write for themselves (scripts/tv-probe/), which aren't copied.
-const UNCOPIED = "tiviplayer.probe.";
+const UNCOPIED = "velio.probe.";
 /** When the settings were last written, in both. */
-export const STAMP_KEY = "tiviplayer.savedAt";
+export const STAMP_KEY = "velio.savedAt";
 /** How long a start waits for the copy before going on without it. */
 const RESTORE_TIMEOUT_MS = 3000;
 

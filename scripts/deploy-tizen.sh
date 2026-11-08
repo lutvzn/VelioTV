@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-readonly APP_ID="TiviPlayer.TiviPlayer"
+readonly APP_ID="VelioTVapp.Velio"
 readonly PROFILE="${TIZEN_PROFILE:-TizenDev}"
 readonly TOOLS="$HOME/tizen-studio/tools"
 

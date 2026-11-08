@@ -13,8 +13,8 @@
 //   "check": true   only say whether the reminder from step 3 was kept
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.reminders) return { error: "window.tiviplayer.reminders is missing: deploy the app first" };
+  const app = window.velio;
+  if (!app?.reminders) return { error: "window.velio.reminders is missing: deploy the app first" };
   const { reminders, lineup, guide, player } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const waitFor = async (test, ms = 10_000) => {

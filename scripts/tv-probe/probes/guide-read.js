@@ -18,9 +18,9 @@
 
 async function probe(input) {
   const log = (...args) => console.log("[probe]", ...args);
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!app?.createGuideClient)
-    return { error: "window.tiviplayer has no createGuideClient: deploy a newer build" };
+    return { error: "window.velio has no createGuideClient: deploy a newer build" };
   const { rows = 10, passes = 3, scrollRows = 40, scrollEveryMs = 100 } = input;
   const DAY = app.db.DAY;
   const HOUR = 3600000;

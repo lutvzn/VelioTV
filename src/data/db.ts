@@ -41,7 +41,7 @@ export { DAY, type StoredChannel, type StoredProgramme };
 
 ensureGetAll();
 
-export const DB_NAME = "tiviplayer";
+export const DB_NAME = "velio";
 const VERSION = 6;
 const STORES = ["imports", "channelLists", "guide", "guideIndex", "guides", "vod"];
 

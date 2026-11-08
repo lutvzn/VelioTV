@@ -19,8 +19,8 @@
 //                            film and episodes a previous run played
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.vod || !app?.watched) return { error: "window.tiviplayer.vod is missing: deploy the app first" };
+  const app = window.velio;
+  if (!app?.vod || !app?.watched) return { error: "window.velio.vod is missing: deploy the app first" };
   const { vod, watched, player, library } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));

@@ -7,7 +7,7 @@
 
 import { createSignal } from "solid-js";
 
-const STORAGE_KEY = "tiviplayer.watched";
+const STORAGE_KEY = "velio.watched";
 const VERSION = 1;
 /** Entries kept, newest first. */
 export const MAX_WATCHED = 300;

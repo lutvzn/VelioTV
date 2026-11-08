@@ -11,7 +11,7 @@
 
 import { createMemo, createRoot, createSignal } from "solid-js";
 
-const STORAGE_KEY = "tiviplayer.channelEdits";
+const STORAGE_KEY = "velio.channelEdits";
 const STORAGE_VERSION = 1;
 
 /** How a group's channels are ordered: as the playlist has them, by number, or by name. */

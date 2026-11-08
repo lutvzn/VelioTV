@@ -131,7 +131,7 @@ const programmeXml = (channel, p) => {
 export function* xmltv({ base, channels, window }) {
   const listed = guideChannels(channels);
   yield '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE tv SYSTEM "xmltv.dtd">\n';
-  yield '<tv generator-info-name="TiviPlayer test streams">\n';
+  yield '<tv generator-info-name="Velio test streams">\n';
   let chunk = "";
   for (const channel of listed) {
     chunk += `<channel id="${escapeXml(channel.guideId)}"><display-name lang="en">${escapeXml(channel.name)}</display-name>`;

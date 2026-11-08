@@ -17,8 +17,8 @@
 //   "watchSeconds": 120    ...for this long
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.player || !app?.live) return { error: "window.tiviplayer.live is missing: deploy a newer build" };
+  const app = window.velio;
+  if (!app?.player || !app?.live) return { error: "window.velio.live is missing: deploy a newer build" };
   const { player, live } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));

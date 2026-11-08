@@ -11,7 +11,7 @@ async function probe(input) {
     "User-Agent": "Mozilla/5.0 (QtEmbedded; U; Linux; C) MAG200 stbapp ver: 2 rev: 250 Safari/533.3",
     "X-User-Agent": "Model: MAG250; Link: WiFi",
     Authorization: "Bearer TEST",
-    Referer: "http://tiviplayer.test/",
+    Referer: "http://velio.test/",
   };
   // Which of the wanted headers arrived, and with what value.
   const arrived = headers =>

@@ -17,8 +17,8 @@
 //   "look": 0      seconds to wait after each step, to look at the TV
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.secondPlayer) return { error: "window.tiviplayer.secondPlayer is missing: deploy the app first" };
+  const app = window.velio;
+  if (!app?.secondPlayer) return { error: "window.velio.secondPlayer is missing: deploy the app first" };
   const { lineup, player, secondPlayer } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));

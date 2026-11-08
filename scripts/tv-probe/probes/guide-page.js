@@ -16,7 +16,7 @@
 //   "pageEveryMs": 300
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   const { rows = 60, everyMs = 100, pages = 10, pageEveryMs = 300 } = input;
   const { player, lineup } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -93,7 +93,7 @@ async function probe(input) {
   // From full screen: Back (once for the banner) to the guide, which takes the focus.
   // Right after the restart, the page may not be up yet.
   if ((await waitFor(() => app.live, 30_000)) === undefined) {
-    return { error: "window.tiviplayer.live is missing: is the app full screen?" };
+    return { error: "window.velio.live is missing: is the app full screen?" };
   }
   await waitFor(() => lineup.channels().length > 0 && live()?.zapper.playing(), 30_000);
   await sleep(1000);

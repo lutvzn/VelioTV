@@ -7,7 +7,7 @@ import { runImport } from "./importer";
 import { normalizeServer, xtreamAccount, xtreamLiveChannels, type XtreamLogin } from "./xtream";
 
 const BASE = "http://xtream.test:8080";
-const DB = "tiviplayer-xtream-test";
+const DB = "velio-xtream-test";
 const LOGIN: XtreamLogin = { server: BASE, username: "test", password: "test" };
 
 const urlOf = (input: RequestInfo | URL) => (input instanceof Request ? input.url : input.toString());

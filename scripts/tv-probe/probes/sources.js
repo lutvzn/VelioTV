@@ -14,8 +14,8 @@
 // The result lists the sources and how their last imports went.
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.library) return { error: "window.tiviplayer.library is missing: deploy a newer build" };
+  const app = window.velio;
+  if (!app?.library) return { error: "window.velio.library is missing: deploy a newer build" };
   const { library } = app;
 
   if (input.clear) {

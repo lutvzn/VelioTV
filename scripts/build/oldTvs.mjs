@@ -23,7 +23,7 @@ const presetEnv = (targets, options = {}) => [
 
 /** Adds the core-js polyfills each module uses. For worker.plugins. */
 export const workerPolyfills = ({ targets }) => ({
-  name: "tiviplayer:worker-polyfills",
+  name: "velio:worker-polyfills",
   async transform(code, id) {
     const file = id.split("?")[0];
     if (!SCRIPT.test(file) || SKIP.test(file) || file.includes("\0")) return null;
@@ -44,7 +44,7 @@ export const workerPolyfills = ({ targets }) => ({
  * targets' syntax, after minifying. Their source maps no longer match.
  */
 export const lowerChunks = ({ targets, include }) => ({
-  name: "tiviplayer:lower-chunks",
+  name: "velio:lower-chunks",
   enforce: "post",
   generateBundle: {
     order: "post",

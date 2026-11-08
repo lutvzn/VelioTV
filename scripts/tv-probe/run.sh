@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Runs a probe inside TiviPlayer on a Samsung TV, to test what the TV can do
+# Runs a probe inside Velio on a Samsung TV, to test what the TV can do
 # from the app's own context. Run it inside the tv-dev box, with the app
 # installed (scripts/deploy-tizen.sh):
 #
@@ -45,13 +45,13 @@ eval "$(fnm env --shell bash)"
 
 "$sdb" connect "$tv_ip" >/dev/null
 # The debug command hangs if the app is already running.
-timeout 15 "$sdb" -s "$target" shell 0 was_kill TiviPlayer >/dev/null || true
+timeout 15 "$sdb" -s "$target" shell 0 was_kill VelioTVapp >/dev/null || true
 # A start right after the kill has sometimes read the app's localStorage as
 # empty or old, and lost what was written then (PLAN.md, Phase 6), so the
 # killed app gets a moment to let go of it. KILL_WAIT (seconds) changes it,
 # for testing that (the `storage-kill` probe).
 sleep "${KILL_WAIT:-3}"
-launch="$(timeout 40 "$sdb" -s "$target" shell 0 debug TiviPlayer.TiviPlayer 2>&1)"
+launch="$(timeout 40 "$sdb" -s "$target" shell 0 debug VelioTVapp.Velio 2>&1)"
 debug_port="$(grep -o 'port: [0-9]*' <<<"$launch" | grep -o '[0-9]*' || true)"
 [[ -n "$debug_port" ]] || {
   echo "Error: the app didn't start in debug mode: $launch" >&2

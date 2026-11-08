@@ -17,8 +17,8 @@
 //   "streams": ["ts", "hls"]           which of the two to try
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.player) return { error: "window.tiviplayer.player is missing" };
+  const app = window.velio;
+  if (!app?.player) return { error: "window.velio.player is missing" };
   if (!input.server) return { error: 'Give the test server\'s address as "server"' };
   const { player } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

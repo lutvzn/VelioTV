@@ -197,7 +197,7 @@ await call("Page.navigate", { url: pageUrl });
 let ready = false;
 for (let waited = 0; waited < 20_000 && !ready; waited += 250) {
   const check = await call("Runtime.evaluate", {
-    expression: "document.readyState === 'complete' && window.tiviplayer !== undefined",
+    expression: "document.readyState === 'complete' && window.velio !== undefined",
     returnByValue: true,
   });
   ready = check.result?.result?.value === true;

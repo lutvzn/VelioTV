@@ -22,7 +22,7 @@
 //   "holdMs": 900   how long OK is held
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!app?.settings?.setPin) return { error: "this build has no PIN: deploy the app first" };
   const { holdMs = 900 } = input;
   const { lineup, edits, settings, liveView } = app;

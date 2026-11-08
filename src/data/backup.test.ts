@@ -56,7 +56,9 @@ describe("backups", () => {
     // Backups from before Phase 6 have neither.
     const older = readBackup({ ...makeBackup(parts, 5), watched: undefined, reminders: undefined });
     expect([older.watched, older.reminders]).toEqual([[], []]);
+    // Backups made under the app's old name.
+    expect(readBackup({ ...makeBackup(parts, 5), app: "tiviplayer" })).toEqual(makeBackup(parts, 5));
     expect(() => readBackup({ app: "other" })).toThrow("backup.problem.notBackup");
-    expect(() => readBackup({ app: "tiviplayer", version: 2 })).toThrow("backup.problem.version");
+    expect(() => readBackup({ app: "velio", version: 2 })).toThrow("backup.problem.version");
   });
 });

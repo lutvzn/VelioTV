@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { keyCursor, readAll } from "./indexedDb";
 
-const DB = "tiviplayer-polyfill-test";
+const DB = "velio-polyfill-test";
 
 const request = <T>(r: IDBRequest) =>
   new Promise<T>((resolve, reject) => {

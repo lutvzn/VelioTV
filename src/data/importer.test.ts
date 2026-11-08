@@ -21,7 +21,7 @@ import type { GuideBlock } from "./db";
 
 const BASE = "http://test.local";
 const HOUR = 3_600_000;
-const DB = "tiviplayer-test";
+const DB = "velio-test";
 const PLAYLIST = `${BASE}/playlist.m3u`;
 const GUIDE = `${BASE}/guide.xml.gz`;
 const GUIDE_KEY = guideKey([GUIDE]) ?? "";

@@ -108,7 +108,7 @@ export interface PlayerOptions {
   preferences?: PreferenceStore;
 }
 
-const PREFERENCES_KEY = "tiviplayer.tracks";
+const PREFERENCES_KEY = "velio.tracks";
 
 /** The chosen languages, in localStorage (and its copy). */
 export const storedPreferences: PreferenceStore = {

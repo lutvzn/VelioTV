@@ -9,7 +9,7 @@ import { episodeTitle, parseEpisodeName, vodKind, xtreamFilmInfo, xtreamSeriesIn
 import type { XtreamLogin } from "./xtream";
 
 const BASE = "http://vod.test:8080";
-const DB = "tiviplayer-vod-test";
+const DB = "velio-vod-test";
 const LOGIN: XtreamLogin = { server: BASE, username: "test", password: "test" };
 const urlOf = (input: RequestInfo | URL) => (input instanceof Request ? input.url : input.toString());
 

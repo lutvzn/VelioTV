@@ -17,7 +17,7 @@ import type { Channel, ChannelGroup } from "../data/lineup";
 export const ZAP_DELAY_MS = 400;
 export const NUMBER_DELAY_MS = 2000;
 export const MAX_DIGITS = 5;
-const LAST_CHANNEL_KEY = "tiviplayer.lastChannel";
+const LAST_CHANNEL_KEY = "velio.lastChannel";
 
 export interface ZapperOptions {
   channels: () => Channel[];

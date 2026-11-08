@@ -15,9 +15,9 @@
 //   "holdMs": 900   how long OK is held
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!app?.edits || !app?.channelKeys)
-    return { error: "window.tiviplayer.edits is missing: deploy the app first" };
+    return { error: "window.velio.edits is missing: deploy the app first" };
   const { holdMs = 900 } = input;
   const { lineup, edits } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -92,9 +92,7 @@ async function probe(input) {
     closed: !live().optionsFor(),
     favourite: edits.isFavourite(playing.id),
     favouriteBefore: wasFavourite,
-    stored: JSON.parse(localStorage.getItem("tiviplayer.channelEdits") ?? "{}").favourites?.includes(
-      playing.id,
-    ),
+    stored: JSON.parse(localStorage.getItem("velio.channelEdits") ?? "{}").favourites?.includes(playing.id),
   };
   log("full screen", results.fullScreen);
 

@@ -16,8 +16,8 @@
 //   "end": true                         check the end of a programme too
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.handPlay) return { error: "window.tiviplayer.handPlay is missing: deploy the app first" };
+  const app = window.velio;
+  if (!app?.handPlay) return { error: "window.velio.handPlay is missing: deploy the app first" };
   if (!input.server) return { error: 'Give the test server\'s address as "server"' };
   const { lineup, guide, player } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

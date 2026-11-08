@@ -60,7 +60,7 @@ async function probe(input) {
 
   await note("start");
   // 1. Records deleted from a store, as a source's refresh or removal does.
-  const db = await open("tiviplayer-probe-space", 1, created => created.createObjectStore("junk"));
+  const db = await open("velio-probe-space", 1, created => created.createObjectStore("junk"));
   await fill(db, "junk");
   await note("records written");
   const clearing = db.transaction("junk", "readwrite");
@@ -69,12 +69,12 @@ async function probe(input) {
   await note("records deleted");
   db.close();
   // 2. A whole database deleted.
-  const whole = await open("tiviplayer-probe-whole", 1, created => created.createObjectStore("junk"));
+  const whole = await open("velio-probe-whole", 1, created => created.createObjectStore("junk"));
   await fill(whole, "junk");
   await note("database written");
   whole.close();
   await new Promise((resolve, reject) => {
-    const r = indexedDB.deleteDatabase("tiviplayer-probe-whole");
+    const r = indexedDB.deleteDatabase("velio-probe-whole");
     r.addEventListener("success", resolve);
     r.addEventListener("error", () => reject(r.error));
   });

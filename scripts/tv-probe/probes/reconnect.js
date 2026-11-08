@@ -8,8 +8,8 @@
 //          "cases": ["cut", "stall", "missing", "outage", "outageHls", "hang"] }
 
 async function probe(input) {
-  const app = window.tiviplayer;
-  if (!app?.player) return { error: "window.tiviplayer is missing: deploy a newer build" };
+  const app = window.velio;
+  if (!app?.player) return { error: "window.velio is missing: deploy a newer build" };
   const { player } = app;
   const server = input.server;
   if (!server) return { error: "give the test server as `server`" };

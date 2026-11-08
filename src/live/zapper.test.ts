@@ -59,7 +59,7 @@ describe("the zapper", () => {
 
   it("waits for the remembered channel while sources load", () => {
     const storage = memoryStorage();
-    storage.setItem("tiviplayer.lastChannel", "other/5");
+    storage.setItem("velio.lastChannel", "other/5");
     const { zapper, played } = setup([channel(0)], storage);
     expect(zapper.start(true)).toBe(false);
     expect(setup([], storage).zapper.start(false)).toBe(false);

@@ -5,7 +5,7 @@
 // "idle": true for imports to finish too.
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   const { waitMs = 20_000 } = input;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const { idle = false } = input;
@@ -37,7 +37,7 @@ async function probe(input) {
     edits: app.edits.all(),
     settings: app.settings?.all(),
     unlocked: app.settings?.unlocked(),
-    lastChannel: localStorage.getItem("tiviplayer.lastChannel"),
+    lastChannel: localStorage.getItem("velio.lastChannel"),
     playing: app.live?.zapper.playing()?.name,
     player: app.player.status().state,
   };

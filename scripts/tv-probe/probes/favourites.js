@@ -12,7 +12,7 @@
 //   "holdMs": 900   how long OK is held
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!app?.edits?.moveFavourite) return { error: "this build has no Favourites: deploy the app first" };
   const { holdMs = 900 } = input;
   const { lineup, edits } = app;

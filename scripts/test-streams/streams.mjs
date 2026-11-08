@@ -2,8 +2,8 @@
 // Each shows its name and a clock on screen, and beeps once a second.
 
 // Headers that the /need-referer/ and /need-user-agent/ streams require.
-export const REQUIRED_REFERER = "http://tiviplayer.test/";
-export const REQUIRED_USER_AGENT = "TiviPlayerTest";
+export const REQUIRED_REFERER = "http://velio.test/";
+export const REQUIRED_USER_AGENT = "VelioTest";
 
 const FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
 const KEYFRAMES = ["-g", "50", "-keyint_min", "50", "-sc_threshold", "0"];

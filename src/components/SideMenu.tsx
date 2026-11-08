@@ -61,7 +61,7 @@ export const SideMenu = (props: SideMenuProps) => {
   return (
     <View width={MENU_WIDTH} height={1080} color="#0b1d33ff" alpha={props.hidden ? 0 : 1}>
       <Text x={40} y={56} fontSize={44}>
-        TiviPlayer
+        Velio
       </Text>
       <Column
         ref={props.ref}

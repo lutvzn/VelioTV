@@ -29,7 +29,7 @@
 //   "timeoutSeconds": 300   how long restore waits for the imports
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!app?.restoreFrom) return { error: "this build has no backup: deploy the app first" };
   const { phase, url, timeoutSeconds = 300 } = input;
   const { library, lineup, edits, settings, liveView } = app;

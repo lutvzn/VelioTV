@@ -2,7 +2,7 @@
 // player does until the app is shown again; then plays a stream through a
 // pretend network drop. Something must bring the app back while it waits,
 // such as the remote's app list, or from the dev machine:
-//   tizen run -s <tv-ip>:26101 -p TiviPlayer.TiviPlayer
+//   tizen run -s <tv-ip>:26101 -p VelioTVapp.Velio
 // It waits up to `hiddenMs` (default 60 s) for that; all of it takes about
 // 40 s more.
 //
@@ -13,9 +13,9 @@
 // Input: { "server": "http://<dev-ip>:8090", "hiddenMs": 60000, "skip": ["hide"|"network"] }
 
 async function probe(input) {
-  const app = window.tiviplayer;
+  const app = window.velio;
   if (!app?.player?.suspend || !app?.live)
-    return { error: "window.tiviplayer.player.suspend is missing: deploy a newer build" };
+    return { error: "window.velio.player.suspend is missing: deploy a newer build" };
   const { player, live } = app;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const log = (label, value) => console.log("[probe]", label, JSON.stringify(value));
