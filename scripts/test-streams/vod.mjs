@@ -124,6 +124,23 @@ const pad = n => String(n).padStart(2, "0");
 export const episodeCode = episode => `S${pad(episode.season)} E${pad(episode.episode)}`;
 const duration = () => `00:${pad(Math.floor(FILM_SECONDS / 60))}:${pad(FILM_SECONDS % 60)}`;
 
+// The film's subtitles as a separate file, as subtitle add-ons give them:
+// one a second, for 800 ms, saying its format and the time the film's clock
+// shows then, such as "SRT 0:01:05", so a TV test can check they keep time.
+export const filmSubtitles = format => {
+  const time = (seconds, ms) => {
+    const sep = format === "srt" ? "," : ".";
+    return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}${sep}${ms}`;
+  };
+  const label = format.toUpperCase();
+  const cues = Array.from({ length: FILM_SECONDS }, (_, s) => {
+    const clock = `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+    const cue = `${time(s, "000")} --> ${time(s, "800")}\n${label} ${clock}\n`;
+    return format === "srt" ? `${s + 1}\n${cue}` : cue;
+  });
+  return `${format === "vtt" ? "WEBVTT\n\n" : ""}${cues.join("\n")}`;
+};
+
 // The Xtream API's answers (player_api.php actions).
 export const xtreamVod = {
   categories: library =>

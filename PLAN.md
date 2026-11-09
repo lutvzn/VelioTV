@@ -502,6 +502,17 @@ Storage first, as it's the one place users can lose data today; then older TVs, 
    - **Holding Up or Down in the guide's channels and in the posters** (asked by the user, 2026-11-09) speeds up the same way, and each list's top speed is set in Settings → "Scrolling speed" (`src/pages/settings/ScrollingPage.tsx`): groups, TV guide channels, rows of posters, each 5, 10, 15, 20, 30, 40 or 60 a second, 20 to start. Under 8, the speed is the top from the start. They're kept with the app's settings (`holdSpeeds`) and in backups.
      - **On the TV** (the user's source: 14,267 channels, 36,813 films): held 4 s, the guide's channels moved 55 rows at 59.3–60.1 fps, the longest frame 51 ms; set to 5 a second, 14 in 3 s. The posters moved 54 rows, but at 48–49 fps with frames up to 120 ms: each row passed made 8 posters, with their pictures, titles and focus rings. Now rows that appear while the held key moves the cursor by itself show the bare card, and their pictures and titles once it stops (`Artwork`'s `wait`, `heldRacing`): 55 rows at 56–57 fps, the longest frame 35–39 ms. Making the focus ring for the focused poster only made no clear difference, so it stays as it was.
 
+## Stremio add-ons (looked into, 2026-11-09)
+
+The user asked whether Velio could use Stremio add-ons: catalogs, details, streams and subtitles from web services, matched by IMDb id. Only streams with a direct `url` could play; torrent results (`infoHash`) need a streaming server the TV can't run. Not planned yet; tests on the TV first.
+
+1. **Subtitles from a separate file** (`external-subtitles` probe, about 1.5 minutes; the test server's `/vod/film.srt` and `/vod/film.vtt`, one a second, each saying the time on the film's clock; the film as MP4): AVPlay's `setExternalSubtitlePath()` takes only a plain path on the TV.
+   - A web address (SRT or VTT), or a `file://` URI: refused with `PLAYER_ERROR_INVALID_PARAMETER`, before and after prepare.
+   - A copy saved in `wgt-private` with `tizen.filesystem` (about 16 KB), given by its path (`/home/owner/apps_rw/VelioTVapp/data/…`: `toURI()` without the `file://`) before prepare: SRT and VTT both played. AVPlay lists the file as a text track (`fourCC` `text/plain`, language "un") and sends each line to `onsubtitlechange`, as it does for subtitles in the stream, so the app's own drawing works unchanged. Each line came 1–2 ms after its time (the first 25–36 ms), for its 800 ms, and still kept time after a seek to 2:00. The user saw both on the TV, drawn over the film.
+   - Once, with the SRT file set, the film didn't open within 15 s; run again, it played.
+   - **So:** the app downloads the add-on's file, saves it in `wgt-private` and gives AVPlay its path. The other way, parsing the file and drawing each line by the player's time, stays for files AVPlay can't read, and for the desktop and LG.
+   - Not tested yet: text with accents and other non-English letters, files that aren't UTF-8, styling tags such as `<i>`, MKV and HLS films, and Tizen 3, whose `tizen.filesystem` lacks `openFile()` and `toURI()` (the older `resolve()` API would be needed).
+
 ## What you need before starting
 
 - **TVs:** at least one Samsung in developer mode now, and an LG in developer mode by Phase 9. The oldest models you own set the realistic support floor.

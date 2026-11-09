@@ -40,6 +40,8 @@
 // run, its clock on screen:
 //   /vod/film.mp4, .mkv, .ts     with range requests
 //   /vod/film.m3u8               HLS, as a VOD playlist
+//   /vod/film.srt, .vtt          its subtitles as a separate file, one a
+//                                second, saying the time on its clock
 //   /poster/<channels>/(film|series)/<id>.svg
 //   /backdrop/<channels>/(film|series)/<id>.svg   a wide picture, in
 //                                Xtream's film and series details
@@ -93,7 +95,7 @@ import {
   subtitles,
 } from "./streams.mjs";
 import { handleXtream } from "./xtream.mjs";
-import { backdropSvg, FILM_SECONDS, posterSvg, vodLibrary, vodLines } from "./vod.mjs";
+import { backdropSvg, FILM_SECONDS, filmSubtitles, posterSvg, vodLibrary, vodLines } from "./vod.mjs";
 
 const option = (name, fallback) => {
   const at = process.argv.indexOf(`--${name}`);
@@ -295,6 +297,11 @@ const serveFilm = (req, res, url) => {
     if (whole[1] === "m3u8")
       return (sendFile(req, res, filmPath("m3u8"), "application/vnd.apple.mpegurl"), true);
     return (sendFile(req, res, filmPath(whole[1]), FILM_TYPES[whole[1]]), true);
+  }
+  const subtitleFile = url.pathname.match(/^\/vod\/film\.(srt|vtt)$/);
+  if (subtitleFile) {
+    const type = subtitleFile[1] === "vtt" ? "text/vtt" : "application/x-subrip";
+    return (send(res, 200, filmSubtitles(subtitleFile[1]), `${type}; charset=utf-8`), true);
   }
   const segment = url.pathname.match(/^\/vod\/film\/(seg\d+\.ts)$/);
   if (segment) {
@@ -534,6 +541,7 @@ const index = host => {
     },
     backup: { sample: `${base}/backup/sample.json`, yours: `${base}/backup/<name>.json` },
     film: ["mp4", "mkv", "ts", "m3u8"].map(ext => `${base}/vod/film.${ext}`),
+    filmSubtitles: ["srt", "vtt"].map(ext => `${base}/vod/film.${ext}`),
     catchupLog: `${base}/catchup/log`,
   };
 };
