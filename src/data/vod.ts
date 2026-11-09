@@ -78,6 +78,8 @@ export interface FilmDetails {
   durationMs?: number;
   year?: number;
   poster?: string;
+  /** A wide picture from the film, for behind its page. */
+  backdrop?: string;
 }
 
 /** A series' details and episodes, by season. */
@@ -85,6 +87,8 @@ export interface SeriesDetails {
   plot?: string;
   cast?: string;
   genre?: string;
+  /** A wide picture from the series, for behind its page. */
+  backdrop?: string;
   seasons: { season: number; episodes: Episode[] }[];
 }
 
@@ -285,6 +289,13 @@ export const xtreamVod = async (login: XtreamLogin, fetcher: typeof fetch) => {
   return result;
 };
 
+/** Xtream's `backdrop_path`: a list of addresses, or on some servers one. */
+const backdropOf = (info: Json) => {
+  const value = info.backdrop_path;
+  const first = Array.isArray(value) ? (value as unknown[]).find(one => text(one)) : value;
+  return text(first) || undefined;
+};
+
 const durationOf = (info: Json) => {
   const seconds = number(info.duration_secs);
   if (seconds) return seconds * 1000;
@@ -319,6 +330,8 @@ export const xtreamFilmInfo = async (
   if (year) details.year = year;
   const poster = text(info.movie_image) || text(info.cover_big);
   if (poster) details.poster = poster;
+  const backdrop = backdropOf(info);
+  if (backdrop) details.backdrop = backdrop;
   return details;
 };
 
@@ -339,6 +352,8 @@ export const xtreamSeriesInfo = async (
     const value = text(info[key]);
     if (value) details[key] = value;
   }
+  const backdrop = backdropOf(info);
+  if (backdrop) details.backdrop = backdrop;
   // { "1": [...], "2": [...] }, or on some servers a list of lists.
   const groups = isObject(root.episodes) ? Object.values(root.episodes) : [];
   const bySeason = new Map<number, Episode[]>();

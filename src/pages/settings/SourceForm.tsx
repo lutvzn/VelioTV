@@ -12,6 +12,7 @@ import {
   type SourceKind,
 } from "../../data/sources";
 import { edits, library, watched } from "../../library";
+import { BOLD, colors } from "../../theme";
 import { $t, $tn } from "../../translate";
 import { statusLines } from "./status";
 
@@ -229,17 +230,17 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
         </Show>
       </Column>
 
-      <Text x={80} y={50} fontSize={56}>
+      <Text x={80} y={56} fontSize={52} fontFamily={BOLD}>
         {existing ? $t("source.edit") : $t("source.add")}
       </Text>
       <Show when={status()}>
         {lines => (
-          <Text x={80} y={128} width={1400} contain="width" maxLines={1} fontSize={26} color="#ffffffb3">
+          <Text x={80} y={128} width={1400} contain="width" maxLines={1} fontSize={26} color={colors.textDim}>
             {lines().filter(Boolean).join(". ")}
           </Text>
         )}
       </Show>
-      <Text x={80} y={1010} width={FIELD_WIDTH} contain="width" fontSize={28} color="#ff8a80ff">
+      <Text x={80} y={1010} width={FIELD_WIDTH} contain="width" fontSize={28} color={colors.danger}>
         {problem()}
       </Text>
     </View>

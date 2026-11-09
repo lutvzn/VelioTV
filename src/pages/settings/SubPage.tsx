@@ -2,6 +2,7 @@ import { Text, View } from "@solidtv/solid";
 import { Column } from "@solidtv/solid/primitives";
 import type { JSX } from "solid-js";
 import { FIELD_WIDTH } from "../../components/Form";
+import { BOLD, colors } from "../../theme";
 
 /**
  * A Settings page in place of the list: a title, a column of fields that
@@ -29,10 +30,10 @@ export const SubPage = (props: {
         {props.children}
       </Column>
     </View>
-    <Text x={80} y={50} fontSize={56}>
+    <Text x={80} y={56} fontSize={52} fontFamily={BOLD}>
       {props.title}
     </Text>
-    <Text x={80} y={128} width={1400} contain="width" maxLines={1} fontSize={26} color="#ffffffb3">
+    <Text x={80} y={128} width={1400} contain="width" maxLines={1} fontSize={26} color={colors.textDim}>
       {props.intro ?? ""}
     </Text>
     <Text
@@ -42,7 +43,7 @@ export const SubPage = (props: {
       contain="width"
       maxLines={1}
       fontSize={28}
-      color={props.problem ? "#ff8a80ff" : "#7fb2ffff"}
+      color={props.problem ? colors.danger : colors.accentText}
     >
       {props.message ?? ""}
     </Text>

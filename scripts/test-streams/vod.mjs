@@ -153,6 +153,8 @@ export const xtreamVod = {
     return {
       info: {
         movie_image: film.poster ? `${base}${film.poster}` : "",
+        // Films with a poster have a backdrop too; real servers often send none.
+        backdrop_path: film.poster ? [`${base}${backdropPath(film.poster)}`] : [],
         name: film.name,
         plot: film.plot,
         cast: film.cast.join(", "),
@@ -205,6 +207,7 @@ export const xtreamVod = {
       info: {
         name: show.name,
         cover: `${base}${show.poster}`,
+        backdrop_path: [`${base}${backdropPath(show.poster)}`],
         plot: show.plot,
         cast: show.cast.join(", "),
         director: show.director,
@@ -259,6 +262,30 @@ export const vodLines = (library, base, url) => {
 };
 
 const escapeXml = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+/** The backdrop's address for a poster's: /poster/... becomes /backdrop/.... */
+const backdropPath = poster => poster.replace(/^\/poster\//, "/backdrop/");
+
+/**
+ * A backdrop: a wide 16:9 picture in the poster's colours, with soft shapes
+ * and no title, as a still from a film would have.
+ */
+export const backdropSvg = (library, kind, id) => {
+  const item = (kind === "film" ? library.films : library.series).find(one => one.id === id);
+  if (!item) return undefined;
+  const hue = hash(item.name) % 360;
+  const other = (hue + 40) % 360;
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">`,
+    `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${other} 60% 16%)"/><stop offset="1" stop-color="hsl(${hue} 55% 38%)"/></linearGradient>`,
+    `<radialGradient id="r" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="hsl(${hue} 70% 70%)" stop-opacity="0.55"/><stop offset="1" stop-color="hsl(${hue} 70% 70%)" stop-opacity="0"/></radialGradient></defs>`,
+    `<rect width="1280" height="720" fill="url(#g)"/>`,
+    `<circle cx="${880 + (hash(item.name + "x") % 200)}" cy="${220 + (hash(item.name + "y") % 200)}" r="360" fill="url(#r)"/>`,
+    `<path d="M0 560 L320 420 L560 520 L860 360 L1280 520 L1280 720 L0 720 Z" fill="hsl(${other} 50% 10%)" fill-opacity="0.7"/>`,
+    `<text x="1240" y="680" font-family="sans-serif" font-size="28" fill="#ffffff80" text-anchor="end">${kind === "film" ? "Film" : "Series"} ${id}</text>`,
+    `</svg>`,
+  ].join("");
+};
 
 /** A poster: a coloured 2:3 card with the title on it. */
 export const posterSvg = (library, kind, id) => {

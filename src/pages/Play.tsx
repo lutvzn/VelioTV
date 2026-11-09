@@ -14,6 +14,8 @@ import { takePlay, type CatchupPlay, type PlayRequest, type VodPlay } from "../p
 import { createSeeker } from "../play/seeker";
 import { player } from "../player";
 import type { Stream } from "../player/player";
+import { BottomScrim } from "../components/BottomScrim";
+import { BOLD, colors, radius } from "../theme";
 import { $t } from "../translate";
 import { FULL_SCREEN } from "../videoWindow";
 import { TrackPanel } from "./live/TrackPanel";
@@ -481,7 +483,7 @@ export default () => {
     >
       <Show when={status()}>
         {text => (
-          <View x={560} y={470} width={800} height={110} borderRadius={16} color="#071423d9">
+          <View x={560} y={470} width={800} height={110} borderRadius={radius.xlarge} color={colors.dialog}>
             <Text
               width={800}
               height={110}
@@ -506,8 +508,8 @@ export default () => {
             display="flex"
             flexBoundary="contain"
             padding={[12, 28]}
-            borderRadius={10}
-            color="#000000bf"
+            borderRadius={radius.medium}
+            color={colors.caption}
           >
             <Text maxWidth={1500} maxLines={3} textAlign="center" fontSize={42}>
               {text()}
@@ -516,29 +518,45 @@ export default () => {
         )}
       </Show>
       <Show when={barShown() && request()}>
-        <View y={1080 - BAR_HEIGHT} width={1920} height={BAR_HEIGHT} color="#071423eb">
-          <Text x={BAR_X} y={34} width={1300} maxLines={1} contain="width" fontSize={46}>
+        <View y={1080 - BAR_HEIGHT} width={1920} height={BAR_HEIGHT}>
+          <BottomScrim height={BAR_HEIGHT} />
+          <Text x={BAR_X} y={34} width={1300} maxLines={1} contain="width" fontSize={46} fontFamily={BOLD}>
             {title()}
           </Text>
-          <Text x={1840} y={40} mountX={1} fontSize={40}>
+          <Text x={1840} y={40} mountX={1} fontSize={40} fontFamily={BOLD}>
             {clockTime(tick())}
           </Text>
-          <Text x={BAR_X} y={98} width={1300} maxLines={1} contain="width" fontSize={28} color="#ffffffb3">
+          <Text
+            x={BAR_X}
+            y={98}
+            width={1300}
+            maxLines={1}
+            contain="width"
+            fontSize={28}
+            color={colors.textDim}
+          >
             {subtitle()}
           </Text>
           <Show when={paused() || seeker.target() !== undefined}>
-            <Text x={1840} y={98} mountX={1} fontSize={28} color="#7fb2ffff">
+            <Text
+              x={1840}
+              y={98}
+              mountX={1}
+              fontSize={28}
+              fontFamily={BOLD}
+              color={seeker.target() === undefined ? colors.accentText : colors.gold}
+            >
               {paused() ? $t("play.paused") : $t("play.seeking")}
             </Text>
           </Show>
-          <View x={BAR_X} y={158} width={BAR_WIDTH} height={8} borderRadius={4} color="#ffffff1f" />
+          <View x={BAR_X} y={158} width={BAR_WIDTH} height={8} borderRadius={4} color={colors.track} />
           <View
             x={BAR_X}
             y={158}
             width={BAR_WIDTH * airedFraction()}
             height={8}
             borderRadius={4}
-            color="#ffffff40"
+            color={colors.track}
           />
           <View
             x={BAR_X}
@@ -546,22 +564,23 @@ export default () => {
             width={BAR_WIDTH * fraction()}
             height={8}
             borderRadius={4}
-            color={seeker.target() === undefined ? "#7fb2ffff" : "#ffd166ff"}
+            color={seeker.target() === undefined ? colors.accent : colors.gold}
           />
           <View
             x={BAR_X + BAR_WIDTH * fraction()}
             y={162}
             mountX={0.5}
             mountY={0.5}
-            width={22}
-            height={22}
-            borderRadius={11}
-            color={seeker.target() === undefined ? "#ffffffff" : "#ffd166ff"}
+            width={24}
+            height={24}
+            borderRadius={12}
+            color={seeker.target() === undefined ? colors.focus : colors.gold}
+            shadow={{ color: "#00000099", blur: 12, spread: 0, x: 0, y: 2 }}
           />
           <Text x={BAR_X} y={180} fontSize={28}>
             {leftText()}
           </Text>
-          <Text x={1840} y={180} mountX={1} fontSize={28} color="#ffffffb3">
+          <Text x={1840} y={180} mountX={1} fontSize={28} color={colors.textDim}>
             {rightText()}
           </Text>
         </View>

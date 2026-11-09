@@ -3,6 +3,7 @@ import { batch, createEffect, createMemo, createSignal, Index } from "solid-js";
 import type { Channel } from "../../data/lineup";
 import { exposeToProbes } from "../../devHooks";
 import { scrollTop, wrapIndex } from "../../live/listWindow";
+import { BOLD, colors, radius, textOn } from "../../theme";
 import { channelMenu, type Menu, type MenuOption } from "./menus";
 
 export type { Menu, MenuOption } from "./menus";
@@ -87,7 +88,7 @@ export const OptionsPanel = (props: {
       x={props.x}
       width={OPTIONS_WIDTH}
       height={1080}
-      color="#071423f2"
+      color={colors.panel}
       onUp={() => move(-1)}
       onDown={() => move(1)}
       onEnter={() => {
@@ -105,7 +106,8 @@ export const OptionsPanel = (props: {
       // Every other key stops here.
       onKeyPress={() => true}
     >
-      <Text x={32} y={56} width={ROW_WIDTH} maxLines={1} contain="width" fontSize={36}>
+      <View width={1} height={1080} color={colors.line} />
+      <Text x={40} y={58} width={ROW_WIDTH - 16} maxLines={1} contain="width" fontSize={34} fontFamily={BOLD}>
         {level().menu.title}
       </Text>
       <Index each={SLOTS}>
@@ -118,9 +120,9 @@ export const OptionsPanel = (props: {
               y={ROWS_Y + slot() * ROW_HEIGHT}
               width={ROW_WIDTH}
               height={ROW_HEIGHT - 6}
-              borderRadius={10}
+              borderRadius={radius.medium}
               alpha={option() ? 1 : 0}
-              color={at() === level().cursor ? "#2e6bd6ff" : "#00000000"}
+              color={at() === level().cursor ? colors.focus : colors.transparent}
             >
               <Text
                 x={24}
@@ -129,8 +131,9 @@ export const OptionsPanel = (props: {
                 lineHeight={ROW_HEIGHT - 6}
                 maxLines={1}
                 contain="width"
-                fontSize={32}
-                color={option()?.dim ? "#ffffffb3" : "#ffffffff"}
+                fontSize={30}
+                fontFamily={at() === level().cursor ? BOLD : undefined}
+                color={textOn(at() === level().cursor, option()?.dim)}
               >
                 {option()?.label ?? ""}
               </Text>

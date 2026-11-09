@@ -13,6 +13,8 @@ import { PinPage } from "./settings/PinPage";
 import { RemindersPage } from "./settings/RemindersPage";
 import { SourceForm } from "./settings/SourceForm";
 import { progressFraction, statusLines } from "./settings/status";
+import { Glow } from "../components/Glow";
+import { BOLD, colors, radius, RING } from "../theme";
 
 // Settings: the sources, in the order the lineup takes them, then pages for
 // hidden channels and groups, the parental PIN, the app's own settings,
@@ -28,21 +30,34 @@ const PAGES: { page: Page; label: TextKey }[] = [
   { page: "backup", label: "settings.backup" },
 ];
 
+const LEFT = 64;
+/** Room round the list for the focused row's glow, which clipping would cut. */
+const GLOW_ROOM = 24;
 const LIST_WIDTH = 1200;
-const ROW_HEIGHT = 124;
+const ROW_HEIGHT = 140;
+const TILE = 76;
+const TEXT_X = 28 + TILE + 24;
 
+/**
+ * A source as a card: an icon, its name and whether it's on, then what it
+ * holds and when it was updated. The focus rings it in cyan and lights it,
+ * rather than filling it, as its lines are in several colours.
+ */
 const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) => {
   const [focused, setFocused] = createSignal(false);
   const status = () => library.statusOf(props.source.id);
   const lines = () => statusLines(status(), props.now);
   const fraction = () => (status().importing ? progressFraction(status().progress) : undefined);
   const failed = () => !status().importing && status().state?.status === "failed";
+  const kind = () => (props.source.kind === "xtream" ? $t("source.kind.xtream") : $t("source.kind.m3u"));
+  const inset = () => (focused() ? RING : 1);
   return (
     <View
       width={LIST_WIDTH}
       height={ROW_HEIGHT}
-      borderRadius={12}
-      color={focused() ? "#2e6bd6ff" : "#ffffff14"}
+      borderRadius={radius.large}
+      // Shows as the card's edge: a hairline, or the focus ring.
+      color={focused() ? colors.focus : colors.line}
       alpha={props.source.disabled ? 0.6 : 1}
       onFocusChanged={setFocused}
       onEnter={() => {
@@ -50,43 +65,105 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
         return true;
       }}
     >
-      <Text x={28} y={16} width={800} maxLines={1} contain="width" fontSize={34}>
+      <Glow width={LIST_WIDTH} height={ROW_HEIGHT} borderRadius={radius.large} shown={focused()} />
+      <View
+        x={inset()}
+        y={inset()}
+        width={LIST_WIDTH - 2 * inset()}
+        height={ROW_HEIGHT - 2 * inset()}
+        borderRadius={radius.large - inset()}
+        color={focused() ? colors.highlight : colors.card}
+      />
+      <View
+        x={28}
+        y={(ROW_HEIGHT - TILE) / 2}
+        width={TILE}
+        height={TILE}
+        borderRadius={radius.medium}
+        color={colors.accentWash}
+      >
+        <View
+          x={(TILE - 40) / 2}
+          y={(TILE - 40) / 2}
+          width={40}
+          height={40}
+          src="assets/icons/live.png"
+          color={colors.accentText}
+        />
+      </View>
+      <Text
+        x={TEXT_X}
+        y={22}
+        width={LIST_WIDTH - TEXT_X - 200}
+        maxLines={1}
+        contain="width"
+        fontSize={32}
+        fontFamily={BOLD}
+        color={focused() ? colors.accentText : colors.text}
+      >
         {props.source.name}
       </Text>
-      <Text x={LIST_WIDTH - 28} y={22} mountX={1} fontSize={24} color="#ffffffb3">
-        {(props.source.kind === "xtream" ? $t("source.kind.xtream") : $t("source.kind.m3u")) +
-          (props.source.disabled ? `  ·  ${$t("source.off")}` : "")}
-      </Text>
+      {/* Whether the source is on, as a badge on the right. */}
+      <View
+        x={LIST_WIDTH - 28}
+        y={24}
+        mountX={1}
+        height={36}
+        display="flex"
+        flexBoundary="contain"
+        padding={[0, 16]}
+        borderRadius={18}
+        color={props.source.disabled ? colors.surfaceRaised : colors.accentWash}
+      >
+        <Text
+          height={36}
+          lineHeight={36}
+          fontSize={20}
+          fontFamily={BOLD}
+          letterSpacing={2}
+          color={props.source.disabled ? colors.textDim : colors.accentText}
+        >
+          {(props.source.disabled ? $t("source.off") : $t("source.on")).toUpperCase()}
+        </Text>
+      </View>
       <Text
-        x={28}
-        y={62}
-        width={LIST_WIDTH - 56}
+        x={TEXT_X}
+        y={68}
+        width={LIST_WIDTH - TEXT_X - 28}
         maxLines={1}
         contain="width"
         fontSize={24}
-        color="#ffffffcc"
+        color={colors.textDim}
       >
-        {lines()[0]}
+        {`${kind()}   ·   ${lines()[0]}`}
       </Text>
       <Text
-        x={28}
-        y={90}
-        width={LIST_WIDTH - 56}
+        x={TEXT_X}
+        y={100}
+        width={LIST_WIDTH - TEXT_X - 28}
         maxLines={1}
         contain="width"
         fontSize={22}
-        color={failed() ? "#ff8a80ff" : "#ffffff99"}
+        color={failed() ? colors.danger : colors.textFaint}
       >
         {lines()[1]}
       </Text>
       <Show when={fraction() !== undefined}>
-        <View x={12} y={ROW_HEIGHT - 8} width={LIST_WIDTH - 24} height={4} color="#ffffff26" />
         <View
-          x={12}
-          y={ROW_HEIGHT - 8}
-          width={(LIST_WIDTH - 24) * (fraction() ?? 0)}
+          x={TEXT_X}
+          y={ROW_HEIGHT - 12}
+          width={LIST_WIDTH - TEXT_X - 28}
           height={4}
-          color="#7fb2ffff"
+          borderRadius={2}
+          color={colors.track}
+        />
+        <View
+          x={TEXT_X}
+          y={ROW_HEIGHT - 12}
+          width={(LIST_WIDTH - TEXT_X - 28) * (fraction() ?? 0)}
+          height={4}
+          borderRadius={2}
+          color={colors.accent}
         />
       </Show>
     </View>
@@ -106,8 +183,10 @@ const SourceList = (props: {
   return (
     <>
       {/* First, so that the page's forwardFocus reaches the list. */}
-      <View x={80} y={210} width={LIST_WIDTH} height={840} clipping forwardFocus={0}>
+      <View x={LEFT} y={210} width={LIST_WIDTH + 2 * GLOW_ROOM} height={840} clipping forwardFocus={0}>
         <Column
+          x={GLOW_ROOM}
+          y={GLOW_ROOM}
           width={LIST_WIDTH}
           gap={16}
           scroll="edge"
@@ -125,29 +204,48 @@ const SourceList = (props: {
             onEnter={() => props.onOpen(library.sources().length)}
           />
           <Show when={library.sources().length === 0}>
-            <Text width={LIST_WIDTH} contain="width" fontSize={28} color="#ffffffb3" skipFocus>
+            <Text width={LIST_WIDTH} contain="width" fontSize={28} color={colors.textDim} skipFocus>
               {$t("settings.noSources")}
             </Text>
           </Show>
-          <Text width={LIST_WIDTH} height={60} marginTop={24} fontSize={34} color="#ffffffb3" skipFocus>
-            {$t("settings.more")}
+          <Text
+            width={LIST_WIDTH}
+            height={60}
+            marginTop={24}
+            lineHeight={60}
+            fontSize={22}
+            fontFamily={BOLD}
+            letterSpacing={3}
+            color={colors.accentText}
+            skipFocus
+          >
+            {$t("settings.more").toUpperCase()}
           </Text>
           <For each={PAGES}>
             {(entry, at) => (
               <FormButton
                 label={$t(entry.label)}
                 width={LIST_WIDTH}
+                opens
                 onEnter={() => props.onPage(library.sources().length + 1 + at(), entry.page)}
               />
             )}
           </For>
         </Column>
       </View>
-      <Text x={80} y={50} fontSize={56}>
+      <Text x={LEFT + GLOW_ROOM} y={52} fontSize={56} fontFamily={BOLD}>
         {$t("menu.settings")}
       </Text>
-      <Text x={80} y={150} fontSize={34} color="#ffffffb3">
-        {$t("settings.sources")}
+      <View x={LEFT + GLOW_ROOM} y={136} width={LIST_WIDTH} height={1} color={colors.line} />
+      <Text
+        x={LEFT + GLOW_ROOM}
+        y={162}
+        fontSize={22}
+        fontFamily={BOLD}
+        letterSpacing={3}
+        color={colors.accentText}
+      >
+        {$t("settings.sources").toUpperCase()}
       </Text>
     </>
   );

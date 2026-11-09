@@ -1,34 +1,61 @@
 import { type ElementNode, Text, View } from "@solidtv/solid";
 import { Column, type KeyHandler } from "@solidtv/solid/primitives";
 import { createSignal, For } from "solid-js";
+import { OVERLAY_Z } from "../pages/live/ChannelOptions";
 import type { Section } from "../sections";
+import { BOLD, colors, motion, radius } from "../theme";
 import { $t, type TextKey } from "../translate";
+import { Glow } from "./Glow";
 
-export const MENU_WIDTH = 360;
-const ITEM_WIDTH = MENU_WIDTH - 48;
-const ITEM_HEIGHT = 72;
+/** The rail's width at rest, which pages start right of. */
+export const MENU_WIDTH = 96;
+/** Its width while it has the focus, drawn over the page. */
+const OPEN_WIDTH = 340;
+const ITEM_X = 16;
+const ITEM_SIZE = 64;
+const OPEN_ITEM_WIDTH = OPEN_WIDTH - 2 * ITEM_X;
+const ICON_SIZE = 32;
+const LOGO_SIZE = 52;
+const LOGO_X = (MENU_WIDTH - LOGO_SIZE) / 2;
+const ITEMS_Y = 200;
+/** The shade the open rail casts over the page. */
+const SHADE_WIDTH = 260;
 
-const MenuItem = (props: { label: TextKey; current: boolean }) => {
+const MenuItem = (props: { label: TextKey; icon: string; current: boolean; open: boolean }) => {
   const [focused, setFocused] = createSignal(false);
-  const color = () => {
-    if (focused()) return "#2e6bd6ff";
-    return props.current ? "#ffffff1f" : "#00000000";
+  const width = () => (props.open ? OPEN_ITEM_WIDTH : ITEM_SIZE);
+  const ink = () => {
+    if (focused()) return colors.onFocus;
+    return props.current ? colors.accentText : colors.textDim;
   };
 
   return (
     <View
-      width={ITEM_WIDTH}
-      height={ITEM_HEIGHT}
-      borderRadius={12}
-      color={color()}
+      width={width()}
+      height={ITEM_SIZE}
+      borderRadius={radius.large}
+      color={props.current && !focused() ? colors.accentWash : colors.transparent}
+      transition={{ width: motion.normal, color: motion.quick }}
       onFocusChanged={setFocused}
     >
+      <Glow width={width()} height={ITEM_SIZE} borderRadius={radius.large} shown={focused()} />
+      <View
+        x={(ITEM_SIZE - ICON_SIZE) / 2}
+        y={(ITEM_SIZE - ICON_SIZE) / 2}
+        width={ICON_SIZE}
+        height={ICON_SIZE}
+        src={props.icon}
+        color={ink()}
+      />
       <Text
-        x={24}
-        height={ITEM_HEIGHT}
-        lineHeight={ITEM_HEIGHT}
-        fontSize={34}
-        color={focused() || props.current ? "#ffffffff" : "#ffffffb3"}
+        x={ITEM_SIZE + 4}
+        height={ITEM_SIZE}
+        lineHeight={ITEM_SIZE}
+        fontSize={28}
+        fontFamily={focused() || props.current ? BOLD : undefined}
+        color={focused() ? colors.onFocus : props.current ? colors.text : colors.textDim}
+        alpha={props.open ? 1 : 0}
+        transition={{ alpha: motion.normal }}
       >
         {$t(props.label)}
       </Text>
@@ -49,30 +76,88 @@ interface SideMenuProps {
   onBack?: KeyHandler;
 }
 
-// The menu on the left. Moving up and down opens each section straight away.
+/**
+ * The menu: a rail of icons on the left that widens over the page, with the
+ * sections' names, while it has the focus. Moving up and down opens each
+ * section straight away.
+ */
 export const SideMenu = (props: SideMenuProps) => {
+  const [open, setOpen] = createSignal(false);
   // Follows the page, which can also change from the pages themselves.
   const currentIndex = () =>
     Math.max(
       0,
       props.sections.findIndex(section => section.path === props.currentPath),
     );
+  const width = () => (open() ? OPEN_WIDTH : MENU_WIDTH);
 
   return (
-    <View width={MENU_WIDTH} height={1080} color="#0b1d33ff" alpha={props.hidden ? 0 : 1}>
-      <Text x={40} y={56} fontSize={44}>
+    // The rail's panel is its root. Its zIndex draws the page's text before
+    // it, which the renderer would otherwise draw over the open rail
+    // (PLAN.md, Phase 5, step 1, "Text showing through the panel").
+    <View
+      width={width()}
+      height={1080}
+      color={colors.menu}
+      zIndex={OVERLAY_Z}
+      alpha={props.hidden ? 0 : 1}
+      transition={{ width: motion.normal, alpha: motion.quick }}
+    >
+      <View
+        x={width()}
+        width={SHADE_WIDTH}
+        height={1080}
+        colorLeft={colors.caption}
+        colorRight={colors.transparent}
+        alpha={open() ? 1 : 0}
+        transition={{ x: motion.normal, alpha: motion.normal }}
+      />
+      <View x={width() - 1} width={1} height={1080} color={colors.line} transition={{ x: motion.normal }} />
+      <View
+        x={LOGO_X}
+        y={48}
+        width={LOGO_SIZE}
+        height={LOGO_SIZE}
+        borderRadius={radius.large}
+        colorTop={colors.accentTop}
+        colorBottom={colors.accentBottom}
+      >
+        <Text
+          width={LOGO_SIZE}
+          height={LOGO_SIZE}
+          lineHeight={LOGO_SIZE}
+          contain="width"
+          textAlign="center"
+          fontSize={32}
+          fontFamily={BOLD}
+          color={colors.onFocus}
+        >
+          V
+        </Text>
+      </View>
+      <Text
+        x={LOGO_X + LOGO_SIZE + 18}
+        y={48}
+        height={LOGO_SIZE}
+        lineHeight={LOGO_SIZE}
+        fontSize={38}
+        fontFamily={BOLD}
+        alpha={open() ? 1 : 0}
+        transition={{ alpha: motion.normal }}
+      >
         Velio
       </Text>
       <Column
         ref={props.ref}
         autofocus={props.autofocus}
-        x={24}
-        y={170}
-        width={ITEM_WIDTH}
-        height={1080 - 200}
-        gap={12}
+        x={ITEM_X}
+        y={ITEMS_Y}
+        width={OPEN_ITEM_WIDTH}
+        height={1080 - ITEMS_Y - 160}
+        gap={14}
         scroll="none"
         selected={currentIndex()}
+        onFocusChanged={setOpen}
         // Column also reports the selection each time the menu takes focus;
         // only an actual move opens a section.
         onSelectedChanged={(index, _menu, _item, lastIndex) => {
@@ -82,17 +167,36 @@ export const SideMenu = (props: SideMenuProps) => {
         onBack={props.onBack}
       >
         <For each={props.sections}>
-          {section => <MenuItem label={section.label} current={section.path === props.currentPath} />}
+          {section => (
+            <MenuItem
+              label={section.label}
+              icon={section.icon}
+              current={section.path === props.currentPath}
+              open={open()}
+            />
+          )}
         </For>
       </Column>
+      {/* An import in progress: a dot on the rail, and its words when open. */}
+      <View
+        x={(MENU_WIDTH - 12) / 2}
+        y={1080 - 72}
+        width={12}
+        height={12}
+        borderRadius={6}
+        color={colors.gold}
+        alpha={props.status && !open() ? 1 : 0}
+      />
       <Text
-        x={40}
+        x={ITEM_X + 8}
         y={1080 - 110}
-        width={MENU_WIDTH - 64}
+        width={OPEN_WIDTH - 2 * ITEM_X - 16}
         contain="width"
         maxLines={2}
+        lineHeight={30}
         fontSize={22}
-        color="#ffffffb3"
+        color={colors.textFaint}
+        alpha={open() ? 1 : 0}
       >
         {props.status ?? ""}
       </Text>

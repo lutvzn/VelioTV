@@ -4,6 +4,7 @@ import type { ProgrammeDetails } from "../../data/guideCodec";
 import type { Channel } from "../../data/lineup";
 import type { Cell } from "../../guide/timeline";
 import { progress, timeRange } from "../../live/format";
+import { BOLD, colors } from "../../theme";
 import { $t } from "../../translate";
 
 export interface GuideDetailsProps {
@@ -21,6 +22,11 @@ export interface GuideDetailsProps {
   /** What OK or the options can do with it, such as playing it from the catch-up. */
   note?: string;
 }
+
+/** The most letters of a channel's name its chip shows. */
+const CHIP_LETTERS = 48;
+const shorten = (text: string, letters: number) =>
+  text.length > letters ? `${text.slice(0, letters - 1).trimEnd()}…` : text;
 
 /** The highlighted programme, beside the preview: its title, time and description. */
 export const GuideDetails = (props: GuideDetailsProps) => {
@@ -43,13 +49,55 @@ export const GuideDetails = (props: GuideDetailsProps) => {
 
   return (
     <View x={props.x} y={props.y} width={props.width} height={330}>
-      <Text width={props.width} maxLines={1} contain="width" fontSize={28} color="#ffffffb3">
-        {props.channel ? `${props.number ?? ""}   ${props.channel.name}` : ""}
-      </Text>
+      {/* A badge for a programme on now, then the channel. */}
+      <View display="flex" flexDirection="row" gap={12} height={40}>
+        <Show when={onNow()}>
+          <View
+            display="flex"
+            flexBoundary="contain"
+            alignItems="center"
+            gap={10}
+            padding={[0, 18]}
+            height={40}
+            borderRadius={20}
+            color={colors.live}
+          >
+            <View width={10} height={10} borderRadius={5} color={colors.onLive} />
+            <Text fontSize={20} fontFamily={BOLD} letterSpacing={2} color={colors.onLive}>
+              {$t("guide.liveNow").toUpperCase()}
+            </Text>
+          </View>
+        </Show>
+        <Show when={props.channel}>
+          {channel => (
+            <View
+              display="flex"
+              flexBoundary="contain"
+              alignItems="center"
+              padding={[0, 18]}
+              height={40}
+              borderRadius={20}
+              color={colors.surfaceRaised}
+            >
+              {/* Sized by its words, so a long name is cut short here. */}
+              <Text maxLines={1} fontSize={22} fontFamily={BOLD}>
+                {`${props.number ?? ""}  ·  ${shorten(channel().name, CHIP_LETTERS)}`}
+              </Text>
+            </View>
+          )}
+        </Show>
+      </View>
       <Show
         when={programme()}
         fallback={
-          <Text y={50} width={props.width} maxLines={1} contain="width" fontSize={36} color="#ffffff99">
+          <Text
+            y={62}
+            width={props.width}
+            maxLines={1}
+            contain="width"
+            fontSize={36}
+            color={colors.textFaint}
+          >
             {emptyText()}
           </Text>
         }
@@ -57,51 +105,59 @@ export const GuideDetails = (props: GuideDetailsProps) => {
         {shown => (
           <>
             <Text
-              y={44}
+              y={54}
               width={props.width}
               maxLines={1}
               contain="width"
-              fontSize={42}
-              fontFamily="NotoSans700"
+              lineHeight={64}
+              fontSize={52}
+              fontFamily={BOLD}
             >
               {shown().title}
             </Text>
-            <Text y={106} width={props.width} maxLines={1} contain="width" fontSize={28} color="#ffffffcc">
+            <Text
+              y={126}
+              width={props.width}
+              maxLines={1}
+              contain="width"
+              fontSize={26}
+              color={colors.textDim}
+            >
               {`${props.day}   ${timeRange(shown().start, shown().stop)}${extra() ? `   ${extra()}` : ""}`}
             </Text>
             <Show when={onNow()}>
-              <View y={152} width={360} height={6} borderRadius={3} color="#ffffff33" />
+              <View y={173} width={360} height={6} borderRadius={3} color={colors.track} />
               <View
-                y={152}
+                y={173}
                 width={360 * progress(shown().start, shown().stop, props.now)}
                 height={6}
                 borderRadius={3}
-                color="#7fb2ffff"
+                color={colors.accent}
               />
             </Show>
             <Show when={props.note}>
               {note => (
                 <Text
                   x={onNow() ? 390 : 0}
-                  y={140}
+                  y={160}
                   width={props.width - (onNow() ? 390 : 0)}
                   maxLines={1}
                   contain="width"
                   fontSize={24}
-                  color="#7fb2ffff"
+                  color={colors.accentText}
                 >
                   {note()}
                 </Text>
               )}
             </Show>
             <Text
-              y={176}
+              y={200}
               width={props.width}
-              maxLines={4}
+              maxLines={3}
               contain="width"
               lineHeight={36}
               fontSize={26}
-              color="#ffffffb3"
+              color={colors.textDim}
             >
               {props.details?.description ?? ""}
             </Text>

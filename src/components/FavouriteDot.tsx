@@ -1,7 +1,8 @@
 import { View } from "@solidtv/solid";
 import { edits } from "../library";
+import { colors } from "../theme";
 
-export const FAVOURITE_COLOR = "#f2c14eff";
+export const FAVOURITE_COLOR = colors.gold;
 
 /**
  * The gold dot by a favourite channel's name (Noto Sans has no star). `y` is

@@ -136,9 +136,11 @@ describe("films and series", () => {
       plot: film.plot,
       director: film.director,
       durationMs: 360_000,
+      backdrop: `${BASE}${film.poster?.replace("/poster/", "/backdrop/")}`,
     });
     const show = library.series[1];
     const details = await xtreamSeriesInfo(LOGIN, String(show.id), fetcher);
+    expect(details.backdrop).toBe(`${BASE}${show.poster.replace("/poster/", "/backdrop/")}`);
     expect(details.seasons.map(season => season.episodes.length)).toEqual(
       show.seasons.map(season => season.length),
     );

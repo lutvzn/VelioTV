@@ -41,6 +41,8 @@
 //   /vod/film.mp4, .mkv, .ts     with range requests
 //   /vod/film.m3u8               HLS, as a VOD playlist
 //   /poster/<channels>/(film|series)/<id>.svg
+//   /backdrop/<channels>/(film|series)/<id>.svg   a wide picture, in
+//                                Xtream's film and series details
 // Catch-up (PLAN.md, Phase 6, step 2): the playlist's catch-up channels take
 // turns at the styles (playlist.mjs), and Xtream has its own. Each makes a
 // recording as it is asked for, showing the time it stands for:
@@ -91,7 +93,7 @@ import {
   subtitles,
 } from "./streams.mjs";
 import { handleXtream } from "./xtream.mjs";
-import { FILM_SECONDS, posterSvg, vodLibrary, vodLines } from "./vod.mjs";
+import { backdropSvg, FILM_SECONDS, posterSvg, vodLibrary, vodLines } from "./vod.mjs";
 
 const option = (name, fallback) => {
   const at = process.argv.indexOf(`--${name}`);
@@ -300,10 +302,11 @@ const serveFilm = (req, res, url) => {
     if (!existsSync(file)) return (send(res, 404, "Not found\n"), true);
     return (sendFile(req, res, file, "video/mp2t"), true);
   }
-  const poster = url.pathname.match(/^\/poster\/(\d+)\/(film|series)\/(\d+)\.svg$/);
-  if (poster && Number(poster[1]) <= MAX_CHANNELS) {
-    const svg = posterSvg(vodLibrary(Number(poster[1])), poster[2], Number(poster[3]));
-    if (!svg) return (send(res, 404, "No such poster\n"), true);
+  const poster = url.pathname.match(/^\/(poster|backdrop)\/(\d+)\/(film|series)\/(\d+)\.svg$/);
+  if (poster && Number(poster[2]) <= MAX_CHANNELS) {
+    const draw = poster[1] === "poster" ? posterSvg : backdropSvg;
+    const svg = draw(vodLibrary(Number(poster[2])), poster[3], Number(poster[4]));
+    if (!svg) return (send(res, 404, `No such ${poster[1]}\n`), true);
     return (send(res, 200, svg, "image/svg+xml"), true);
   }
   return false;

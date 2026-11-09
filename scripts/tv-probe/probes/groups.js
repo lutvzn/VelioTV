@@ -69,10 +69,10 @@ async function probe(input) {
     for (let i = 0; i < 3 && !page(); i++) await press(KEYS.back, 1200);
     await waitFor(() => page()?.list().length > 0);
   };
-  // Up to the group line, then along it to a group.
+  // Back to the groups' column, then down it to a group.
   const toGroupLine = async key => {
-    for (let i = 0; i < 40 && page().area() !== "filters"; i++) await press(KEYS.up, 80);
-    for (let i = 0; i < 4 && page().filter().group !== key; i++) await press(KEYS.right);
+    if (page().area() !== "filters") await press(KEYS.back);
+    for (let i = 0; i < 40 && page().filter().group !== key; i++) await press(KEYS.down);
   };
   const PIN = "1379";
   const results = {};

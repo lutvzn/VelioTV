@@ -17,11 +17,12 @@ import { groupTitle, guide, isBlocked, library, lineup, liveGroups, liveNumbers,
 import { askPin } from "../pin";
 import { canPlaySecond, player, secondPlayer } from "../player";
 import { programmeAt, watchRecording } from "../play/start";
+import { BOLD, colors, radius } from "../theme";
 import { $t } from "../translate";
 import { sayWhileFocused } from "../voiceGuide";
 import { FULL_SCREEN } from "../videoWindow";
 import { Banner } from "./live/Banner";
-import { ChannelList, LIST_ROWS } from "./live/ChannelList";
+import { ChannelList, LIST_ROWS, LIST_WIDTH } from "./live/ChannelList";
 import {
   ChannelOptions,
   HOLD_MS,
@@ -30,7 +31,7 @@ import {
   OVERLAY_Z,
 } from "./live/ChannelOptions";
 import { type MenuOption, programmeOptions } from "./live/menus";
-import { TrackPanel } from "./live/TrackPanel";
+import { PANEL_WIDTH, TrackPanel } from "./live/TrackPanel";
 
 // Live TV full screen (PLAN.md, Phase 3, step 3, and Phase 4). The app
 // starts here, on the last channel watched; OK in the guide (src/pages/
@@ -210,6 +211,14 @@ export default () => {
 
   // The audio and subtitle choices.
   const [tracksOpen, setTracksOpen] = createSignal(false);
+  // The status box sits in the video beside an open panel, which would
+  // otherwise cover it (and its text would show through).
+  const statusX = () =>
+    listOpen()
+      ? LIST_WIDTH + (1920 - LIST_WIDTH - 800) / 2
+      : tracksOpen()
+        ? (1920 - PANEL_WIDTH - 800) / 2
+        : 560;
   const [trackCursor, setTrackCursor] = createSignal(0);
   const rows = createMemo(() =>
     trackRows(player.tracks(), {
@@ -645,7 +654,7 @@ export default () => {
       <Show
         when={watching()}
         fallback={
-          <Text y={500} width={1920} textAlign="center" fontSize={40} color="#ffffffb3">
+          <Text y={500} width={1920} textAlign="center" fontSize={40} color={colors.textDim}>
             {lineup.loading() || !library.loaded() ? $t("live.loading") : ""}
           </Text>
         }
@@ -657,8 +666,8 @@ export default () => {
               y={smallRect().y - 4}
               width={SMALL_WIDTH + 8}
               height={SMALL_HEIGHT + 8}
-              borderRadius={8}
-              border={{ width: 4, color: "#ffffffcc" }}
+              borderRadius={radius.large}
+              border={{ width: 4, color: colors.focus }}
             >
               <View
                 x={4}
@@ -667,7 +676,8 @@ export default () => {
                 display="flex"
                 flexBoundary="contain"
                 padding={[6, 16]}
-                color="#000000b3"
+                borderRadius={radius.small}
+                color={colors.caption}
               >
                 <Text maxWidth={SMALL_WIDTH - 32} maxLines={1} fontSize={26}>
                   {channel().name}
@@ -681,7 +691,7 @@ export default () => {
                   maxLines={1}
                   contain="width"
                   fontSize={28}
-                  color="#ffffffcc"
+                  color={colors.textDim}
                 >
                   {smallText()}
                 </Text>
@@ -690,25 +700,17 @@ export default () => {
           )}
         </Show>
         <Show when={pausedAt() !== undefined}>
-          <View x={60} y={60} width={760} height={130} borderRadius={16} color="#071423e6">
-            <Text
-              x={32}
-              y={20}
-              width={696}
-              maxLines={1}
-              contain="width"
-              fontSize={40}
-              fontFamily="NotoSans700"
-            >
+          <View x={60} y={60} width={760} height={130} borderRadius={radius.xlarge} color={colors.dialog}>
+            <Text x={32} y={20} width={696} maxLines={1} contain="width" fontSize={40} fontFamily={BOLD}>
               {$t("live.paused", { time: duration(pausedFor()) })}
             </Text>
-            <Text x={32} y={78} width={696} maxLines={1} contain="width" fontSize={26} color="#ffffffb3">
+            <Text x={32} y={78} width={696} maxLines={1} contain="width" fontSize={26} color={colors.textDim}>
               {pausedHint()}
             </Text>
           </View>
         </Show>
         <Show when={lockedChannel() && !zapper.pending() && !listOpen()}>
-          <View x={460} y={470} width={1000} height={110} borderRadius={16} color="#071423d9">
+          <View x={460} y={470} width={1000} height={110} borderRadius={radius.xlarge} color={colors.dialog}>
             <Text
               width={1000}
               height={110}
@@ -723,7 +725,14 @@ export default () => {
           </View>
         </Show>
         <Show when={statusText() && !zapper.pending()}>
-          <View x={560} y={470} width={800} height={110} borderRadius={16} color="#071423d9">
+          <View
+            x={statusX()}
+            y={470}
+            width={800}
+            height={110}
+            borderRadius={radius.xlarge}
+            color={colors.dialog}
+          >
             <Text
               width={800}
               height={110}
@@ -747,8 +756,8 @@ export default () => {
               display="flex"
               flexBoundary="contain"
               padding={[12, 28]}
-              borderRadius={10}
-              color="#000000bf"
+              borderRadius={radius.medium}
+              color={colors.caption}
             >
               <Text maxWidth={1500} maxLines={3} textAlign="center" fontSize={42}>
                 {text()}
@@ -783,8 +792,8 @@ export default () => {
             mountX={1}
             width={420}
             height={110}
-            borderRadius={16}
-            color="#071423e6"
+            borderRadius={radius.xlarge}
+            color={colors.dialog}
           >
             <Text
               width={420}
@@ -793,6 +802,7 @@ export default () => {
               contain="width"
               textAlign="center"
               fontSize={zapper.digits() ? 64 : 32}
+              fontFamily={zapper.digits() ? BOLD : undefined}
             >
               {zapper.digits() || $t("live.noNumber", { number: zapper.missing() ?? "" })}
             </Text>

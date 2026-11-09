@@ -19,6 +19,8 @@ import { appStorage } from "../data/settingsCopy";
 import { DAY, type ProgrammeDetails, type StoredProgramme } from "../data/guideCodec";
 import type { Channel, ChannelGroup } from "../data/lineup";
 import { exposeToProbes } from "../devHooks";
+import { markEmpty } from "../emptySection";
+import { useWholeScreen } from "../wholeScreen";
 import { createGuideDays } from "../guide/guideDays";
 import { searchChannels } from "../guide/search";
 import {
@@ -32,7 +34,7 @@ import {
 } from "../guide/timeline";
 import { clockTime, dayLabel, timeRange } from "../live/format";
 import { handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../live/handoff";
-import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow";
+import { centredTop, clampIndex, scrollTop } from "../live/listWindow";
 import { createNumberEntry } from "../live/numberEntry";
 import { rememberedChannel } from "../live/zapper";
 import {
@@ -53,7 +55,9 @@ import { watchRecording } from "../play/start";
 import { editText } from "../textEntry";
 import { $t, $tn } from "../translate";
 import type { Rect } from "../videoWindow";
+import { BOLD, colors, radius } from "../theme";
 import { sayWhileFocused } from "../voiceGuide";
+import { GROUP_ROWS, GroupColumn, SEARCH_RECT } from "./guide/GroupColumn";
 import { GuideDetails } from "./guide/GuideDetails";
 import {
   ChannelOptions,
@@ -72,16 +76,24 @@ import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
 //
 // Up and Down move between channels, Left and Right between programmes, and
 // the channel keys a page at a time; Left from the first programme goes to
-// the menu. OK watches the channel full screen (src/pages/Watch.tsx), and
+// the groups. OK watches the channel full screen (src/pages/Watch.tsx), and
 // Back there comes back here; the Guide key in full screen opens the guide,
-// and Back returns to full screen. Number keys jump to a channel. Up from the first row
-// reaches the group line, where Left and Right change group and OK searches
-// channel names with the TV's keyboard. Holding OK on a channel, or the
-// Tools key, opens its options (Phase 5, step 1).
+// and Back returns to full screen. Number keys jump to a channel.
 //
-// Channels with catch-up reach back as far as their archive (Phase 6): Left
-// goes on into the past, programmes that can be played are marked, and OK on
-// one that has ended plays it (src/pages/Play.tsx). The options offer
+// The guide fills the screen while you move through it. Left from the first
+// programme, or Back, brings back the menu and, beside it, a column of groups
+// over the guide (src/pages/guide/GroupColumn.tsx), with the focus on it, where Up and Down change
+// group, Right returns to the guide, OK on the search field at its top
+// searches channel names with the TV's keyboard, and Left goes on to the
+// menu. Holding OK on a channel or a group, or the Tools key, opens its
+// options (Phase 5, step 1).
+//
+// The guide starts at now: programmes that have ended aren't shown, and Left
+// from the programme on now goes to the groups. On a channel with catch-up
+// (Phase 6), its options' "Earlier programmes" opens its past, back as far
+// as its archive: Left goes on into it, programmes that can be played are
+// marked, and OK on one that has ended plays it (src/pages/Play.tsx). Back,
+// or moving to another channel, returns to now. The options also offer
 // watching a programme on now from its start, and reminders for programmes
 // to come.
 //
@@ -95,21 +107,21 @@ export const STEP = HOUR / 2;
 const AHEAD = 7 * DAY;
 /** How far back catch-up can take it. */
 const MAX_BACK_DAYS = 7;
-export const GUIDE_ROWS = 8;
+export const GUIDE_ROWS = 9;
 /** How long the cursor stays on a channel before the preview plays it. */
 export const PREVIEW_DELAY_MS = 800;
 const CLOCK_MS = 30_000;
 
-// In the page's own pixels, which start right of the menu.
-const PAGE_WIDTH = 1920 - MENU_WIDTH;
-const LEFT = 40;
-// In screen pixels.
-const PREVIEW: Rect = { x: MENU_WIDTH + LEFT, y: 40, width: 576, height: 324 };
+// The page lays out across the whole screen, under the menu (src/wholeScreen.ts),
+// so its pixels are the screen's.
+const PAGE_WIDTH = 1920;
+const LEFT = 64;
+/** Where the words for no channels go, right of the menu, which stays then. */
+const EMPTY_X = MENU_WIDTH + 40;
+const PREVIEW: Rect = { x: LEFT, y: 40, width: 576, height: 324 };
 const DETAILS_X = LEFT + PREVIEW.width + 40;
-const HEADER_Y = 392;
-const HEADER_HEIGHT = 50;
-const TIMES_Y = 452;
-const ROWS_Y = 492;
+const TIMES_Y = 392;
+const ROWS_Y = 432;
 const GRID_X = LEFT + CHANNEL_WIDTH + 10;
 const GRID_WIDTH = PAGE_WIDTH - GRID_X - 30;
 const PX_PER_MS = GRID_WIDTH / SPAN;
@@ -179,14 +191,17 @@ export default () => {
   const [filterId, setFilterId] = createSignal(handoff?.group === undefined ? ALL : `group:${handoff.group}`);
   const filter = createMemo(() => filters().find(f => f.id === filterId()) ?? filters()[0]);
   const list = createMemo(() => filter().channels);
-  // As far back as the longest catch-up among the channels shown; each
-  // row's Left stops at its own.
-  const reach = createMemo(() => list().reduce((most, channel) => Math.max(most, backDays(channel)), 0));
-  const earliest = () => alignDown(now() - reach() * DAY, STEP);
-  const rowEarliest = (channel: Channel) => {
-    const back = backDays(channel);
-    return back > 0 ? alignDown(now() - back * DAY, STEP) : nowStart();
-  };
+  // The channel whose past is open, from its options; the others start at now.
+  const [pastId, setPastId] = createSignal<string>();
+  const pastDays = createMemo(() => {
+    const id = pastId();
+    const channel = id === undefined ? undefined : list().find(c => c.id === id);
+    return channel ? backDays(channel) : 0;
+  });
+  /** Where the span can start: the open past's start, or now. */
+  const earliest = () => (pastDays() > 0 ? alignDown(now() - pastDays() * DAY, STEP) : nowStart());
+  /** Where a row's Left stops: its archive's start with its past open, or now. */
+  const rowEarliest = (channel: Channel) => (channel.id === pastId() && pastDays() > 0 ? earliest() : now());
 
   // The cursor's row, and the first row drawn. When the channels change,
   // the cursor stays on its channel if it can.
@@ -261,10 +276,31 @@ export default () => {
       if (!channel.guideId) return { channel, cells: wholeRow("none", from(), to(), STEP) };
       const programmes = days.programmes(channel, from() - SPAN, to() + SPAN);
       if (!programmes) return { channel, cells: wholeRow("loading", from(), to(), STEP) };
-      return { channel, cells: rowCells(programmes, from() - SPAN, to() + SPAN) };
+      // Ended programmes only with the channel's past open.
+      const start = channel.id === pastId() ? from() - SPAN : now();
+      return { channel, cells: rowCells(programmes, start, to() + SPAN) };
     }),
   );
   const currentRow = () => rows[cursor() - top()]?.();
+
+  const leavePast = () =>
+    batch(() => {
+      setPastId(undefined);
+      setAnchor(Date.now());
+    });
+  /** Opens a channel's past, with the focus on the programme before now. */
+  const openPast = (channel: Channel) => {
+    setPastId(channel.id);
+    const row = currentRow();
+    const previous = row && previousAnchor(row.cells, anchorAt(), rowEarliest(channel), STEP);
+    if (previous !== undefined) moveTo(previous);
+  };
+  // Moving to another channel returns to now.
+  createEffect(
+    on(cursorChannel, channel => {
+      if (pastId() !== undefined && channel?.id !== pastId()) leavePast();
+    }),
+  );
   const focusedCell = createMemo(() => {
     const row = currentRow();
     return row ? cellAt(row.cells, anchorAt()) : undefined;
@@ -335,7 +371,34 @@ export default () => {
     }),
   );
 
+  // "filters" is the groups' column; on it the cursor is on the group shown,
+  // or on the search field above the groups.
   const [area, setArea] = createSignal<"grid" | "filters">("grid");
+  const [onSearch, setOnSearch] = createSignal(false);
+  const filterIndex = createMemo(() =>
+    Math.max(
+      0,
+      filters().findIndex(f => f.id === filter().id),
+    ),
+  );
+  const [groupTop, setGroupTop] = createSignal(0);
+  createEffect(() => {
+    const at = filterIndex();
+    setGroupTop(first => scrollTop(at, first, GROUP_ROWS, filters().length));
+  });
+  const toGroups = () => {
+    batch(() => {
+      setOnSearch(false);
+      setArea("filters");
+    });
+    return true;
+  };
+  /** Back to the guide, if it has channels to show. */
+  const toGrid = () => {
+    if (list().length === 0) return false;
+    setArea("grid");
+    return true;
+  };
 
   const entry = createNumberEntry({
     onNumber: number => {
@@ -353,26 +416,29 @@ export default () => {
     },
   });
 
-  const changeFilter = (step: number) => {
+  /** Moves the column's cursor by `step`, from the search field (-1) to the last group. */
+  const moveGroup = (step: number) => {
     const all = filters();
-    const at = Math.max(
-      0,
-      all.findIndex(f => f.id === filter().id),
-    );
-    setFilterId(all[wrapIndex(at, step, all.length)].id);
+    const at = Math.max(-1, Math.min(all.length - 1, (onSearch() ? -1 : filterIndex()) + step));
+    batch(() => {
+      setOnSearch(at < 0);
+      if (at >= 0) setFilterId(all[at].id);
+    });
   };
 
   const search = () =>
     editText({
-      rect: { x: MENU_WIDTH + LEFT, y: HEADER_Y - 4, width: 760, height: HEADER_HEIGHT + 8 },
+      rect: { ...SEARCH_RECT, x: MENU_WIDTH + SEARCH_RECT.x, width: 640 },
       value: query(),
       fontSize: 30,
       onDone: value => {
         const typed = value.trim();
         batch(() => {
           setQuery(typed);
-          if (typed) setFilterId(SEARCH);
-          else if (filterId() === SEARCH) setFilterId(ALL);
+          if (typed) {
+            setFilterId(SEARCH);
+            setOnSearch(false);
+          } else if (filterId() === SEARCH) setFilterId(ALL);
         });
         if (typed && results().length > 0) setArea("grid");
         root?.setFocus();
@@ -452,6 +518,7 @@ export default () => {
   const openOptions = () => {
     if (entry.active()) return false;
     if (area() === "filters") {
+      if (onSearch()) return false;
       const key = filter().group;
       // Every channel, search results and Favourites have no group options.
       if (key === undefined || key === FAVOURITES) return false;
@@ -472,8 +539,10 @@ export default () => {
   };
   const pressEnter = () => {
     if (entry.digits()) entry.enter();
-    else if (area() === "filters") search();
-    else watch();
+    else if (area() === "filters") {
+      if (onSearch()) search();
+      else toGrid();
+    } else watch();
   };
   const [holdEnter, releaseEnter] = useHold({
     onEnter: pressEnter,
@@ -483,6 +552,12 @@ export default () => {
     holdThreshold: HOLD_MS,
     holdRequiresRepeat: HOLD_REQUIRES_REPEAT,
   });
+
+  // With no channels (or while they load) the menu keeps the keys.
+  markEmpty(() => liveView().channels.length === 0);
+  // The menu and the groups show unless you're moving through the guide.
+  const inGuide = () => focused() && area() === "grid";
+  useWholeScreen(inGuide);
 
   exposeToProbes("guidePage", {
     optionsFor,
@@ -494,6 +569,10 @@ export default () => {
     from,
     anchor: anchorAt,
     area,
+    pastId,
+    openPast,
+    onSearch,
+    groupTop,
     list,
     filter,
     query,
@@ -529,14 +608,19 @@ export default () => {
     const channel = cursorChannel();
     const programme = focusedCell()?.programme;
     if (!channel || !programme || isBlocked(channel)) return undefined;
+    if (moving()) return $t("guide.moveHint");
     if (reminders.has(channel.id, programme.start)) return $t("guide.reminderSet");
-    if (!inArchive(channel, programme.start, now())) return undefined;
-    return programme.stop <= now() ? $t("guide.okPlays") : $t("guide.canStartOver");
+    if (inArchive(channel, programme.start, now()))
+      return programme.stop <= now() ? $t("guide.okPlays") : $t("guide.canStartOver");
+    return channel.id === pastId() ? $t("guide.backToNow") : undefined;
   };
   // What the voice guide reads: the group, or the channel, then the
   // programme under the cursor, its day and time, and what OK does.
   sayWhileFocused(focused, () => {
-    if (area() === "filters") return [filter().label, $tn("count.channels", list().length)];
+    if (area() === "filters")
+      return onSearch()
+        ? [$t("guide.search"), query()]
+        : [filter().label, $tn("count.channels", list().length)];
     const channel = cursorChannel();
     if (!channel)
       return filter().id === SEARCH ? $t("guide.noMatches", { query: query() }) : $t("live.groupEmpty");
@@ -563,44 +647,38 @@ export default () => {
       // While a favourite moves, it has every key.
       onCaptureKey={(_event, _element, _focused, key) => (moving() ? movingKey(key) : false)}
       onUp={() => {
-        if (area() === "filters") return true;
-        if (cursor() === 0 || list().length === 0) setArea("filters");
+        if (area() === "filters") moveGroup(-1);
         else moveCursor(cursor() - 1);
         return true;
       }}
       onDown={() => {
-        if (area() === "filters") {
-          if (list().length > 0) setArea("grid");
-        } else {
-          moveCursor(cursor() + 1);
-        }
+        if (area() === "filters") moveGroup(1);
+        else moveCursor(cursor() + 1);
         return true;
       }}
       onChannelUp={() => {
-        setArea("grid");
-        moveCursor(clampIndex(cursor(), -GUIDE_ROWS, list().length));
+        if (area() === "filters") moveGroup(-GROUP_ROWS);
+        else moveCursor(clampIndex(cursor(), -GUIDE_ROWS, list().length));
         return true;
       }}
       onChannelDown={() => {
-        setArea("grid");
-        moveCursor(clampIndex(cursor(), GUIDE_ROWS, list().length));
+        if (area() === "filters") moveGroup(GROUP_ROWS);
+        else moveCursor(clampIndex(cursor(), GUIDE_ROWS, list().length));
         return true;
       }}
       onLeft={() => {
-        if (area() === "filters") {
-          changeFilter(-1);
-          return true;
-        }
+        // From the groups, on to the menu.
+        if (area() === "filters") return false;
         const row = currentRow();
         const previous = row && previousAnchor(row.cells, anchorAt(), rowEarliest(row.channel), STEP);
-        // From the first programme, on to the menu.
-        if (previous === undefined) return false;
+        // From the first programme, on to the groups.
+        if (previous === undefined) return toGroups();
         moveTo(previous);
         return true;
       }}
       onRight={() => {
         if (area() === "filters") {
-          changeFilter(1);
+          toGrid();
           return true;
         }
         const row = currentRow();
@@ -616,12 +694,14 @@ export default () => {
       }}
       onBack={() => {
         if (entry.active()) entry.clear();
-        else if (area() === "filters") setArea("grid");
+        // From the groups, on to the menu.
+        else if (area() === "filters") return false;
+        else if (pastId() !== undefined) leavePast();
         else if (handoff?.backTo === "/watch") {
           // Opened from full screen with the Guide key: back to the channel.
           handOff({ channelId: handoff.channelId, group: handoff.group });
           navigate("/watch", { replace: true });
-        } else return false;
+        } else return toGroups();
         return true;
       }}
       onKey0={digit(0)}
@@ -639,13 +719,13 @@ export default () => {
         when={liveView().channels.length > 0}
         fallback={
           <>
-            <Text x={LEFT} y={50} fontSize={56}>
+            <Text x={EMPTY_X} y={50} fontSize={52} fontFamily={BOLD}>
               {$t("menu.live")}
             </Text>
-            <Text x={LEFT} y={170} fontSize={44}>
+            <Text x={EMPTY_X} y={170} fontSize={44}>
               {lineup.loading() ? $t("live.loading") : $t("live.empty")}
             </Text>
-            <Text x={LEFT} y={240} width={1300} contain="width" fontSize={30} color="#ffffffb3">
+            <Text x={EMPTY_X} y={240} width={1300} contain="width" fontSize={30} color={colors.textDim}>
               {lineup.loading() ? "" : $t("live.emptyHint")}
             </Text>
           </>
@@ -663,7 +743,7 @@ export default () => {
               contain="width"
               textAlign="center"
               fontSize={26}
-              color="#ffffffcc"
+              color={colors.textDim}
             >
               {text()}
             </Text>
@@ -682,42 +762,16 @@ export default () => {
           note={detailsNote()}
         />
 
-        <View
-          x={LEFT}
-          y={HEADER_Y}
-          width={PAGE_WIDTH - LEFT - 30}
-          height={HEADER_HEIGHT}
-          borderRadius={10}
-          color={focused() && area() === "filters" ? "#2e6bd6ff" : "#ffffff0f"}
+        <Text
+          x={LEFT + 16}
+          y={TIMES_Y}
+          width={CHANNEL_WIDTH - 16}
+          maxLines={1}
+          contain="width"
+          fontSize={24}
+          fontFamily={BOLD}
+          color={colors.accentText}
         >
-          <Text
-            x={20}
-            width={760}
-            height={HEADER_HEIGHT}
-            lineHeight={HEADER_HEIGHT}
-            maxLines={1}
-            contain="width"
-            fontSize={28}
-          >
-            {`‹  ${filter().label}  ›`}
-          </Text>
-          <Text
-            x={PAGE_WIDTH - LEFT - 50}
-            mountX={1}
-            height={HEADER_HEIGHT}
-            lineHeight={HEADER_HEIGHT}
-            fontSize={24}
-            color="#ffffffb3"
-          >
-            {moving()
-              ? $t("guide.moveHint")
-              : focused() && area() === "filters"
-                ? $t("guide.filterHint")
-                : $tn("count.channels", list().length)}
-          </Text>
-        </View>
-
-        <Text x={LEFT} y={TIMES_Y} width={CHANNEL_WIDTH} maxLines={1} contain="width" fontSize={26}>
           {dayLabel(from(), now(), dayWords())}
         </Text>
         <Index each={ticks()}>
@@ -725,16 +779,17 @@ export default () => {
             <>
               <View
                 x={GRID_X + (time() - from()) * PX_PER_MS}
-                y={TIMES_Y + 4}
+                y={TIMES_Y + 6}
                 width={2}
-                height={26}
-                color="#ffffff4d"
+                height={22}
+                borderRadius={1}
+                color={colors.line}
               />
               <Text
                 x={GRID_X + (time() - from()) * PX_PER_MS + 10}
                 y={TIMES_Y}
-                fontSize={26}
-                color="#ffffffcc"
+                fontSize={24}
+                color={colors.textDim}
               >
                 {clockTime(time())}
               </Text>
@@ -771,19 +826,38 @@ export default () => {
           )}
         </For>
         <Show when={list().length === 0}>
-          <Text x={LEFT} y={ROWS_Y + 20} fontSize={30} color="#ffffffb3">
+          <Text x={LEFT} y={ROWS_Y + 20} fontSize={30} color={colors.textDim}>
             {filter().id === SEARCH ? $t("guide.noMatches", { query: query() }) : $t("live.groupEmpty")}
           </Text>
         </Show>
         <Show when={now() >= from() && now() < to()}>
           <View
-            x={nowX()}
+            x={nowX() - 1}
             y={TIMES_Y + 34}
             width={3}
             height={ROWS_Y - TIMES_Y - 34 + GUIDE_ROWS * ROW_HEIGHT}
-            color="#ff6b6bcc"
+            borderRadius={1}
+            color={colors.live}
+          />
+          <View
+            x={nowX() - 6}
+            y={TIMES_Y + 28}
+            width={13}
+            height={13}
+            borderRadius={6.5}
+            color={colors.live}
           />
         </Show>
+        <GroupColumn
+          x={MENU_WIDTH}
+          shown={!inGuide()}
+          items={filters().map(f => ({ label: f.label, count: f.channels.length }))}
+          top={groupTop()}
+          cursor={onSearch() ? -1 : filterIndex()}
+          current={filterIndex()}
+          focused={focused() && area() === "filters"}
+          query={query()}
+        />
       </Show>
 
       <Show when={entry.active()}>
@@ -794,8 +868,8 @@ export default () => {
           mountX={1}
           width={420}
           height={110}
-          borderRadius={16}
-          color="#071423f2"
+          borderRadius={radius.xlarge}
+          color={colors.dialog}
         >
           <Text
             width={420}
@@ -825,6 +899,17 @@ export default () => {
               ...programmeOptions(channel(), focusedProgramme(channel()), Date.now(), programme =>
                 watchFromStart(channel(), programme),
               ),
+              ...(backDays(channel()) > 0 && channel().id !== pastId() && channel().id === cursorChannel()?.id
+                ? [
+                    {
+                      id: "earlier",
+                      label: $t("options.earlier"),
+                      run: () => {
+                        openPast(channel());
+                      },
+                    },
+                  ]
+                : []),
               ...(inFavourites()
                 ? [
                     {

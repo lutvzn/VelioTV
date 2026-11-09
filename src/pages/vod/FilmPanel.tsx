@@ -1,22 +1,28 @@
 import { type ElementNode, Text, View } from "@solidtv/solid";
 import { createMemo, createResource, createSignal, Index, onMount, Show } from "solid-js";
+import { Artwork } from "../../components/Artwork";
+import { Backdrop } from "../../components/Backdrop";
+import { Glow } from "../../components/Glow";
 import { MENU_WIDTH } from "../../components/SideMenu";
 import type { FilmDetails } from "../../data/vod";
 import type { FilmEntry } from "../../data/vodLibrary";
 import { exposeToProbes } from "../../devHooks";
 import { vod, watched } from "../../library";
 import { duration } from "../../live/format";
+import { BOLD, colors, motion, radius, raisedShadow, textOn } from "../../theme";
 import { $t } from "../../translate";
 import { OVERLAY_Z } from "../live/ChannelOptions";
 
 const PAGE_WIDTH = 1920 - MENU_WIDTH;
-const LEFT = 60;
-const POSTER_WIDTH = 360;
-const POSTER_HEIGHT = 540;
-const TEXT_X = LEFT + POSTER_WIDTH + 60;
+const LEFT = 80;
+const TOP = 150;
+const POSTER_WIDTH = 300;
+const POSTER_HEIGHT = 450;
+const TEXT_X = LEFT + POSTER_WIDTH + 64;
 const TEXT_WIDTH = PAGE_WIDTH - TEXT_X - LEFT;
-const BUTTON_HEIGHT = 70;
-const BUTTON_WIDTH = 520;
+const BUTTON_HEIGHT = 68;
+const BUTTON_WIDTH = 440;
+const BUTTONS_Y = 650;
 
 export interface Action {
   id: string;
@@ -33,30 +39,112 @@ export const ActionList = (props: {
   y: number;
 }) => (
   <Index each={props.actions}>
-    {(action, at) => (
-      <View
-        x={props.x}
-        y={props.y + at * (BUTTON_HEIGHT + 16)}
-        width={BUTTON_WIDTH}
-        height={BUTTON_HEIGHT}
-        borderRadius={12}
-        color={props.focused && at === props.cursor ? "#2e6bd6ff" : "#ffffff14"}
-      >
-        <Text
-          x={28}
-          width={BUTTON_WIDTH - 56}
-          height={BUTTON_HEIGHT}
-          lineHeight={BUTTON_HEIGHT}
-          maxLines={1}
-          contain="width"
-          fontSize={30}
-        >
-          {action().label}
-        </Text>
-      </View>
-    )}
+    {(action, at) => {
+      const selected = () => props.focused && at === props.cursor;
+      return (
+        <>
+          <Glow
+            x={props.x}
+            y={props.y + at * (BUTTON_HEIGHT + 16)}
+            width={BUTTON_WIDTH}
+            height={BUTTON_HEIGHT}
+            borderRadius={BUTTON_HEIGHT / 2}
+            shown={selected()}
+          />
+          <View
+            x={props.x}
+            y={props.y + at * (BUTTON_HEIGHT + 16)}
+            width={BUTTON_WIDTH}
+            height={BUTTON_HEIGHT}
+            borderRadius={BUTTON_HEIGHT / 2}
+            color={selected() ? colors.focus : colors.surfaceRaised}
+            transition={{ color: motion.quick }}
+          >
+            <Text
+              x={36}
+              width={BUTTON_WIDTH - 72}
+              height={BUTTON_HEIGHT}
+              lineHeight={BUTTON_HEIGHT}
+              maxLines={1}
+              contain="width"
+              fontSize={28}
+              fontFamily={BOLD}
+              color={textOn(selected())}
+            >
+              {action().label}
+            </Text>
+          </View>
+        </>
+      );
+    }}
   </Index>
 );
+
+/** A film's or series' poster on its page, raised off the backdrop. */
+export const PagePoster = (props: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  src?: string;
+  title: string;
+}) => (
+  <>
+    <View
+      x={props.x}
+      y={props.y}
+      width={props.width}
+      height={props.height}
+      borderRadius={radius.large}
+      color={colors.background}
+      shadow={raisedShadow}
+    />
+    <Artwork
+      x={props.x}
+      y={props.y}
+      width={props.width}
+      height={props.height}
+      borderRadius={radius.large}
+      src={props.src}
+      title={props.title}
+      fontSize={34}
+    />
+  </>
+);
+
+/** The line under a title: a rating badge, then the year, genre and length. */
+export const Facts = (props: { rating?: number; text: string; width: number }) => (
+  <View display="flex" flexDirection="row" alignItems="center" gap={20} width={props.width} height={40}>
+    <Show when={props.rating}>
+      {rating => (
+        <View width={RATING_WIDTH} height={36} borderRadius={radius.small} color={colors.gold}>
+          <Text
+            width={RATING_WIDTH}
+            height={36}
+            lineHeight={36}
+            contain="width"
+            textAlign="center"
+            fontSize={22}
+            fontFamily={BOLD}
+            color={colors.onFocus}
+          >
+            {String(rating())}
+          </Text>
+        </View>
+      )}
+    </Show>
+    <Text
+      maxLines={1}
+      width={props.width - RATING_WIDTH - 20}
+      contain="width"
+      fontSize={26}
+      color={colors.textDim}
+    >
+      {props.text}
+    </Text>
+  </View>
+);
+const RATING_WIDTH = 72;
 
 /**
  * A film's page, over the grid: its poster, details from the server, and
@@ -92,7 +180,6 @@ export const FilmPanel = (props: {
     const film = props.film;
     return [
       info?.year ?? film.year,
-      film.rating ? `★ ${film.rating}` : undefined,
       info?.genre ?? film.category,
       info?.durationMs ? duration(info.durationMs) : undefined,
     ]
@@ -107,7 +194,7 @@ export const FilmPanel = (props: {
       zIndex={OVERLAY_Z}
       width={PAGE_WIDTH}
       height={1080}
-      color="#071423ff"
+      color={colors.background}
       onFocusChanged={setFocused}
       onUp={() => {
         setCursor(Math.max(0, cursor() - 1));
@@ -128,75 +215,48 @@ export const FilmPanel = (props: {
         return true;
       }}
     >
-      <View x={LEFT} y={80} width={POSTER_WIDTH} height={POSTER_HEIGHT} borderRadius={10} color="#1d2b3dff">
-        <Text
-          x={20}
-          y={30}
-          width={POSTER_WIDTH - 40}
-          maxLines={5}
-          contain="width"
-          fontSize={34}
-          color="#ffffffb3"
-        >
+      <Backdrop width={PAGE_WIDTH} height={1080} src={details()?.backdrop} />
+      <PagePoster
+        x={LEFT}
+        y={TOP}
+        width={POSTER_WIDTH}
+        height={POSTER_HEIGHT}
+        src={poster()}
+        title={props.film.name}
+      />
+      <View x={TEXT_X} y={TOP - 8} width={TEXT_WIDTH} display="flex" flexDirection="column" gap={20}>
+        <Text width={TEXT_WIDTH} maxLines={2} contain="width" lineHeight={72} fontSize={60} fontFamily={BOLD}>
           {props.film.name}
         </Text>
+        <Facts rating={props.film.rating} text={facts()} width={TEXT_WIDTH} />
+        <Text
+          width={TEXT_WIDTH}
+          maxLines={4}
+          contain="width"
+          lineHeight={40}
+          fontSize={28}
+          color={colors.textDim}
+          marginTop={8}
+        >
+          {details.loading ? $t("live.loading") : (details()?.plot ?? "")}
+        </Text>
+        <Text
+          width={TEXT_WIDTH}
+          maxLines={2}
+          contain="width"
+          lineHeight={34}
+          fontSize={24}
+          color={colors.textFaint}
+        >
+          {[
+            details()?.director ? $t("vod.director", { name: details()?.director ?? "" }) : "",
+            details()?.cast ? $t("vod.cast", { names: details()?.cast ?? "" }) : "",
+          ]
+            .filter(Boolean)
+            .join("\n")}
+        </Text>
       </View>
-      <Show when={poster()}>
-        {src => (
-          <View x={LEFT} y={80} width={POSTER_WIDTH} height={POSTER_HEIGHT} borderRadius={10} src={src()} />
-        )}
-      </Show>
-      <Text
-        x={TEXT_X}
-        y={80}
-        width={TEXT_WIDTH}
-        maxLines={2}
-        contain="width"
-        fontSize={52}
-        fontFamily="NotoSans700"
-      >
-        {props.film.name}
-      </Text>
-      <Text
-        x={TEXT_X}
-        y={210}
-        width={TEXT_WIDTH}
-        maxLines={1}
-        contain="width"
-        fontSize={28}
-        color="#ffffffcc"
-      >
-        {facts()}
-      </Text>
-      <Text
-        x={TEXT_X}
-        y={270}
-        width={TEXT_WIDTH}
-        maxLines={6}
-        contain="width"
-        lineHeight={40}
-        fontSize={28}
-        color="#ffffffb3"
-      >
-        {details.loading ? $t("live.loading") : (details()?.plot ?? "")}
-      </Text>
-      <Text
-        x={TEXT_X}
-        y={530}
-        width={TEXT_WIDTH}
-        maxLines={2}
-        contain="width"
-        fontSize={24}
-        color="#ffffff99"
-      >
-        {[
-          details()?.director ? $t("vod.director", { name: details()?.director ?? "" }) : "",
-          details()?.cast ? $t("vod.cast", { names: details()?.cast ?? "" }) : "",
-        ]
-          .filter(Boolean)
-          .join("\n")}
-      </Text>
-      <ActionList actions={actions()} cursor={cursor()} focused={focused()} x={TEXT_X} y={660} />
+      <ActionList actions={actions()} cursor={cursor()} focused={focused()} x={TEXT_X} y={BUTTONS_Y} />
     </View>
   );
 };

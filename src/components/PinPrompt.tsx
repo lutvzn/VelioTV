@@ -3,6 +3,7 @@ import { createSignal, For, Show } from "solid-js";
 import { exposeToProbes } from "../devHooks";
 import { OVERLAY_Z } from "../pages/live/ChannelOptions";
 import { PIN_LENGTH, pinRequest, type PinRequest } from "../pin";
+import { BOLD, colors, dialogShadow, radius } from "../theme";
 import { $t } from "../translate";
 
 const WIDTH = 720;
@@ -48,8 +49,10 @@ const Prompt = (props: { request: PinRequest }) => {
       y={(1080 - HEIGHT) / 2}
       width={WIDTH}
       height={HEIGHT}
-      borderRadius={20}
-      color="#071423fa"
+      borderRadius={radius.xlarge}
+      color={colors.dialog}
+      border={{ width: 1, color: colors.line }}
+      shadow={dialogShadow}
       onLeft={() => {
         setDigits(digits().slice(0, -1));
         return true;
@@ -71,7 +74,7 @@ const Prompt = (props: { request: PinRequest }) => {
       // Every other key stops here.
       onKeyPress={() => true}
     >
-      <Text y={48} width={WIDTH} contain="width" textAlign="center" fontSize={38}>
+      <Text y={48} width={WIDTH} contain="width" textAlign="center" fontSize={38} fontFamily={BOLD}>
         {props.request.title}
       </Text>
       <For each={Array.from({ length: PIN_LENGTH }, (_, at) => at)}>
@@ -82,7 +85,7 @@ const Prompt = (props: { request: PinRequest }) => {
             width={DOT}
             height={DOT}
             borderRadius={DOT / 2}
-            color={at < digits().length ? "#ffffffff" : "#ffffff33"}
+            color={at < digits().length ? colors.accent : colors.track}
           />
         )}
       </For>
@@ -92,7 +95,7 @@ const Prompt = (props: { request: PinRequest }) => {
         contain="width"
         textAlign="center"
         fontSize={28}
-        color={wrong() ? "#ff8a80ff" : "#ffffffb3"}
+        color={wrong() ? colors.danger : colors.textDim}
       >
         {wrong() ? $t("pin.wrong") : $t("pin.hint")}
       </Text>

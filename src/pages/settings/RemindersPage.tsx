@@ -4,6 +4,7 @@ import { FIELD_WIDTH, ToggleField } from "../../components/Form";
 import { exposeToProbes } from "../../devHooks";
 import { reminders } from "../../library";
 import { dayLabel, timeRange } from "../../live/format";
+import { colors } from "../../theme";
 import { $t } from "../../translate";
 import { SubPage } from "./SubPage";
 
@@ -40,7 +41,7 @@ export const RemindersPage = (props: { onClose: () => void }) => {
         }}
       </For>
       <Show when={list.length === 0}>
-        <Text width={FIELD_WIDTH} contain="width" fontSize={30} color="#ffffffb3" skipFocus>
+        <Text width={FIELD_WIDTH} contain="width" fontSize={30} color={colors.textDim} skipFocus>
           {$t("reminders.none")}
         </Text>
       </Show>

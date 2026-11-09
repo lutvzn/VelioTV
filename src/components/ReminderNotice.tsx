@@ -7,6 +7,7 @@ import { lineup, reminders } from "../library";
 import { handOff } from "../live/handoff";
 import { clockTime } from "../live/format";
 import { OVERLAY_Z } from "../pages/live/ChannelOptions";
+import { BOLD, colors, dialogShadow, radius } from "../theme";
 import { $t } from "../translate";
 
 const CHECK_MS = 10_000;
@@ -48,9 +49,10 @@ const Notice = (props: { reminder: Reminder; onDone: () => void }) => {
       y={60}
       width={WIDTH}
       height={HEIGHT}
-      borderRadius={20}
-      color="#0b2240fa"
-      border={{ width: 3, color: "#ffd166ff" }}
+      borderRadius={radius.xlarge}
+      color={colors.dialog}
+      border={{ width: 2, color: colors.goldWash }}
+      shadow={dialogShadow}
       onEnter={() => {
         watch();
         return true;
@@ -62,21 +64,31 @@ const Notice = (props: { reminder: Reminder; onDone: () => void }) => {
       // Every other key stops here.
       onKeyPress={() => true}
     >
-      <Text x={36} y={28} width={WIDTH - 72} maxLines={1} contain="width" fontSize={26} color="#ffd166ff">
+      <View x={36} y={40} width={12} height={12} borderRadius={6} color={colors.gold} />
+      <Text
+        x={60}
+        y={28}
+        width={WIDTH - 96}
+        maxLines={1}
+        contain="width"
+        fontSize={26}
+        fontFamily={BOLD}
+        color={colors.gold}
+      >
         {`${starts()}  ·  ${props.reminder.channelName}`}
+      </Text>
+      <Text x={36} y={72} width={WIDTH - 72} maxLines={1} contain="width" fontSize={40} fontFamily={BOLD}>
+        {props.reminder.title}
       </Text>
       <Text
         x={36}
-        y={72}
+        y={158}
         width={WIDTH - 72}
         maxLines={1}
         contain="width"
-        fontSize={40}
-        fontFamily="NotoSans700"
+        fontSize={26}
+        color={colors.textDim}
       >
-        {props.reminder.title}
-      </Text>
-      <Text x={36} y={158} width={WIDTH - 72} maxLines={1} contain="width" fontSize={26} color="#ffffffb3">
         {$t("reminder.hint")}
       </Text>
     </View>

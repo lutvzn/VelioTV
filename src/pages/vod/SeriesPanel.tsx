@@ -10,6 +10,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { Backdrop } from "../../components/Backdrop";
 import { MENU_WIDTH } from "../../components/SideMenu";
 import type { Episode, SeriesDetails } from "../../data/vod";
 import type { SeriesEntry } from "../../data/vodLibrary";
@@ -19,17 +20,21 @@ import { duration } from "../../live/format";
 import { scrollTop } from "../../live/listWindow";
 import { episodeKey, episodeLabel, episodeToContinue } from "../../play/vodPlay";
 import { $t, $tn } from "../../translate";
+import { BOLD, colors, motion, radius, textOn } from "../../theme";
 import { OVERLAY_Z } from "../live/ChannelOptions";
+import { Facts, PagePoster } from "./FilmPanel";
 
 const PAGE_WIDTH = 1920 - MENU_WIDTH;
-const LEFT = 60;
-const POSTER_WIDTH = 300;
-const POSTER_HEIGHT = 450;
-const TEXT_X = LEFT + POSTER_WIDTH + 60;
+const LEFT = 80;
+const TOP = 110;
+const POSTER_WIDTH = 240;
+const POSTER_HEIGHT = 360;
+const TEXT_X = LEFT + POSTER_WIDTH + 64;
 const TEXT_WIDTH = PAGE_WIDTH - TEXT_X - LEFT;
-const SEASON_Y = 350;
-const LIST_Y = 430;
-const ROW_HEIGHT = 76;
+const SEASON_Y = 404;
+const SEASON_HEIGHT = 52;
+const LIST_Y = 478;
+const ROW_HEIGHT = 72;
 const ROWS = 8;
 const SLOTS = Array.from({ length: ROWS }, (_, slot) => slot);
 
@@ -99,7 +104,6 @@ export const SeriesPanel = (props: {
   const facts = createMemo(() =>
     [
       props.show.year,
-      props.show.rating ? `★ ${props.show.rating}` : undefined,
       details()?.genre ?? props.show.category,
       seasons().length ? $tn("vod.seasons", seasons().length) : undefined,
     ]
@@ -118,7 +122,7 @@ export const SeriesPanel = (props: {
       zIndex={OVERLAY_Z}
       width={PAGE_WIDTH}
       height={1080}
-      color="#071423ff"
+      color={colors.background}
       onFocusChanged={setFocused}
       onUp={() => {
         place(cursor() - 1);
@@ -153,71 +157,62 @@ export const SeriesPanel = (props: {
         return true;
       }}
     >
-      <View x={LEFT} y={80} width={POSTER_WIDTH} height={POSTER_HEIGHT} borderRadius={10} color="#1d2b3dff">
-        <Text
-          x={20}
-          y={30}
-          width={POSTER_WIDTH - 40}
-          maxLines={5}
-          contain="width"
-          fontSize={32}
-          color="#ffffffb3"
-        >
+      <Backdrop width={PAGE_WIDTH} height={1080} src={details()?.backdrop} />
+      <PagePoster
+        x={LEFT}
+        y={TOP}
+        width={POSTER_WIDTH}
+        height={POSTER_HEIGHT}
+        src={props.show.poster}
+        title={props.show.name}
+      />
+      <View x={TEXT_X} y={TOP - 8} width={TEXT_WIDTH} display="flex" flexDirection="column" gap={18}>
+        <Text width={TEXT_WIDTH} maxLines={1} contain="width" lineHeight={68} fontSize={56} fontFamily={BOLD}>
           {props.show.name}
         </Text>
+        <Facts rating={props.show.rating} text={facts()} width={TEXT_WIDTH} />
+        <Text
+          width={TEXT_WIDTH}
+          maxLines={3}
+          contain="width"
+          lineHeight={40}
+          fontSize={28}
+          color={colors.textDim}
+          marginTop={6}
+        >
+          {details()?.plot ?? props.show.plot ?? ""}
+        </Text>
       </View>
-      <Show when={props.show.poster}>
-        {src => (
-          <View x={LEFT} y={80} width={POSTER_WIDTH} height={POSTER_HEIGHT} borderRadius={10} src={src()} />
-        )}
-      </Show>
-      <Text
-        x={TEXT_X}
-        y={70}
-        width={TEXT_WIDTH}
-        maxLines={1}
-        contain="width"
-        fontSize={52}
-        fontFamily="NotoSans700"
-      >
-        {props.show.name}
-      </Text>
-      <Text
-        x={TEXT_X}
-        y={146}
-        width={TEXT_WIDTH}
-        maxLines={1}
-        contain="width"
-        fontSize={28}
-        color="#ffffffcc"
-      >
-        {facts()}
-      </Text>
-      <Text
-        x={TEXT_X}
-        y={196}
-        width={TEXT_WIDTH}
-        maxLines={3}
-        contain="width"
-        lineHeight={40}
-        fontSize={28}
-        color="#ffffffb3"
-      >
-        {details()?.plot ?? props.show.plot ?? ""}
-      </Text>
       <Show
         when={seasons().length > 0}
         fallback={
-          <Text x={TEXT_X} y={SEASON_Y} fontSize={30} color="#ffffffb3">
+          <Text x={TEXT_X} y={SEASON_Y + 8} fontSize={30} color={colors.textDim}>
             {details.loading ? $t("live.loading") : $t("vod.noEpisodes")}
           </Text>
         }
       >
-        <Text x={TEXT_X} y={SEASON_Y} fontSize={34}>
-          {seasons().length > 1
-            ? `‹  ${$t("vod.season", { number: seasons()[seasonAt()]?.season ?? 1 })}  ›`
-            : $t("vod.season", { number: seasons()[0]?.season ?? 1 })}
-        </Text>
+        <View
+          x={TEXT_X}
+          y={SEASON_Y}
+          width={340}
+          height={SEASON_HEIGHT}
+          borderRadius={SEASON_HEIGHT / 2}
+          color={colors.surfaceRaised}
+        >
+          <Text
+            width={340}
+            height={SEASON_HEIGHT}
+            lineHeight={SEASON_HEIGHT}
+            contain="width"
+            textAlign="center"
+            fontSize={26}
+            fontFamily={BOLD}
+          >
+            {seasons().length > 1
+              ? `‹   ${$t("vod.season", { number: seasons()[seasonAt()]?.season ?? 1 })}   ›`
+              : $t("vod.season", { number: seasons()[0]?.season ?? 1 })}
+          </Text>
+        </View>
         <For each={SLOTS}>
           {slot => (
             <Show when={episodes()[top() + slot]}>
@@ -226,31 +221,36 @@ export const SeriesPanel = (props: {
                 const entry = () => entryOf(episode());
                 return (
                   <View
-                    x={TEXT_X - 20}
+                    x={TEXT_X}
                     y={LIST_Y + slot * ROW_HEIGHT}
-                    width={TEXT_WIDTH + 20}
-                    height={ROW_HEIGHT - 8}
-                    borderRadius={10}
-                    color={selected() ? "#2e6bd6ff" : "#ffffff0a"}
+                    width={TEXT_WIDTH}
+                    height={ROW_HEIGHT - 10}
+                    borderRadius={radius.medium}
+                    color={selected() ? colors.focus : colors.surface}
+                    transition={{ color: motion.quick }}
                   >
                     <Text
-                      x={20}
-                      width={TEXT_WIDTH - 300}
-                      height={ROW_HEIGHT - 8}
-                      lineHeight={ROW_HEIGHT - 8}
+                      x={24}
+                      width={TEXT_WIDTH - 280}
+                      height={ROW_HEIGHT - 10}
+                      lineHeight={ROW_HEIGHT - 10}
                       maxLines={1}
                       contain="width"
-                      fontSize={30}
+                      fontSize={28}
+                      fontFamily={selected() ? BOLD : undefined}
+                      color={textOn(selected())}
                     >
                       {episodeLabel(episode())}
                     </Text>
                     <Text
-                      x={TEXT_WIDTH}
+                      x={TEXT_WIDTH - 24}
                       mountX={1}
-                      height={ROW_HEIGHT - 8}
-                      lineHeight={ROW_HEIGHT - 8}
+                      height={ROW_HEIGHT - 10}
+                      lineHeight={ROW_HEIGHT - 10}
                       fontSize={24}
-                      color="#ffffffb3"
+                      color={
+                        selected() ? colors.onFocus : entry()?.finished ? colors.accentText : colors.textFaint
+                      }
                     >
                       {entry()?.finished
                         ? $t("vod.watched")
@@ -260,20 +260,20 @@ export const SeriesPanel = (props: {
                     </Text>
                     <Show when={progressOf(episode()) > 0}>
                       <View
-                        x={20}
-                        y={ROW_HEIGHT - 18}
+                        x={24}
+                        y={ROW_HEIGHT - 20}
                         width={300}
                         height={5}
-                        borderRadius={2}
-                        color="#ffffff33"
+                        borderRadius={2.5}
+                        color={selected() ? colors.trackOnFocus : colors.track}
                       />
                       <View
-                        x={20}
-                        y={ROW_HEIGHT - 18}
+                        x={24}
+                        y={ROW_HEIGHT - 20}
                         width={300 * progressOf(episode())}
                         height={5}
-                        borderRadius={2}
-                        color="#7fb2ffff"
+                        borderRadius={2.5}
+                        color={selected() ? colors.onFocus : colors.accent}
                       />
                     </Show>
                   </View>

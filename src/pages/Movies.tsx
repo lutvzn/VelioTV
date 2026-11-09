@@ -6,17 +6,18 @@ import { exposeToProbes } from "../devHooks";
 import { vod, watched } from "../library";
 import { watchVod } from "../play/start";
 import { filmPlay } from "../play/vodPlay";
+import { duration } from "../live/format";
 import { $t } from "../translate";
 import { FilmPanel } from "./vod/FilmPanel";
-import { type GridPlace, PosterGrid } from "./vod/PosterGrid";
+import { type HubPlace, VodHub } from "./vod/VodHub";
 
-// Movies (PLAN.md, Phase 6, step 4): every source's films as posters, by
-// category, with Continue watching first. OK opens a film's page, and Play
+// Movies (PLAN.md, Phase 6, step 4): every source's films in rows of
+// posters, by category, with Continue watching first (src/pages/vod/VodHub.tsx). OK opens a film's page, and Play
 // there watches it full screen (src/pages/Play.tsx); Back from the film
 // comes back to its page here.
 
 // Where the page was, and the film open, for coming back from watching.
-let place: GridPlace | undefined;
+let place: HubPlace | undefined;
 let reopen: string | undefined;
 
 export default () => {
@@ -70,7 +71,7 @@ export default () => {
 
   return (
     <>
-      <PosterGrid
+      <VodHub
         ref={element => (grid = element)}
         probeName="moviesGrid"
         title={$t("menu.movies")}
@@ -84,6 +85,16 @@ export default () => {
         onPlace={next => (place = next)}
         covered={open() !== undefined}
         onOpen={film => setOpen(film)}
+        details={film =>
+          vod.filmDetails(film).then(info => ({
+            backdrop: info.backdrop,
+            plot: info.plot,
+            facts: [
+              info.genre ?? film.category,
+              info.durationMs ? duration(info.durationMs) : undefined,
+            ].filter((fact): fact is string => Boolean(fact)),
+          }))
+        }
       />
       <Show when={open()}>
         {film => <FilmPanel film={film()} onClose={close} onPlay={startMs => play(film(), startMs)} />}

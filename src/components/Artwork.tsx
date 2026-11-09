@@ -1,0 +1,69 @@
+import { Text, View } from "@solidtv/solid";
+import { createSignal, Show } from "solid-js";
+import { BOLD, colors, radius } from "../theme";
+
+export interface ArtworkProps {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  /** The image; without one, or until it loads, a card with the title stands in. */
+  src?: string;
+  /** The title on the card standing in for the image. */
+  title: string;
+  fontSize?: number;
+  borderRadius?: number;
+}
+
+/**
+ * A poster or other artwork, with a card in its place until it loads. The
+ * renderer draws text after shapes, so the card's title would show through
+ * the image; it hides once the image is in.
+ */
+export const Artwork = (props: ArtworkProps) => {
+  // The image that loaded, so a slot reused for another title shows its card again.
+  const [loaded, setLoaded] = createSignal<string | undefined>();
+  const hasImage = () => !!props.src && loaded() === props.src;
+  const corner = () => props.borderRadius ?? radius.medium;
+  const fontSize = () => props.fontSize ?? 28;
+  return (
+    <View
+      x={props.x ?? 0}
+      y={props.y ?? 0}
+      width={props.width}
+      height={props.height}
+      borderRadius={corner()}
+      colorTop={colors.surfaceRaised}
+      colorBottom={colors.surfaceFaint}
+    >
+      <Text
+        x={20}
+        y={24}
+        width={props.width - 40}
+        maxLines={4}
+        contain="width"
+        lineHeight={Math.round(fontSize() * 1.3)}
+        fontSize={fontSize()}
+        fontFamily={BOLD}
+        color={colors.textDim}
+        alpha={hasImage() ? 0 : 1}
+      >
+        {props.title}
+      </Text>
+      <Show when={props.src}>
+        {src => (
+          <View
+            width={props.width}
+            height={props.height}
+            borderRadius={corner()}
+            src={src()}
+            onEvent={{
+              loaded: target => setLoaded(target.src ?? undefined),
+              failed: () => setLoaded(undefined),
+            }}
+          />
+        )}
+      </Show>
+    </View>
+  );
+};

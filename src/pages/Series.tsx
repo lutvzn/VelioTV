@@ -6,16 +6,16 @@ import { exposeToProbes } from "../devHooks";
 import { vod, watched } from "../library";
 import { watchVod } from "../play/start";
 import { episodePlay } from "../play/vodPlay";
-import { $t } from "../translate";
-import { type GridPlace, PosterGrid } from "./vod/PosterGrid";
+import { $t, $tn } from "../translate";
+import { type HubPlace, VodHub } from "./vod/VodHub";
 import { SeriesPanel } from "./vod/SeriesPanel";
 
-// Series (PLAN.md, Phase 6, step 4): every source's series as posters, by
-// category, with the ones being watched first. OK opens a series' page, on
-// the episode to carry on with; OK there plays it, and the episodes after
-// it follow on.
+// Series (PLAN.md, Phase 6, step 4): every source's series in rows of
+// posters, by category, with the ones being watched first
+// (src/pages/vod/VodHub.tsx). OK opens a series' page, on the episode to
+// carry on with; OK there plays it, and the episodes after it follow on.
 
-let place: GridPlace | undefined;
+let place: HubPlace | undefined;
 let reopen: string | undefined;
 
 export default () => {
@@ -51,7 +51,7 @@ export default () => {
 
   return (
     <>
-      <PosterGrid
+      <VodHub
         ref={element => (grid = element)}
         probeName="seriesGrid"
         title={$t("menu.series")}
@@ -65,6 +65,16 @@ export default () => {
         onPlace={next => (place = next)}
         covered={open() !== undefined}
         onOpen={show => setOpen(show)}
+        details={show =>
+          vod.seriesDetails(show).then(info => ({
+            backdrop: info.backdrop,
+            plot: info.plot ?? show.plot,
+            facts: [
+              info.genre ?? show.category,
+              info.seasons.length ? $tn("vod.seasons", info.seasons.length) : undefined,
+            ].filter((fact): fact is string => Boolean(fact)),
+          }))
+        }
       />
       <Show when={open()}>
         {show => (

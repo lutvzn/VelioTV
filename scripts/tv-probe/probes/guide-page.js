@@ -187,31 +187,36 @@ async function probe(input) {
   results.number = { typed: "500", name: at500?.name, number: at500?.number };
   log("number", results.number);
 
-  // Up from the first row to the group line, Right to the next group.
+  // Back to the groups' column, Down to the next group, Right to the guide.
   await type("1");
   press(KEYS.enter);
   await sleep(400);
-  press(KEYS.up);
+  press(KEYS.back);
   await sleep(300);
-  const areaAfterUp = page().area();
-  press(KEYS.right);
+  const areaAfterBack = page().area();
+  press(KEYS.down);
   await sleep(400);
   const group = page().filter();
-  press(KEYS.down);
+  press(KEYS.right);
   await sleep(300);
   results.group = {
-    areaAfterUp,
+    areaAfterBack,
     group: group.label,
     channels: group.channels.length,
     cursor: cursorName(),
-    areaAfterDown: page().area(),
+    areaAfterRight: page().area(),
   };
   log("group", results.group);
 
-  // Search, typing in the input the keyboard opens for.
+  // Search, from the field at the top of the column, typing in the input
+  // the keyboard opens for.
   const word = lineup.channels()[Math.floor(lineup.channels().length / 3)].name.split(" ")[0];
-  press(KEYS.up);
+  press(KEYS.back);
   await sleep(300);
+  for (let i = 0; i < 40 && !page().onSearch(); i++) {
+    press(KEYS.up);
+    await sleep(150);
+  }
   press(KEYS.enter);
   await sleep(500);
   const field = document.querySelector("input");

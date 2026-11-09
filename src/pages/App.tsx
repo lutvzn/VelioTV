@@ -6,8 +6,11 @@ import { PinPrompt } from "../components/PinPrompt";
 import { ReminderNotice } from "../components/ReminderNotice";
 import { MENU_WIDTH, SideMenu } from "../components/SideMenu";
 import { device } from "../device";
+import { sectionEmpty } from "../emptySection";
+import { menuAway, wholeScreen } from "../wholeScreen";
 import { library } from "../library";
 import { SECTIONS } from "../sections";
+import { colors } from "../theme";
 import { $t } from "../translate";
 import { smallVideoWindow, videoFillsScreen, videoWindow } from "../videoWindow";
 import { followVoiceGuide, readFocus } from "../voiceGuide";
@@ -34,12 +37,16 @@ declare global {
   }
 }
 
+const HOLE_RADIUS = 16;
+
 // The background's hole for the video window, or else the small window's; an
 // empty hole when there's neither.
 const backgroundHole = () => {
   const video = videoWindow() ?? smallVideoWindow();
-  if (!video) return { x: 0, y: 0, w: 0, h: 0 };
-  return { x: video.x, y: video.y, w: video.width, h: video.height };
+  if (!video) return { x: 0, y: 0, w: 0, h: 0, radius: 0 };
+  // Rounded like the cards around it, unless it fills the screen.
+  const radius = video.width >= 1920 ? 0 : HOLE_RADIUS;
+  return { x: video.x, y: video.y, w: video.width, h: video.height, radius };
 };
 
 // What the menu says while a source imports.
@@ -74,6 +81,12 @@ const topOf = (node: ElementNode) => {
   return at;
 };
 
+/** Whether a node is `container` or inside it. */
+const isInside = (node: ElementNode, container: ElementNode) => {
+  for (let at: ElementNode | undefined = node; at; at = at.parent) if (at === container) return true;
+  return false;
+};
+
 const App = (props: { children?: JSX.Element }) => {
   useMouse();
   const navigate = useNavigate();
@@ -91,16 +104,23 @@ const App = (props: { children?: JSX.Element }) => {
   // The menu is hidden while video fills the screen, and on the full-screen
   // pages even before their video shows.
   const menuHidden = () =>
-    videoFillsScreen() || location.pathname === "/watch" || location.pathname === "/play";
+    videoFillsScreen() || location.pathname === "/watch" || location.pathname === "/play" || menuAway();
   const focusMenu = () => {
     if (menuHidden()) return false;
     menu?.setFocus();
     return true;
   };
+  // A section with nothing in it (no channels, no films) leaves the keys
+  // on the menu.
   const focusContent = () => {
-    content?.setFocus();
+    if (!sectionEmpty()) content?.setFocus();
     return true;
   };
+  createEffect(() => {
+    if (!sectionEmpty()) return;
+    const active = activeElement();
+    if (active && content && isInside(active, content)) focusMenu();
+  });
 
   // A page that goes while it has the keys, such as when another page
   // opens it, takes them with it; they come back to the menu. Pages that
@@ -124,11 +144,12 @@ const App = (props: { children?: JSX.Element }) => {
 
   return (
     <View ref={window.APP}>
-      <View color={0x071423ff} shader={["holePunch", backgroundHole()]} />
+      <View color={colors.background} shader={["holePunch", backgroundHole()]} />
       <View
         ref={element => (content = element)}
-        x={MENU_WIDTH}
-        width={1920 - MENU_WIDTH}
+        // Under the menu for a page that lays out across the whole screen.
+        x={wholeScreen() ? 0 : MENU_WIDTH}
+        width={wholeScreen() ? 1920 : 1920 - MENU_WIDTH}
         height={1080}
         // To the page's first node, which passes it on to what should have it.
         forwardFocus={0}

@@ -11,3 +11,6 @@ PRIVATE.md
 
 # Vitest failure screenshots
 .vitest/
+
+# The user's design references, kept local
+reference/
