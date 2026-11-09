@@ -13,7 +13,8 @@
 # The result is printed as JSON; progress goes to stderr. It restarts the app
 # in debug mode, because the TV only opens its debug port when the app starts.
 # A probe is stopped after 15 minutes; set PROBE_TIMEOUT (in seconds) for a
-# longer one.
+# longer one. Set PROBE_PROFILE to a folder to save CPU profiles of the
+# app's workers during the probe there (eval.mjs).
 
 set -euo pipefail
 

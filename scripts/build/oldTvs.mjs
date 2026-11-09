@@ -21,6 +21,12 @@ const presetEnv = (targets, options = {}) => [
   { targets, bugfixes: true, modules: false, ...options },
 ];
 
+// core-js replaces push() and unshift() where growing a length past 2^32 - 1,
+// or a read-only length, isn't handled to spec, as on the TVs. No array here
+// is like that, and its push(), used for every playlist entry, took 3% of a
+// playlist import on the TV (PLAN.md, Faster playlist imports).
+const NOT_NEEDED = ["es.array.push", "es.array.unshift"];
+
 /** Adds the core-js polyfills each module uses. For worker.plugins. */
 export const workerPolyfills = ({ targets }) => ({
   name: "velio:worker-polyfills",
@@ -33,7 +39,7 @@ export const workerPolyfills = ({ targets }) => ({
       configFile: false,
       sourceType: "unambiguous",
       sourceMaps: true,
-      presets: [presetEnv(targets, { useBuiltIns: "usage", corejs: "3.50" })],
+      presets: [presetEnv(targets, { useBuiltIns: "usage", corejs: "3.50", exclude: NOT_NEEDED })],
     });
     return result && { code: result.code ?? code, map: result.map };
   },

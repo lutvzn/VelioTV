@@ -43,7 +43,7 @@ import { type GuideFilter, wantAll, wantChannels, Wanted, type WantOptions } fro
 import { GuideWriter, RECORD_OVERHEAD } from "./guideWriter";
 import { M3uParser } from "./m3u";
 import { readText } from "./stream";
-import type { GuideChannel, PlaylistChannel } from "./types";
+import type { GuideChannel, PlaylistChannel, Programme } from "./types";
 import { M3uVod, xtreamVod, type Film, type Series } from "./vod";
 import { XmltvParser } from "./xmltv";
 import {
@@ -124,8 +124,9 @@ export interface ImportProgress {
  * thread, so the guide stage's parts add up to it.
  */
 export interface ImportTiming {
-  /** The playlist or Xtream lists: downloading, parsing and storing them. */
+  /** The playlist or Xtream lists: downloading, parsing and storing them; the parts below. */
   channelsMs: number;
+  channels: ChannelTiming;
   /** The guide, all of it; the parts below. */
   guideMs: number;
   /** Waiting for the download's next piece: the network, and the browser's gunzip. */
@@ -141,6 +142,23 @@ export interface ImportTiming {
   /** Merging late programmes into stored blocks, inside storageWaitMs. */
   mergeMs: number;
   /** The rest: letting events run, progress, and choosing what to keep. */
+  otherMs: number;
+}
+
+/** The channel stage's parts, for `timing`. */
+export interface ChannelTiming {
+  /** Waiting for the playlist's next piece; for Xtream, its lists, read whole. */
+  downloadWaitMs: number;
+  /** Reading the M3U, not counting what is done with each entry. */
+  parseMs: number;
+  /** Telling films and episodes from channels, and gathering them. */
+  vodMs: number;
+  /** Giving channels their keys (channelKeys) and choosing the guide channels wanted. */
+  keysMs: number;
+  /** Storing the channel list, and the films and series. */
+  storeChannelsMs: number;
+  storeVodMs: number;
+  /** The rest: letting events run, and progress. */
   otherMs: number;
 }
 
@@ -281,6 +299,15 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
   const timing: ImportTiming | undefined = input.timing
     ? {
         channelsMs: 0,
+        channels: {
+          downloadWaitMs: 0,
+          parseMs: 0,
+          vodMs: 0,
+          keysMs: 0,
+          storeChannelsMs: 0,
+          storeVodMs: 0,
+          otherMs: 0,
+        },
         guideMs: 0,
         downloadWaitMs: 0,
         decodeMs: 0,
@@ -411,6 +438,10 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       const known = validatorsOf(response);
       if (known) validators[url] = known;
       progress = { ...progress, stage: "guide", url, bytes: 0, totalBytes };
+      // Timed, a piece's programmes are added after it is read, so the clock
+      // is read once a piece: on the TV, reading it for each programme took
+      // a tenth of the time it measured.
+      const timedProgrammes: Programme[] = [];
       const parser = new XmltvParser({
         defaultOffsetMinutes: input.guideOffsetMinutes,
         // Programmes of channels not kept go unread (parser.unwanted), and
@@ -423,24 +454,22 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
         },
         onProgramme: programme => {
           counts.read++;
-          if (!timing) {
-            writer.add(programme);
-            return;
-          }
-          const from = clock();
-          writer.add(programme);
-          addMs += clock() - from;
+          if (timing) timedProgrammes.push(programme);
+          else writer.add(programme);
         },
       });
       const decoding = timing ? { decodeMs: 0 } : undefined;
       let bodyEnded = timing ? clock() : 0;
       for await (const text of readText(body, bytes => (progress.bytes += bytes), { timing: decoding })) {
         if (timing) {
-          const from = clock();
+          let from = clock();
           timing.downloadWaitMs += from - bodyEnded;
-          const added = addMs;
           parser.push(text);
-          timing.parseMs += clock() - from - (addMs - added);
+          timing.parseMs += clock() - from;
+          from = clock();
+          for (let i = 0; i < timedProgrammes.length; i++) writer.add(timedProgrammes[i]);
+          timedProgrammes.length = 0;
+          addMs += clock() - from;
         } else parser.push(text);
         if (writer.full) {
           writer.expectedChannels = kept.size;
@@ -523,6 +552,11 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     if (previous?.lastDoneAt) state.lastDoneAt = previous.lastDoneAt;
     await putState(db, shownState("importing"));
     const channelsFrom = clock();
+    const channelParts = timing?.channels;
+    // Adds the time since `from` to a part of the channel stage, if timed.
+    const lap = (part: keyof ChannelTiming, from: number) => {
+      if (channelParts) channelParts[part] += clock() - from;
+    };
     let guideUrls = input.guideUrls ?? [];
 
     // Kept until the channel stage ends, then stored as one record.
@@ -536,42 +570,70 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
 
     if (input.kind === "xtream") {
       progress = { ...progress, url: normalizeServer(input.server) };
+      let from = clock();
       const account = await xtreamAccount(input, fetcher);
       state.account = account;
       for (const channel of await xtreamLiveChannels(input, account, fetcher, countBytes))
         addChannel(channel);
+      lap("downloadWaitMs", from);
       progress.channels = channels.length;
       report(true);
+      from = clock();
       vod = await xtreamVod(input, fetcher).catch((error: unknown) => {
         console.error("The Xtream server didn't list its films and series:", error);
         return undefined;
       });
+      lap("downloadWaitMs", from);
       if (!input.guideUrls) guideUrls = [xtreamGuideUrl(input)];
     } else if (input.playlistUrl) {
       const { body, totalBytes } = await download(fetcher, input.playlistUrl);
       progress = { ...progress, url: input.playlistUrl, totalBytes };
       const films = new M3uVod();
-      const parser = new M3uParser(channel => {
+      const take = (channel: PlaylistChannel) => {
         if (!films.add(channel)) addChannel(channel);
-      });
+      };
+      // Timed, as with the guide's programmes: a piece's entries are taken
+      // after it is read.
+      const timedEntries: PlaylistChannel[] = [];
+      const parser = new M3uParser(channelParts ? channel => timedEntries.push(channel) : take);
+      const read = (push: () => void) => {
+        let from = clock();
+        push();
+        lap("parseMs", from);
+        from = clock();
+        for (let i = 0; i < timedEntries.length; i++) take(timedEntries[i]);
+        timedEntries.length = 0;
+        lap("vodMs", from);
+      };
+      let bodyEnded = clock();
       for await (const text of readText(body, bytes => (progress.bytes += bytes))) {
-        parser.push(text);
+        lap("downloadWaitMs", bodyEnded);
+        read(() => parser.push(text));
         progress.channels = channels.length;
         report();
         await letEventsRun();
+        bodyEnded = clock();
       }
-      parser.end();
+      lap("downloadWaitMs", bodyEnded);
+      read(() => parser.end());
       progress.channels = channels.length;
       report(true);
+      const from = clock();
       vod = { films: films.films, series: films.allSeries() };
+      lap("vodMs", from);
       if (!input.guideUrls) guideUrls = parser.guideUrls;
     }
 
     // Written even when empty (a guide-only import), replacing the last list.
     storing = "storing the channels";
+    let from = clock();
     const keys = channelKeys(channels);
+    lap("keysMs", from);
+    from = clock();
     await writeChannels(db, source, channels, keys);
+    lap("storeChannelsMs", from);
     state.channels = channels.length;
+    from = clock();
     // Without a channel list, keep the whole guide.
     const keepAll = input.kind !== "xtream" && !input.playlistUrl;
     const own = new Wanted();
@@ -588,10 +650,13 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
         wantOptions,
       );
     }
+    lap("keysMs", from);
     channels = [];
     if (vod) {
       storing = "storing the films and series";
+      from = clock();
       await writeVod(db, { source, ...vod });
+      lap("storeVodMs", from);
       state.films = vod.films.length;
       state.series = vod.series.length;
     } else if (previous) {
@@ -601,7 +666,13 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
 
     const key = guideKey(guideUrls, input.guideOffsetMinutes);
     const guideFrom = clock();
-    if (timing) timing.channelsMs = guideFrom - channelsFrom;
+    if (timing) {
+      timing.channelsMs = guideFrom - channelsFrom;
+      const c = timing.channels;
+      c.otherMs =
+        timing.channelsMs -
+        (c.downloadWaitMs + c.parseMs + c.vodMs + c.keysMs + c.storeChannelsMs + c.storeVodMs);
+    }
     const guide = key === undefined ? undefined : await importGuide(key, guideUrls, own);
     if (timing) {
       timing.guideMs = clock() - guideFrom;

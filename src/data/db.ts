@@ -28,13 +28,15 @@
 //
 // Writes use relaxed durability, which was about 20 times faster on the TV.
 //
-// A source's films and series are one record too (vod.ts; PLAN.md, Phase 6).
+// A source's films and series are one record too, in columns (vod.ts,
+// vodColumns.ts; PLAN.md, Phase 6).
 
 import { type ChannelColumns, fromColumns, type StoredChannel, toColumns } from "./channelList";
 import { DAY, decodeBlock, type StoredProgramme } from "./guideCodec";
 import { ensureGetAll, keyCursor } from "../polyfills/indexedDb";
 import type { PlaylistChannel } from "./types";
 import type { StoredVod } from "./vod";
+import { fromVodColumns, toVodColumns, type VodColumns } from "./vodColumns";
 import type { XtreamAccount } from "./xtream";
 
 export { DAY, type StoredChannel, type StoredProgramme };
@@ -289,17 +291,27 @@ export const writeChannels = async (
   await finished(transaction);
 };
 
+/**
+ * A source's films and series as stored: in columns, or, imported before
+ * Phase 8, an object each.
+ */
+type StoredVodRecord = { source: string; columns: VodColumns } | StoredVod;
+
 /** Replaces a source's films and series. */
 export const writeVod = async (db: IDBDatabase, vod: StoredVod) => {
   const transaction = writeTransaction(db, "vod");
-  transaction.objectStore("vod").put(vod);
+  const record: StoredVodRecord = { source: vod.source, columns: toVodColumns(vod) };
+  transaction.objectStore("vod").put(record);
   await finished(transaction);
 };
 
 /** A source's films and series; empty if it has none, or hasn't been imported since Phase 6. */
 export const readVod = async (db: IDBDatabase, source: string): Promise<StoredVod> => {
-  const stored = await request<StoredVod | undefined>(db.transaction("vod").objectStore("vod").get(source));
-  return stored ?? { source, films: [], series: [] };
+  const store = db.transaction("vod").objectStore("vod");
+  const stored = await request<StoredVodRecord | undefined>(store.get(source));
+  if (!stored) return { source, films: [], series: [] };
+  if ("columns" in stored) return { source, ...fromVodColumns(stored.columns) };
+  return stored;
 };
 
 /** A source's channels, in playlist order. */

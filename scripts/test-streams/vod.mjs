@@ -96,18 +96,22 @@ const buildSeries = (count, channels) => {
 
 const libraries = new Map();
 
-/** Films and series: about one film per 8 channels and one series per 150, at least 24 and 6. */
-export const vodLibrary = channelCount => {
-  if (!libraries.has(channelCount)) {
-    const films = Math.max(24, Math.min(2000, Math.round(channelCount / 8)));
-    const series = Math.max(6, Math.min(80, Math.round(channelCount / 150)));
-    libraries.set(channelCount, {
-      films: buildFilms(films, channelCount),
-      series: buildSeries(series, channelCount),
+/**
+ * Films and series: about one film per 8 channels and one series per 150, at
+ * least 24 and 6, unless `films` and `series` give the counts.
+ */
+export const vodLibrary = (channelCount, { films, series } = {}) => {
+  const filmCount = films ?? Math.max(24, Math.min(2000, Math.round(channelCount / 8)));
+  const seriesCount = series ?? Math.max(6, Math.min(80, Math.round(channelCount / 150)));
+  const key = `${channelCount}/${filmCount}/${seriesCount}`;
+  if (!libraries.has(key)) {
+    libraries.set(key, {
+      films: buildFilms(filmCount, channelCount),
+      series: buildSeries(seriesCount, channelCount),
       genres: GENRES,
     });
   }
-  return libraries.get(channelCount);
+  return libraries.get(key);
 };
 
 export const findEpisode = (library, id) => {

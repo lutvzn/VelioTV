@@ -13,6 +13,7 @@
 // (src/data/watched.ts) still finds it: the provider's id where the URL has
 // one, or else the name.
 
+import { sortedCopy } from "./sortedCopy";
 import type { PlaylistChannel, StreamHeaders } from "./types";
 import { normalizeServer, playerApiUrl, type XtreamLogin } from "./xtream";
 import { ensureFetch } from "../polyfills/fetch";
@@ -107,24 +108,92 @@ const yearOf = (value: unknown) => {
 
 // --- From M3U playlists ---
 
-const VIDEO_FILE = /\.(mp4|mkv|avi|mov|m4v|wmv|flv|webm|mpg|mpeg)$/i;
-const PROVIDER_PATH = /\/(movie|movies|series)\/(?:[^/]+\/[^/]+\/)?(\d+)(?:\.\w+)?$/i;
+// Every entry of a playlist, channels too, is looked at here, so the URL is
+// read by hand rather than with regular expressions; vod.test.ts holds them
+// to what the expressions they replace gave.
+const VIDEO_FILES = new Set(["mp4", "mkv", "avi", "mov", "m4v", "wmv", "flv", "webm", "mpg", "mpeg"]);
 const EPISODE = /^(.*?)[\s\-_.:|]*\bS(\d{1,2})\s*E(\d{1,3})\b[\s\-_.:|]*(.*)$/i;
 const CATEGORY_PREFIX = /^(movies?|films?|vod|series|tv shows?)\s*[:|\-–]\s*/i;
+const QUERY_ID = /[?&](?:movie|series|id)=(\d+)/;
 
-const pathOf = (url: string) => {
-  const end = url.search(/[?#]/);
-  return end === -1 ? url : url.slice(0, end);
+/** Where a URL's path ends: at its query or fragment. */
+const pathEnd = (url: string) => {
+  const query = url.indexOf("?");
+  const hash = url.indexOf("#");
+  if (query === -1) return hash === -1 ? url.length : hash;
+  return hash === -1 || query < hash ? query : hash;
+};
+
+const isDigitCode = (code: number) => code >= 48 && code <= 57;
+const isWordCode = (code: number) =>
+  isDigitCode(code) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
+
+// Whether url[from, to) is "movie", "movies" or "series", in any case, and which.
+const providerKind = (url: string, from: number, to: number): "film" | "episode" | undefined => {
+  const length = to - from;
+  if (length !== 5 && length !== 6) return undefined;
+  const word = url.slice(from, to).toLowerCase();
+  if (word === "series") return "episode";
+  return word === "movie" || word === "movies" ? "film" : undefined;
+};
+
+/**
+ * An Xtream-style film or episode path, ".../movie/<id>.mkv" or
+ * ".../series/<user>/<password>/<id>.mp4", with "movie", "movies" or
+ * "series" in any case and the extension optional: its kind and id. The one
+ * further left wins, as with a search.
+ */
+const providerPath = (url: string, end: number) => {
+  const last = url.lastIndexOf("/", end - 1);
+  if (last === -1) return undefined;
+  // The last segment: digits, then perhaps "." and word characters.
+  let at = last + 1;
+  while (at < end && isDigitCode(url.charCodeAt(at))) at++;
+  const digitsEnd = at;
+  if (digitsEnd === last + 1) return undefined;
+  if (at < end) {
+    if (url.charCodeAt(at) !== 46 /* . */ || at + 1 === end) return undefined;
+    for (at++; at < end; at++) if (!isWordCode(url.charCodeAt(at))) return undefined;
+  }
+  const id = url.slice(last + 1, digitsEnd);
+  // The segments before it, from the right: b/a/<id>.
+  const a = last > 0 ? url.lastIndexOf("/", last - 1) : -1;
+  const b = a > 0 ? url.lastIndexOf("/", a - 1) : -1;
+  const c = b > 0 ? url.lastIndexOf("/", b - 1) : -1;
+  // "/kind/x/y/<id>": two non-empty segments between.
+  if (c !== -1 && a - b > 1 && last - a > 1) {
+    const kind = providerKind(url, c + 1, b);
+    if (kind) return { kind, id };
+  }
+  if (a !== -1) {
+    const kind = providerKind(url, a + 1, last);
+    if (kind) return { kind, id };
+  }
+  return undefined;
+};
+
+const isVideoFile = (url: string, end: number) => {
+  const dot = url.lastIndexOf(".", end - 1);
+  if (dot === -1 || end - dot > 5) return false;
+  return VIDEO_FILES.has(url.slice(dot + 1, end).toLowerCase());
+};
+
+/** An M3U entry's kind, and its provider's id for it if the URL has one. */
+const classify = (channel: Pick<PlaylistChannel, "url" | "name">) => {
+  const { url } = channel;
+  const end = pathEnd(url);
+  const provider = providerPath(url, end);
+  let kind: "film" | "episode" | undefined = provider?.kind;
+  if (!kind) {
+    if (!isVideoFile(url, end)) return undefined;
+    kind = EPISODE.test(channel.name) ? "episode" : "film";
+  }
+  return { kind, providerId: provider ? provider.id : QUERY_ID.exec(url)?.[1] };
 };
 
 /** Whether an M3U entry is a film or an episode rather than a channel, and which. */
-export const vodKind = (channel: Pick<PlaylistChannel, "url" | "name">): "film" | "episode" | undefined => {
-  const path = pathOf(channel.url);
-  const provider = path.match(PROVIDER_PATH);
-  if (provider) return provider[1].toLowerCase() === "series" ? "episode" : "film";
-  if (!VIDEO_FILE.test(path)) return undefined;
-  return EPISODE.test(channel.name) ? "episode" : "film";
-};
+export const vodKind = (channel: Pick<PlaylistChannel, "url" | "name">): "film" | "episode" | undefined =>
+  classify(channel)?.kind;
 
 /** "Show S01 E02 Title" as its series, season, episode and title. */
 export const parseEpisodeName = (name: string) => {
@@ -140,9 +209,6 @@ export const parseEpisodeName = (name: string) => {
 
 const category = (group: string | undefined) => group?.replace(CATEGORY_PREFIX, "").trim() || undefined;
 const nameKey = (name: string) => name.trim().toLowerCase().replace(/\s+/g, " ");
-/** The provider's id from an Xtream-style URL, or the URL's own query, such as ?movie=12. */
-const providerIdOf = (url: string) =>
-  pathOf(url).match(PROVIDER_PATH)?.[2] ?? url.match(/[?&](?:movie|series|id)=(\d+)/)?.[1];
 
 /** Gathers an M3U playlist's films and episodes as they're parsed. */
 export class M3uVod {
@@ -152,9 +218,10 @@ export class M3uVod {
 
   /** Takes the entry if it's a film or an episode; returns whether it did. */
   add(channel: PlaylistChannel) {
-    const kind = vodKind(channel);
-    if (!kind) return false;
-    const providerId = providerIdOf(channel.url);
+    const found = classify(channel);
+    if (!found) return false;
+    // The provider's id from an Xtream-style URL, or the URL's own query, such as ?movie=12.
+    const { kind, providerId } = found;
     const episode = kind === "episode" ? parseEpisodeName(channel.name) : undefined;
     if (!episode) {
       const id = `m:${providerId ?? nameKey(channel.name)}`;
@@ -201,11 +268,19 @@ export class M3uVod {
 
   /** The series, each with its episodes in order. */
   allSeries(): Series[] {
-    return Array.from(this.series.values(), show => ({
-      ...show,
-      // oxlint-disable-next-line unicorn/no-array-sort -- a fresh array; older TVs lack toSorted()
-      episodes: (show.episodes ?? []).slice().sort((a, b) => a.season - b.season || a.episode - b.episode),
-    }));
+    // Built by hand, not spread: the worker runs as ES5 (PLAN.md, Phase 8, step 4).
+    const list: Series[] = [];
+    this.series.forEach(show => {
+      const copy: Series = {
+        id: show.id,
+        name: show.name,
+        episodes: sortedCopy(show.episodes ?? [], (a, b) => a.season - b.season || a.episode - b.episode),
+      };
+      if (show.poster !== undefined) copy.poster = show.poster;
+      if (show.category !== undefined) copy.category = show.category;
+      list.push(copy);
+    });
+    return list;
   }
 }
 

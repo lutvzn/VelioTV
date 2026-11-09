@@ -173,6 +173,25 @@ describe("films and series", () => {
     db.close();
   });
 
+  it("are read as stored before they were in columns", async () => {
+    let db = await openDb(DB);
+    const films = [{ id: "m:1", name: "One", url: "http://a/1.mp4" }];
+    const series = [
+      {
+        id: "s:a",
+        name: "A",
+        episodes: [{ id: "e:1", season: 1, episode: 1, title: "", url: "http://a/e1.mp4" }],
+      },
+    ];
+    const writing = db.transaction("vod", "readwrite");
+    writing.objectStore("vod").put({ source: "old", films, series });
+    await new Promise(resolve => writing.addEventListener("complete", resolve));
+    db.close();
+    db = await openDb(DB);
+    expect(await readVod(db, "old")).toEqual({ source: "old", films, series });
+    db.close();
+  });
+
   it("make a database again that can't be opened", async () => {
     // A newer version than the app's can't be opened by it.
     const newer = await request<IDBDatabase>(

@@ -83,7 +83,8 @@ export const m3u = ({ base, channels, guideUrl, url, catchup = catchupStyle, ext
     if (url) lines.push(url(channel));
     else lines.push(style === "flussonic" ? flussonicUrl(base, channel) : streamUrl(base, channel));
   }
-  lines.push(...extra);
+  // Not push(...extra): a big provider's films overflow the stack.
+  for (const line of extra) lines.push(line);
   return `${lines.join("\n")}\n`;
 };
 

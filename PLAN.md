@@ -573,6 +573,32 @@ The user asked whether anything in the app is limited by the processor, and whet
 
    - **So Rust wasn't worth it:** the TypeScript parser is as fast as Rust's, and with workers not lowered to ES5 the whole is faster than Rust. That experiment built the workers without `workerPolyfills` and `lowerChunks` (so it can't run on old TVs, and wasn't kept). A modern build of the workers for the TVs that can run it would save another 14% of an import; not done, as too small to be worth a second build (decided 2026-11-09). What it does mean: in worker code on a hot path, avoid spreads and `for...of`, as `tidy()` now does.
 
+## Faster playlist imports (2026-11-09)
+
+After the guide (above), the channel stage: a big M3U, made by the test server as `playlist.m3u?channels=20000&vod=1&films=60000&series=5000` (140,533 entries: 20,000 channels, 60,000 films, 3,560 series of about 60,000 episodes), imported on the TV with `import-timing` and `"guideUrls": []`. `ImportTiming.channels` splits the stage, and `PROBE_PROFILE=<dir>` on `run.sh` saves a CPU profile of the import worker (`scripts/tv-probe/eval.mjs`).
+
+1. **What it cost.** 11.5–14 s: parsing 3.4–3.8 s, telling films and episodes from channels 3.4–4.0 s, storing films and series 2.5 s, the rest under 1.2 s each. Reading the films and series back on the page took 2.3 s, and the UI dropped to 7 fps meanwhile. Writing the M3U parser and the URL checks in `vod.ts` by hand (`charCodeAt` loops, no regular expressions) changed nothing measurable; the profile showed where the time went instead:
+   - **Timing itself.** The importer read the clock (`performance.now()`, about 6 µs on the TV) around each entry, and in the guide stage around each programme: 13% of the profile. Now a piece of text is parsed, and then its entries (or programmes) are handled in one timed loop.
+   - **core-js's `push()`.** The workers' polyfills (`workerPolyfills`) replaced `Array.prototype.push` with a slower one, as the TV fails two checks for arrays no code here makes (lengths past 2^32 - 1, read-only lengths). `es.array.push` and `es.array.unshift` are left out of the workers now (`scripts/build/oldTvs.mjs`).
+   - **core-js's `sort()`.** Samsung's user agent names no Chrome version, only `AppleWebKit/537.36`, so core-js takes the TV for an old Safari and sorts in JavaScript. It stays, as Chromium 38 and 47 do sort unstably, but lists already in order (most episodes, most guide days) are no longer sorted (`src/data/sortedCopy.ts`).
+   - **Storing films and series.** One record of 120,000 objects, cloned whole by IndexedDB. Now a column (array) per field, like channel lists (`src/data/vodColumns.ts`); records stored before are still read.
+
+2. **Results** on the TV, the channel stage of the big M3U:
+
+   | Part                             | Before    | Now       |
+   | -------------------------------- | --------- | --------- |
+   | Whole                            | 11.5–14 s | 7.8–8.0 s |
+   | Parsing                          | 3.4–3.8 s | 1.9–2.1 s |
+   | Films and episodes from channels | 3.4–4.0 s | 1.6–1.8 s |
+   | Storing films and series         | 2.5 s     | 1.3–1.6 s |
+   | Reading them back, on the page   | 2.3 s     | 0.8–1.0 s |
+
+   The UI kept 53+ fps while reading back. What is left is spread out: `parseAttributes()` about 1 s (a version that skips needless lower-casing was no faster), garbage collection about 1.2 s.
+
+   The guide stage gained too, from the timing and `push()`: the 2,000-channel test source's guide took 24.9 s (twice), against 34.9 s, with parsing 6.5 s (was 11.4 s) and packing 13.2 s (was 17.6 s). Part of that was the clock reads: the figures in "A Rust guide importer" above are inflated by them, the TypeScript side of `guide-bench` too. Deflating (fflate, level 6) is now 28% of the guide stage's profile. One run straight after deleting the big M3U's import took 33.2 s, with 9 s not in any part, so measure after a pause.
+
+   With a guide, a `PROBE_PROFILE` run saved the import's profile but didn't finish after it; the runner was stopped by hand. Without one it finishes.
+
 ## What you need before starting
 
 - **TVs:** at least one Samsung in developer mode now, and an LG in developer mode by Phase 9. The oldest models you own set the realistic support floor.

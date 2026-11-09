@@ -105,6 +105,8 @@ const fillStorageAfter = (after: number, times = Infinity) => {
   });
 };
 
+const sum = (values: number[]) => values.reduce((total, ms) => total + ms, 0);
+
 describe("runImport", () => {
   it("imports a playlist and its gzipped guide", async () => {
     const { channels, window, files } = await source(120);
@@ -159,13 +161,18 @@ describe("runImport", () => {
       { dbName: DB, fetch: serve(files) },
     );
     if (!timing) throw new Error("no timing");
-    for (const ms of Object.values(timing)) expect(ms).toBeGreaterThanOrEqual(0);
+    const { channels, ...guide } = timing;
+    for (const ms of [...Object.values(guide), ...Object.values(channels)])
+      expect(ms).toBeGreaterThanOrEqual(0);
     expect(timing.parseMs).toBeGreaterThan(0);
     expect(timing.packMs).toBeGreaterThan(0);
+    expect(channels.parseMs).toBeGreaterThan(0);
     const { downloadWaitMs, decodeMs, parseMs, packMs, storageWaitMs, otherMs } = timing;
-    // Each part is rounded on its own.
-    const parts = downloadWaitMs + decodeMs + parseMs + packMs + storageWaitMs + otherMs;
-    expect(Math.abs(parts - timing.guideMs)).toBeLessThanOrEqual(3);
+    expect(sum([downloadWaitMs, decodeMs, parseMs, packMs, storageWaitMs, otherMs])).toBeCloseTo(
+      timing.guideMs,
+      6,
+    );
+    expect(sum(Object.values(channels))).toBeCloseTo(timing.channelsMs, 6);
   });
 
   it("keeps only the guide channels the playlist uses", async () => {

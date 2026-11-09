@@ -36,7 +36,8 @@
 //                                00:1A:79:00:00:01, or 00:1A:79:00:00:02
 //                                for 50 channels
 // Films and series (vod.mjs) are in the Xtream API and get.php, and in the
-// playlist with ?vod=1. They all play one made-up film, encoded at the first
+// playlist with ?vod=1 (with &films= and &series= for other counts, such as
+// a big provider's). They all play one made-up film, encoded at the first
 // run, its clock on screen:
 //   /vod/film.mp4, .mkv, .ts     with range requests
 //   /vod/film.m3u8               HLS, as a VOD playlist
@@ -710,9 +711,15 @@ const serveSource = (req, res, url, base) => {
   if (url.pathname === "/playlist.m3u") {
     // With ?vod=1, films and episodes as video files, which only their
     // extension tells from channels; raw TS ones would pass for channels.
+    // ?films= and ?series= give their counts, as a big provider's might.
+    const count = name => {
+      const value = Number(url.searchParams.get(name));
+      return Number.isInteger(value) && value > 0 ? Math.min(value, 200_000) : undefined;
+    };
+    const sizes = { films: count("films"), series: count("series") };
     const extra =
       url.searchParams.get("vod") === "1"
-        ? vodLines(vodLibrary(settings.count), base, (kind, id, ext) => {
+        ? vodLines(vodLibrary(settings.count, sizes), base, (kind, id, ext) => {
             const file = ext === "mkv" ? "mkv" : "mp4";
             return `${base}/vod/film.${file}?${kind}=${id}`;
           })

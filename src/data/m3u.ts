@@ -11,7 +11,17 @@ import type { Catchup, PlaylistChannel, StreamHeaders } from "./types";
 
 type Attributes = Record<string, string>;
 
-const isSpace = (c: string | undefined) => c === " " || c === "\t";
+// Character codes. Every line of a playlist comes through here, in workers
+// built for ES5 (PLAN.md, Phase 8, step 4), so it reads codes rather than
+// one-character strings, and loops by index rather than with for...of.
+const SPACE = 32;
+const TAB = 9;
+const COMMA = 44;
+const EQUALS = 61;
+const DOUBLE_QUOTE = 34;
+const SINGLE_QUOTE = 39;
+
+const isSpaceCode = (code: number) => code === SPACE || code === TAB;
 
 /**
  * Reads the `key="value"` pairs and the title after them, from the text after
@@ -23,14 +33,18 @@ export const parseAttributes = (text: string): { attributes: Attributes; title: 
   const n = text.length;
   let i = 0;
   // The duration, such as "-1".
-  while (i < n && !isSpace(text[i]) && text[i] !== ",") i++;
+  for (let code = text.charCodeAt(0); i < n && !isSpaceCode(code) && code !== COMMA;) {
+    code = text.charCodeAt(++i);
+  }
   for (;;) {
-    while (i < n && isSpace(text[i])) i++;
+    while (i < n && isSpaceCode(text.charCodeAt(i))) i++;
     if (i >= n) return { attributes, title: "" };
-    if (text[i] === ",") return { attributes, title: text.slice(i + 1).trim() };
+    if (text.charCodeAt(i) === COMMA) return { attributes, title: text.slice(i + 1).trim() };
     let k = i;
-    while (k < n && text[k] !== "=" && text[k] !== "," && !isSpace(text[k])) k++;
-    if (text[k] !== "=") {
+    for (let code = text.charCodeAt(k); k < n && code !== EQUALS && code !== COMMA && !isSpaceCode(code);) {
+      code = text.charCodeAt(++k);
+    }
+    if (text.charCodeAt(k) !== EQUALS) {
       // A word with no value, such as the rest of a value broken by a stray
       // quote: skip it.
       i = k;
@@ -39,14 +53,16 @@ export const parseAttributes = (text: string): { attributes: Attributes; title: 
     const key = text.slice(i, k).toLowerCase();
     let j = k + 1;
     let value: string;
-    const quote = text[j];
-    if (quote === '"' || quote === "'") {
-      const end = text.indexOf(quote, j + 1);
+    const quote = text.charCodeAt(j);
+    if (quote === DOUBLE_QUOTE || quote === SINGLE_QUOTE) {
+      const end = text.indexOf(quote === DOUBLE_QUOTE ? '"' : "'", j + 1);
       value = text.slice(j + 1, end === -1 ? n : end);
       j = end === -1 ? n : end + 1;
     } else {
       let end = j;
-      while (end < n && text[end] !== "," && !isSpace(text[end])) end++;
+      for (let code = text.charCodeAt(end); end < n && code !== COMMA && !isSpaceCode(code);) {
+        code = text.charCodeAt(++end);
+      }
       value = text.slice(j, end);
       j = end;
     }
@@ -54,6 +70,10 @@ export const parseAttributes = (text: string): { attributes: Attributes; title: 
     i = j;
   }
 };
+
+/** Whether `line` starts with `tag`, such as "#EXTINF:", in any case. */
+const startsWithTag = (line: string, tag: string) =>
+  line.startsWith(tag) || line.slice(0, 11).toUpperCase().startsWith(tag);
 
 const setHeader = (headers: StreamHeaders, name: string, value: string) => {
   const key = name.trim().toLowerCase();
@@ -77,6 +97,9 @@ const positiveNumber = (text: string | undefined) => {
   return Number.isFinite(value) && value > 0 ? value : undefined;
 };
 
+// #EXTINF attributes that give a stream's headers, in the order applied.
+const HEADER_ATTRIBUTES = ["http-user-agent", "user-agent", "http-referrer", "http-referer", "referer"];
+
 export class M3uParser {
   /** Guide URLs from the #EXTM3U line (url-tvg, x-tvg-url). */
   guideUrls: string[] = [];
@@ -97,7 +120,8 @@ export class M3uParser {
   push(text: string) {
     const lines = (this.rest + text).split("\n");
     this.rest = lines.pop() ?? "";
-    for (const line of lines) this.line(line);
+    // oxlint-disable-next-line unicorn/no-for-loop -- see the character codes above
+    for (let i = 0; i < lines.length; i++) this.line(lines[i]);
   }
 
   end() {
@@ -112,14 +136,13 @@ export class M3uParser {
       if (line) this.started = true;
     }
     if (!line) return;
-    if (line[0] !== "#") {
+    if (line.charCodeAt(0) !== 35 /* # */) {
       this.channel(line);
       return;
     }
-    const upper = line.slice(0, 11).toUpperCase();
-    if (upper.startsWith("#EXTINF:")) {
+    if (startsWithTag(line, "#EXTINF:")) {
       this.info = parseAttributes(line.slice(8));
-    } else if (upper.startsWith("#EXTM3U")) {
+    } else if (startsWithTag(line, "#EXTM3U")) {
       const { attributes } = parseAttributes(line.slice(7));
       for (const key of ["url-tvg", "x-tvg-url", "tvg-url"]) {
         for (const url of attributes[key]?.split(",") ?? []) {
@@ -127,13 +150,13 @@ export class M3uParser {
           if (trimmed && !this.guideUrls.includes(trimmed)) this.guideUrls.push(trimmed);
         }
       }
-    } else if (upper.startsWith("#EXTGRP:")) {
+    } else if (startsWithTag(line, "#EXTGRP:")) {
       this.group = line.slice(8).trim() || undefined;
-    } else if (upper.startsWith("#EXTVLCOPT:")) {
+    } else if (startsWithTag(line, "#EXTVLCOPT:")) {
       const option = line.slice(11);
       const equals = option.indexOf("=");
       if (equals > 0) setHeader(this.headers, option.slice(0, equals), option.slice(equals + 1));
-    } else if (upper.startsWith("#EXTHTTP:")) {
+    } else if (startsWithTag(line, "#EXTHTTP:")) {
       try {
         const values: unknown = JSON.parse(line.slice(9));
         if (values && typeof values === "object") {
@@ -160,7 +183,9 @@ export class M3uParser {
         if (equals > 0) setHeader(headers, pair.slice(0, equals), decodeComponent(pair.slice(equals + 1)));
       }
     }
-    for (const key of ["http-user-agent", "user-agent", "http-referrer", "http-referer", "referer"]) {
+    // oxlint-disable-next-line unicorn/no-for-loop -- see the character codes above
+    for (let i = 0; i < HEADER_ATTRIBUTES.length; i++) {
+      const key = HEADER_ATTRIBUTES[i];
       if (attributes[key]) setHeader(headers, key, attributes[key]);
     }
 

@@ -20,6 +20,7 @@
 // the programmes' icons, categories or "new" flags.
 
 import { Deflate, inflateSync, strFromU8, strToU8 } from "fflate";
+import { sortedCopy } from "./sortedCopy";
 import type { Programme } from "./types";
 
 export const DAY = 86_400_000;
@@ -57,11 +58,7 @@ type DetailsRow = [Column, Column];
 // become slow helpers, so this and gridRow() copy and loop by hand: a spread
 // here took a third of a guide's packing on the TV.
 export const tidy = (programmes: Unfinished[]): StoredProgramme[] => {
-  // Not toSorted(): older TVs' browsers lack it, and workers get no polyfills.
-  // oxlint-disable-next-line unicorn/prefer-spread
-  const sorted = programmes.slice();
-  // oxlint-disable-next-line unicorn/no-array-sort
-  sorted.sort((a, b) => a.start - b.start);
+  const sorted = sortedCopy(programmes, (a, b) => a.start - b.start);
   const list: StoredProgramme[] = [];
   for (let i = 0; i < sorted.length; i++) {
     const p = sorted[i];
