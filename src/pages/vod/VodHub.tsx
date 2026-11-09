@@ -5,6 +5,8 @@ import { Backdrop } from "../../components/Backdrop";
 import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen } from "../../components/SideMenu";
 import { exposeToProbes } from "../../devHooks";
 import { markEmpty } from "../../emptySection";
+import { heldRacing, moveWhileHeld, stopHold } from "../../heldKey";
+import { settings } from "../../library";
 import { createRestingCursor } from "../../restingCursor";
 import { fold } from "../../guide/search";
 import { scrollTop } from "../../live/listWindow";
@@ -216,15 +218,30 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
     setArea("grid");
     return true;
   };
-  /** Moves the column's cursor by `step`, from the search field (-1) to the last group. */
+  /**
+   * Moves the column's cursor by `step`, from the search field (-1) to the
+   * last group; returns whether it moved.
+   */
   const moveGroup = (step: number) => {
     const all = groups();
-    const index = Math.max(-1, Math.min(all.length - 1, (onSearch() ? -1 : cursorIndex()) + step));
+    const from = onSearch() ? -1 : cursorIndex();
+    const index = Math.max(-1, Math.min(all.length - 1, from + step));
     batch(() => {
       setOnSearch(index < 0);
       if (index >= 0) groupCursor.move(all[index].id);
     });
+    return index !== from;
   };
+  // Up or Down, held: the cursor goes on by itself, faster and faster, up to
+  // the speed set for the list (Settings, "Scrolling speed").
+  const holdGroup = (event: KeyboardEvent, step: number) =>
+    moveWhileHeld(
+      event,
+      step,
+      settings.holdSpeed("groups"),
+      by => focused() && !props.covered && area() === "groups" && moveGroup(by),
+    );
+  onCleanup(stopHold);
 
   const empty = () => props.items.length === 0 && props.continueItems.length === 0;
   // With no titles at all (or while they load) the menu keeps the keys.
@@ -351,10 +368,20 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   const gridRow = () => Math.floor(at() / COLUMNS);
   const rowCount = () => Math.ceil(items().length / COLUMNS);
   /** Moves the cursor `rows` rows up or down, onto the last poster if the row is short. */
+  /** Moves the cursor `rows` rows, or as far as there are; returns whether it moved. */
   const moveRows = (rows: number) => {
     const row = Math.max(0, Math.min(gridRow() + rows, rowCount() - 1));
-    if (row !== gridRow()) placeAt(row * COLUMNS + (at() % COLUMNS));
+    if (row === gridRow()) return false;
+    placeAt(row * COLUMNS + (at() % COLUMNS));
+    return true;
   };
+  const holdRows = (event: KeyboardEvent, step: number) =>
+    moveWhileHeld(
+      event,
+      step,
+      settings.holdSpeed("posters"),
+      by => focused() && !props.covered && area() === "grid" && moveRows(by),
+    );
   // The rows drawn: the one with the cursor, the two below, and the one
   // above, hidden, so it slides in when the cursor moves up.
   const drawnRows = () => {
@@ -377,14 +404,14 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
       // Read by sayWhileFocused above, not as the page's whole text.
       announce=""
       onFocusChanged={setFocused}
-      onUp={() => {
-        if (area() === "groups") moveGroup(-1);
-        else moveRows(-1);
+      onUp={event => {
+        if (area() === "groups") holdGroup(event, -1);
+        else holdRows(event, -1);
         return true;
       }}
-      onDown={() => {
-        if (area() === "groups") moveGroup(1);
-        else moveRows(1);
+      onDown={event => {
+        if (area() === "groups") holdGroup(event, 1);
+        else holdRows(event, 1);
         return true;
       }}
       onChannelUp={() => {
@@ -554,6 +581,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
                                 src={one().poster}
                                 title={one().name}
                                 fontSize={24}
+                                wait={heldRacing()}
                               />
                               <Show when={one().progress}>
                                 {progress => (

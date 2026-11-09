@@ -20,6 +20,7 @@ import { DAY, type ProgrammeDetails, type StoredProgramme } from "../data/guideC
 import type { Channel, ChannelGroup } from "../data/lineup";
 import { exposeToProbes } from "../devHooks";
 import { markEmpty } from "../emptySection";
+import { moveWhileHeld, stopHold } from "../heldKey";
 import { createRestingCursor } from "../restingCursor";
 import { useWholeScreen } from "../wholeScreen";
 import { createGuideDays } from "../guide/guideDays";
@@ -48,6 +49,7 @@ import {
   liveNumbers,
   liveView,
   reminders,
+  settings,
 } from "../library";
 import { askPin } from "../pin";
 import { FAVOURITES } from "../live/groups";
@@ -237,13 +239,16 @@ export default () => {
       }
     }),
   );
+  /** Puts the cursor on row `index`, or as near as there is; returns whether it moved. */
   const moveCursor = (index: number) => {
     const count = list().length;
-    if (count === 0) return;
+    if (count === 0) return false;
     const at = Math.max(0, Math.min(index, count - 1));
+    const was = cursor();
     setCursor(at);
     setTop(scrollTop(at, top(), GUIDE_ROWS, count));
     cursorId = list()[at]?.id;
+    return at !== was;
   };
   const cursorChannel = () => list()[cursor()] as Channel | undefined;
   const cursorNumber = () => {
@@ -438,15 +443,37 @@ export default () => {
     },
   });
 
-  /** Moves the column's cursor by `step`, from the search field (-1) to the last group. */
+  /**
+   * Moves the column's cursor by `step`, from the search field (-1) to the
+   * last group; returns whether it moved.
+   */
   const moveGroup = (step: number) => {
     const all = filters();
-    const at = Math.max(-1, Math.min(all.length - 1, (onSearch() ? -1 : cursorIndex()) + step));
+    const was = onSearch() ? -1 : cursorIndex();
+    const at = Math.max(-1, Math.min(all.length - 1, was + step));
     batch(() => {
       setOnSearch(at < 0);
       if (at >= 0) groupCursor.move(all[at].id);
     });
+    return at !== was;
   };
+  // Up or Down, held: the cursor goes on by itself, faster and faster, up to
+  // the speed set for the list (Settings, "Scrolling speed").
+  const holdGroup = (event: KeyboardEvent, step: number) =>
+    moveWhileHeld(
+      event,
+      step,
+      settings.holdSpeed("groups"),
+      by => focused() && area() === "filters" && moveGroup(by),
+    );
+  const holdRow = (event: KeyboardEvent, step: number) =>
+    moveWhileHeld(
+      event,
+      step,
+      settings.holdSpeed("guide"),
+      by => focused() && area() === "grid" && !moving() && moveCursor(cursor() + by),
+    );
+  onCleanup(stopHold);
 
   const search = () =>
     editText({
@@ -682,14 +709,14 @@ export default () => {
       onFocusChanged={setFocused}
       // While a favourite moves, it has every key.
       onCaptureKey={(_event, _element, _focused, key) => (moving() ? movingKey(key) : false)}
-      onUp={() => {
-        if (area() === "filters") moveGroup(-1);
-        else moveCursor(cursor() - 1);
+      onUp={event => {
+        if (area() === "filters") holdGroup(event, -1);
+        else holdRow(event, -1);
         return true;
       }}
-      onDown={() => {
-        if (area() === "filters") moveGroup(1);
-        else moveCursor(cursor() + 1);
+      onDown={event => {
+        if (area() === "filters") holdGroup(event, 1);
+        else holdRow(event, 1);
         return true;
       }}
       onChannelUp={() => {

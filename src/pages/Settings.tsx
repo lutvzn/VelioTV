@@ -11,6 +11,7 @@ import { BackupPage } from "./settings/BackupPage";
 import { HiddenPage } from "./settings/HiddenPage";
 import { PinPage } from "./settings/PinPage";
 import { RemindersPage } from "./settings/RemindersPage";
+import { ScrollingPage } from "./settings/ScrollingPage";
 import { SourceForm } from "./settings/SourceForm";
 import { progressFraction, statusLines } from "./settings/status";
 import { Glow } from "../components/Glow";
@@ -21,11 +22,12 @@ import { BOLD, colors, radius, RING } from "../theme";
 // backup and restore (PLAN.md, Phase 5), and the reminders (Phase 6). Each opens in the list's place, and
 // Back comes back to the row it was opened from.
 
-type Page = "hidden" | "pin" | "app" | "reminders" | "backup";
+type Page = "hidden" | "pin" | "app" | "scrolling" | "reminders" | "backup";
 const PAGES: { page: Page; label: TextKey }[] = [
   { page: "hidden", label: "settings.hidden" },
   { page: "pin", label: "settings.pin" },
   { page: "app", label: "settings.app" },
+  { page: "scrolling", label: "settings.scrolling" },
   { page: "reminders", label: "settings.reminders" },
   { page: "backup", label: "settings.backup" },
 ];
@@ -297,6 +299,9 @@ export default () => {
           </Match>
           <Match when={page() === "app"}>
             <AppPage onClose={close} />
+          </Match>
+          <Match when={page() === "scrolling"}>
+            <ScrollingPage onClose={close} />
           </Match>
           <Match when={page() === "reminders"}>
             <RemindersPage onClose={close} />

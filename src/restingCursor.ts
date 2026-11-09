@@ -4,6 +4,7 @@
 // was opened (PLAN.md, "UI performance").
 
 import { type Accessor, batch, createEffect, createSignal, on, onCleanup } from "solid-js";
+import { holding } from "./heldKey";
 
 /** How long the cursor rests on a section or group before it opens. */
 export const CURSOR_REST_MS = 250;
@@ -43,6 +44,11 @@ export const createRestingCursor = (shown: Accessor<string>, show: (id: string) 
     batch(() => show(id));
     return id;
   };
+  // Nothing opens while a held key moves the cursor on.
+  const rest = () => {
+    if (holding()) timer = setTimeout(rest, CURSOR_REST_MS);
+    else settle();
+  };
   const move = (id: string) => {
     if (id === shown()) {
       drop();
@@ -50,7 +56,7 @@ export const createRestingCursor = (shown: Accessor<string>, show: (id: string) 
     }
     clearTimeout(timer);
     setMoved(id);
-    timer = setTimeout(settle, CURSOR_REST_MS);
+    timer = setTimeout(rest, CURSOR_REST_MS);
   };
 
   createEffect(

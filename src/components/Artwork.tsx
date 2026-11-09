@@ -1,5 +1,5 @@
 import { Text, View } from "@solidtv/solid";
-import { createSignal, Show } from "solid-js";
+import { createEffect, createSignal, Show } from "solid-js";
 import { sizedImage } from "../images";
 import { BOLD, colors, radius } from "../theme";
 
@@ -14,6 +14,8 @@ export interface ArtworkProps {
   title: string;
   fontSize?: number;
   borderRadius?: number;
+  /** Shows the bare card until this is false, as while a held key races past (src/heldKey.ts). */
+  wait?: boolean;
 }
 
 /**
@@ -30,7 +32,12 @@ const OPAQUE = /\.jpe?g(\?|#|$)/i;
 export const Artwork = (props: ArtworkProps) => {
   // The image that loaded, so a slot reused for another title shows its card again.
   const [loaded, setLoaded] = createSignal<string | undefined>();
-  const src = () => sizedImage(props.src, props.width);
+  // Once it's shown in full it stays so.
+  const [ready, setReady] = createSignal(!props.wait);
+  createEffect(() => {
+    if (!props.wait) setReady(true);
+  });
+  const src = () => (ready() ? sizedImage(props.src, props.width) : undefined);
   const hasImage = () => !!src() && loaded() === src();
   const covered = () => hasImage() && OPAQUE.test(src() ?? "");
   const corner = () => props.borderRadius ?? radius.medium;
@@ -55,9 +62,9 @@ export const Artwork = (props: ArtworkProps) => {
         fontSize={fontSize()}
         fontFamily={BOLD}
         color={colors.textDim}
-        alpha={hasImage() ? 0 : 1}
+        alpha={hasImage() || !ready() ? 0 : 1}
       >
-        {props.title}
+        {ready() ? props.title : ""}
       </Text>
       <Show when={src()}>
         {image => (

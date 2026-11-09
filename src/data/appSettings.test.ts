@@ -10,10 +10,12 @@ describe("app settings", () => {
     settings.setStartOn("guide");
     settings.setClock("12h");
     settings.setLanguage("pt-BR");
+    settings.setHoldSpeed("guide", 40);
     expect(createAppSettings({ storage }).all()).toEqual({
       startOn: "guide",
       clock: "12h",
       language: "pt-BR",
+      holdSpeeds: { groups: 20, guide: 40, posters: 20 },
     });
   });
 
@@ -40,10 +42,19 @@ describe("app settings", () => {
   });
 
   it("read restored settings, leaving out what doesn't fit", () => {
-    expect(readSettings({ startOn: "guide", clock: "1h", pin: "12345", language: "fr" })).toEqual({
+    expect(
+      readSettings({
+        startOn: "guide",
+        clock: "1h",
+        pin: "12345",
+        language: "fr",
+        holdSpeeds: { groups: 10, guide: 7, posters: "60" },
+      }),
+    ).toEqual({
       startOn: "guide",
       clock: "24h",
       language: "auto",
+      holdSpeeds: { groups: 10, guide: 20, posters: 20 },
     });
     expect(readSettings({ language: "pt-BR" }).language).toBe("pt-BR");
     expect(readSettings(null)).toEqual(defaultSettings());
