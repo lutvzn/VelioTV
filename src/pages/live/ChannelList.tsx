@@ -6,6 +6,7 @@ import { For, Show } from "solid-js";
 import type { NowAndNext } from "../../data/guideCache";
 import type { Channel } from "../../data/lineup";
 import { timeRange } from "../../live/format";
+import { Fill } from "../../components/Fill";
 import { BOLD, colors, radius } from "../../theme";
 import { $t, $tn } from "../../translate";
 
@@ -65,14 +66,13 @@ export const ChannelList = (props: ChannelListProps) => {
               const playing = () => channel().id === props.playingId;
               const nameX = () => (channel().logo ? LOGO_X + LOGO_WIDTH + 16 : LOGO_X);
               return (
-                <View
-                  x={24}
-                  y={ROWS_Y + slot * ROW_HEIGHT}
-                  width={ROW_WIDTH}
-                  height={ROW_HEIGHT - 6}
-                  borderRadius={radius.medium}
-                  color={selected() ? colors.focus : colors.transparent}
-                >
+                <View x={24} y={ROWS_Y + slot * ROW_HEIGHT} width={ROW_WIDTH} height={ROW_HEIGHT - 6}>
+                  <Fill
+                    width={ROW_WIDTH}
+                    height={ROW_HEIGHT - 6}
+                    borderRadius={radius.medium}
+                    color={selected() ? colors.focus : colors.transparent}
+                  />
                   <Text
                     x={70}
                     mountX={1}

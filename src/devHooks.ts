@@ -73,6 +73,11 @@ const hooks: Record<string, unknown> = {
 
 export const installDevHooks = () => Object.assign(globalThis, { velio: hooks });
 
+/** Gives probes the renderer, to time frames and walk the scene (the `ui-perf` probe). */
+export const exposeRenderer = (renderer: unknown) => {
+  hooks.renderer = renderer;
+};
+
 /** Puts a page's own state on `window.velio` while the page is open. */
 export const exposeToProbes = (name: string, value: unknown) => {
   hooks[name] = value;

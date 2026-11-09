@@ -15,7 +15,7 @@ import VideoTest from "./pages/dev/VideoTest";
 import fonts from "./fonts";
 import { merge } from "lodash-es";
 import { config } from "./device";
-import { installDevHooks } from "./devHooks";
+import { exposeRenderer, installDevHooks } from "./devHooks";
 import { library, settings } from "./library";
 import { player, secondPlayer } from "./player";
 import { watchLifecycle } from "./player/lifecycle";
@@ -35,6 +35,7 @@ watchLifecycle(player);
 watchLifecycle(secondPlayer);
 
 const { render, renderer } = createRenderer();
+exposeRenderer(renderer);
 
 // Shaders are WebGL-only; the DOM renderer is never enabled here.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion

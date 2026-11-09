@@ -3,6 +3,7 @@ import { batch, createEffect, createMemo, createSignal, Index } from "solid-js";
 import type { Channel } from "../../data/lineup";
 import { exposeToProbes } from "../../devHooks";
 import { scrollTop, wrapIndex } from "../../live/listWindow";
+import { Fill } from "../../components/Fill";
 import { BOLD, colors, radius, textOn } from "../../theme";
 import { channelMenu, type Menu, type MenuOption } from "./menus";
 
@@ -120,10 +121,14 @@ export const OptionsPanel = (props: {
               y={ROWS_Y + slot() * ROW_HEIGHT}
               width={ROW_WIDTH}
               height={ROW_HEIGHT - 6}
-              borderRadius={radius.medium}
               alpha={option() ? 1 : 0}
-              color={at() === level().cursor ? colors.focus : colors.transparent}
             >
+              <Fill
+                width={ROW_WIDTH}
+                height={ROW_HEIGHT - 6}
+                borderRadius={radius.medium}
+                color={at() === level().cursor ? colors.focus : colors.transparent}
+              />
               <Text
                 x={24}
                 width={ROW_WIDTH - 48}

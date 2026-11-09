@@ -1,6 +1,7 @@
 import { Text, View } from "@solidtv/solid";
 import { For } from "solid-js";
 import type { TrackRow } from "../../live/trackRows";
+import { Fill } from "../../components/Fill";
 import { BOLD, colors, radius } from "../../theme";
 import { OVERLAY_Z } from "./ChannelOptions";
 
@@ -24,14 +25,13 @@ export const TrackPanel = (props: TrackPanelProps) => (
     <View width={1} height={1080} color={colors.line} />
     <For each={props.rows}>
       {(row, at) => (
-        <View
-          x={24}
-          y={ROWS_Y + at() * ROW_HEIGHT}
-          width={ROW_WIDTH}
-          height={ROW_HEIGHT - 6}
-          borderRadius={radius.medium}
-          color={at() === props.cursor ? colors.focus : colors.transparent}
-        >
+        <View x={24} y={ROWS_Y + at() * ROW_HEIGHT} width={ROW_WIDTH} height={ROW_HEIGHT - 6}>
+          <Fill
+            width={ROW_WIDTH}
+            height={ROW_HEIGHT - 6}
+            borderRadius={radius.medium}
+            color={at() === props.cursor ? colors.focus : colors.transparent}
+          />
           <Text
             x={row.type === "heading" ? 16 : 70}
             width={ROW_WIDTH - 90}

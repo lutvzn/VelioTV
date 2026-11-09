@@ -122,7 +122,8 @@ export const SeriesPanel = (props: {
       zIndex={OVERLAY_Z}
       width={PAGE_WIDTH}
       height={1080}
-      color={colors.background}
+      // No fill of its own: the page under it is hidden (VodHub), so the
+      // app's background shows, in the same colour.
       onFocusChanged={setFocused}
       onUp={() => {
         place(cursor() - 1);

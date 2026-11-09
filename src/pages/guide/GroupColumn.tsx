@@ -2,6 +2,7 @@ import { Text, View } from "@solidtv/solid";
 import { For, type JSX, Show } from "solid-js";
 import { Glow } from "../../components/Glow";
 import { OVERLAY_Z } from "../live/ChannelOptions";
+import { Fill } from "../../components/Fill";
 import { BOLD, colors, radius, RING } from "../../theme";
 import { $t } from "../../translate";
 
@@ -38,15 +39,14 @@ const inkFor = (focused: boolean, current: boolean) => {
  * focus, a cyan wash when it's the group shown.
  */
 const Item = (props: { y: number; focused: boolean; current: boolean; children: JSX.Element }) => (
-  <View
-    x={ITEM_X}
-    y={props.y}
-    width={ITEM_WIDTH}
-    height={ITEM_HEIGHT}
-    borderRadius={radius.medium}
-    color={props.focused ? colors.focus : props.current ? colors.accentWash : colors.transparent}
-  >
-    <View
+  <View x={ITEM_X} y={props.y} width={ITEM_WIDTH} height={ITEM_HEIGHT}>
+    <Fill
+      width={ITEM_WIDTH}
+      height={ITEM_HEIGHT}
+      borderRadius={radius.medium}
+      color={props.focused ? colors.focus : props.current ? colors.accentWash : colors.transparent}
+    />
+    <Fill
       x={RING}
       y={RING}
       width={ITEM_WIDTH - 2 * RING}

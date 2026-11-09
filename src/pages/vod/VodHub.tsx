@@ -347,6 +347,9 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
       }}
       width={PAGE_WIDTH}
       height={1080}
+      // Under a title's page it would be drawn for nothing, and the TV's GPU
+      // has no fill rate to spare (PLAN.md, "UI performance").
+      alpha={props.covered ? 0 : 1}
       // Read by sayWhileFocused above, not as the page's whole text.
       announce=""
       onFocusChanged={setFocused}

@@ -464,6 +464,39 @@ Storage first, as it's the one place users can lose data today; then older TVs, 
      - **Found:** SolidTV picks a node's shadow shader once, when it's made, so a shadow switched on later never shows. Focus glows are always-shadowed nodes that fade in (`Glow`).
      - **Checked:** `pnpm check`'s lint, types and tests (214) and `pnpm check:old-tvs` pass; its format check fails only on the untracked `reference/` files. Screenshots in WebKit of the hub, rail, guide and Settings.
    - **To check on the TV:** how it looks, and whether rounded guide cells, the focus scale and glow, the hub's rows and backdrops keep scrolling at 60 fps.
+7. **UI performance** (2026-11-09):
+   - **How it's measured** (`ui-perf` probe: `./scripts/tv-probe/run.sh <tv-ip> ui-perf '{"stopVideo": true}'`, about 4 minutes; `skip` leaves screens out). The TV's GPU is a Mali-G31, short of fill rate: the cost of a screen is in how many pixels it paints, not in the JavaScript. Timing draws with `readPixels` doesn't work on it: one draw waits for the vsync (18.6 ms whatever is drawn), and in a batch the tiled GPU skips the work a later draw covers. So the probe asks for a redraw every frame and counts how many it gets (60 at most), on each screen, then again with each effect taken away (shadows, rounded corners, images, text, see-through layers over 15% of the screen), and records frames while it moves the cursor. Video at 50 Hz holds every reading at 50, so `stopVideo` stops it for the run (and keeps the guide's preview from starting it again). These are the rates while something moves (focus scale and glow, sliding rows, colour fades); a still screen isn't redrawn.
+   - **What cost the frames:**
+     - **Clear rounded fills:** a node with rounded corners is drawn by its shader over its whole area even when its colour is fully transparent. Guide cells, rows, group and menu items had one each under the text (46–62 on a guide screen), and hiding them gained 11–12.5 fps. Now an unlit row's fill is hidden (`src/components/Fill.tsx`), drawn as the row's first child so a lit one stays under its text.
+     - **TMDB "original" pictures:** a poster of about 2000×3000 took 24 MB of texture memory; a screen of them went over the renderer's 200 MB, and decoding them stalled moving through the posters for over a second. TMDB addresses now ask for the width drawn (`src/images.ts`: w185 posters, w780 backdrops at half size).
+     - **Layers under the title pages:** the Movies or Series page stayed drawn under a title's page, which filled the screen again, and the backdrop drew a solid fill, the accent glow and a solid scrim where it all ended up the background colour (overdraw 9.8 screens). Now the page under it is hidden (`VodHub`'s `covered`), the backdrop draws only right of where the picture fades out, and the glow goes once the picture is in (overdraw 3.3).
+     - **Poster cards under JPEG posters:** the stand-in card is hidden once a JPEG (which has no see-through parts) has loaded over it.
+   - **Before and after** (redraws per second, 60 at most):
+
+     | Screen                 | Before | After |
+     | ---------------------- | -----: | ----: |
+     | Guide, menu closed     |   47.2 |  60.7 |
+     | Guide with groups      |   45.9 |  60.1 |
+     | Guide full screen      |   47.0 |  59.4 |
+     | Guide with menu open   |   46.8 |  60.8 |
+     | Movies, groups         |   44.7 |  60.6 |
+     | Movies, posters        |    4.2 |  55.1 |
+     | Movies, a title's page |   19.8 |  53.3 |
+     | Series, groups         |   38.0 |  56.6 |
+     | Series, posters        |   40.1 |  54.2 |
+     | Series, a title's page |   26.6 |  55.6 |
+     | Settings               |   54.7 |  55.4 |
+     | Watching, channel list |     60 |    60 |
+
+     Moving through the posters: Movies 17.5 fps with a longest frame of 1,133 ms (587 ms of uploads) before, 58.4 fps and 33 ms after; Series 40.1 fps and 183 ms before, 58.2 fps and 33 ms after. Moving through the guide's rows, pages, along time and through the groups stays at 59.5–60 with no frame over 33 ms.
+
+   - **What still costs frames** (fps gained by taking each away, after; left to the user to weigh):
+     - The backdrop picture and its two scrims: a title's page +5.4 (Movies) and +3.7 (Series), the poster rows +4.8–5.7, Series groups +3.3.
+     - Rounded corners on posters: the poster rows +3.8–4.9.
+     - The raised poster's shadow and the focused button's glow on a title's page: +4.1 (Movies), +2.4 (Series).
+     - Settings: the focus glow +4.5; the rounded cards, drawn as an edge and a fill, +4.5.
+     - Text costs nothing measurable, and the guide's rounded cells 0–1.3 fps.
+   - **Moving through the menu** stalls 117–183 ms now and then (52 fps): the menu opens each section as the cursor passes it, so each page is built on the way. Waiting until the cursor rests would end it, but changes how the menu behaves.
 
 ## What you need before starting
 

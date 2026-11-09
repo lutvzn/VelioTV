@@ -2,6 +2,7 @@ import { Text, View } from "@solidtv/solid";
 import { createMemo, Index, Show } from "solid-js";
 import { ChannelLogo } from "../../components/ChannelLogo";
 import { FavouriteDot } from "../../components/FavouriteDot";
+import { Fill } from "../../components/Fill";
 import type { Channel } from "../../data/lineup";
 import { type Cell, placeCell } from "../../guide/timeline";
 import { progress } from "../../live/format";
@@ -138,12 +139,13 @@ export const GuideRow = (props: GuideRowProps) => {
 
   return (
     <>
-      <View
-        width={CHANNEL_WIDTH}
-        height={INNER}
-        color={props.moving ? COLORS.moving : props.current ? COLORS.cursorChannel : COLORS.channel}
-        borderRadius={CELL_RADIUS}
-      >
+      <View width={CHANNEL_WIDTH} height={INNER}>
+        <Fill
+          width={CHANNEL_WIDTH}
+          height={INNER}
+          borderRadius={CELL_RADIUS}
+          color={props.moving ? COLORS.moving : props.current ? COLORS.cursorChannel : COLORS.channel}
+        />
         <Text
           x={NUMBER_RIGHT}
           mountX={1}
@@ -194,7 +196,7 @@ export const GuideRow = (props: GuideRowProps) => {
                 // round the fill inside it.
                 color={cell().focused ? COLORS.ring : cell().color}
               >
-                <View
+                <Fill
                   x={RING}
                   y={RING}
                   width={Math.max(0, cell().width - 2 * RING)}
@@ -268,7 +270,7 @@ export const GuideRow = (props: GuideRowProps) => {
             borderRadius={CELL_RADIUS}
             color={props.focused ? COLORS.ring : COLORS.empty}
           >
-            <View
+            <Fill
               x={RING}
               y={RING}
               width={Math.max(0, Math.round((props.to - props.from) * props.pxPerMs) - CELL_GAP - 2 * RING)}

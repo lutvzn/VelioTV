@@ -5,6 +5,7 @@ import { OVERLAY_Z } from "../pages/live/ChannelOptions";
 import type { Section } from "../sections";
 import { BOLD, colors, radius } from "../theme";
 import { $t, type TextKey } from "../translate";
+import { Fill } from "./Fill";
 import { Glow } from "./Glow";
 
 /** The rail's width at rest, which pages start right of. */
@@ -36,13 +37,13 @@ const MenuItem = (props: { label: TextKey; icon: string; current: boolean; open:
   };
 
   return (
-    <View
-      width={width()}
-      height={ITEM_SIZE}
-      borderRadius={radius.large}
-      color={props.current && !focused() ? colors.accentWash : colors.transparent}
-      onFocusChanged={setFocused}
-    >
+    <View width={width()} height={ITEM_SIZE} onFocusChanged={setFocused}>
+      <Fill
+        width={width()}
+        height={ITEM_SIZE}
+        borderRadius={radius.large}
+        color={props.current && !focused() ? colors.accentWash : colors.transparent}
+      />
       <Glow width={width()} height={ITEM_SIZE} borderRadius={radius.large} shown={focused()} />
       <View
         x={(ITEM_SIZE - ICON_SIZE) / 2}

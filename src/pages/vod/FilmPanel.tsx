@@ -194,7 +194,8 @@ export const FilmPanel = (props: {
       zIndex={OVERLAY_Z}
       width={PAGE_WIDTH}
       height={1080}
-      color={colors.background}
+      // No fill of its own: the page under it is hidden (VodHub), so the
+      // app's background shows, in the same colour.
       onFocusChanged={setFocused}
       onUp={() => {
         setCursor(Math.max(0, cursor() - 1));
