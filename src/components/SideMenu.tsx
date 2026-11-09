@@ -3,14 +3,20 @@ import { Column, type KeyHandler } from "@solidtv/solid/primitives";
 import { createSignal, For } from "solid-js";
 import { OVERLAY_Z } from "../pages/live/ChannelOptions";
 import type { Section } from "../sections";
-import { BOLD, colors, motion, radius } from "../theme";
+import { BOLD, colors, radius } from "../theme";
 import { $t, type TextKey } from "../translate";
 import { Glow } from "./Glow";
 
 /** The rail's width at rest, which pages start right of. */
 export const MENU_WIDTH = 96;
 /** Its width while it has the focus, drawn over the page. */
-const OPEN_WIDTH = 340;
+export const MENU_OPEN_WIDTH = 340;
+const OPEN_WIDTH = MENU_OPEN_WIDTH;
+
+// Whether the rail is open, for what sits beside it to move aside, such as
+// the guide's groups. There's one menu.
+const [open, setOpen] = createSignal(false);
+export const menuOpen = open;
 const ITEM_X = 16;
 const ITEM_SIZE = 64;
 const OPEN_ITEM_WIDTH = OPEN_WIDTH - 2 * ITEM_X;
@@ -35,7 +41,6 @@ const MenuItem = (props: { label: TextKey; icon: string; current: boolean; open:
       height={ITEM_SIZE}
       borderRadius={radius.large}
       color={props.current && !focused() ? colors.accentWash : colors.transparent}
-      transition={{ width: motion.normal, color: motion.quick }}
       onFocusChanged={setFocused}
     >
       <Glow width={width()} height={ITEM_SIZE} borderRadius={radius.large} shown={focused()} />
@@ -55,7 +60,6 @@ const MenuItem = (props: { label: TextKey; icon: string; current: boolean; open:
         fontFamily={focused() || props.current ? BOLD : undefined}
         color={focused() ? colors.onFocus : props.current ? colors.text : colors.textDim}
         alpha={props.open ? 1 : 0}
-        transition={{ alpha: motion.normal }}
       >
         {$t(props.label)}
       </Text>
@@ -82,7 +86,6 @@ interface SideMenuProps {
  * section straight away.
  */
 export const SideMenu = (props: SideMenuProps) => {
-  const [open, setOpen] = createSignal(false);
   // Follows the page, which can also change from the pages themselves.
   const currentIndex = () =>
     Math.max(
@@ -95,14 +98,7 @@ export const SideMenu = (props: SideMenuProps) => {
     // The rail's panel is its root. Its zIndex draws the page's text before
     // it, which the renderer would otherwise draw over the open rail
     // (PLAN.md, Phase 5, step 1, "Text showing through the panel").
-    <View
-      width={width()}
-      height={1080}
-      color={colors.menu}
-      zIndex={OVERLAY_Z}
-      alpha={props.hidden ? 0 : 1}
-      transition={{ width: motion.normal, alpha: motion.quick }}
-    >
+    <View width={width()} height={1080} color={colors.menu} zIndex={OVERLAY_Z} alpha={props.hidden ? 0 : 1}>
       <View
         x={width()}
         width={SHADE_WIDTH}
@@ -110,9 +106,8 @@ export const SideMenu = (props: SideMenuProps) => {
         colorLeft={colors.caption}
         colorRight={colors.transparent}
         alpha={open() ? 1 : 0}
-        transition={{ x: motion.normal, alpha: motion.normal }}
       />
-      <View x={width() - 1} width={1} height={1080} color={colors.line} transition={{ x: motion.normal }} />
+      <View x={width() - 1} width={1} height={1080} color={colors.line} />
       <View
         x={LOGO_X}
         y={48}
@@ -143,7 +138,6 @@ export const SideMenu = (props: SideMenuProps) => {
         fontSize={38}
         fontFamily={BOLD}
         alpha={open() ? 1 : 0}
-        transition={{ alpha: motion.normal }}
       >
         Velio
       </Text>

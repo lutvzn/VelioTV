@@ -463,7 +463,14 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         </Show>
 
         <View y={ROWS_TOP - ROWS_MARGIN} width={PAGE_WIDTH} height={1080 - ROWS_TOP + ROWS_MARGIN} clipping>
-          <View y={ROWS_MARGIN - rowIndex() * ROW_HEIGHT} transition={{ y: motion.normal }}>
+          {/* The strips slide, so each is as big as what it holds: the renderer skips the
+              children of a node it finds off screen (three rows down, with no size). */}
+          <View
+            y={ROWS_MARGIN - rowIndex() * ROW_HEIGHT}
+            width={PAGE_WIDTH}
+            height={rows().length * ROW_HEIGHT}
+            transition={{ y: motion.normal }}
+          >
             <For each={drawnRows()}>
               {target => {
                 const place = () => placeOf(target.id);
@@ -493,7 +500,13 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
                         {$t("vod.noMatches", { query: query() })}
                       </Text>
                     </Show>
-                    <View x={LEFT - place().first * STEP} y={LABEL_HEIGHT} transition={{ x: motion.normal }}>
+                    <View
+                      x={LEFT - place().first * STEP}
+                      y={LABEL_HEIGHT}
+                      width={target.items.length * STEP}
+                      height={POSTER_HEIGHT}
+                      transition={{ x: motion.normal }}
+                    >
                       <For each={drawn()}>
                         {index => {
                           const item = () => target.items[index];

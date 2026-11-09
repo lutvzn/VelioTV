@@ -13,7 +13,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { MENU_WIDTH } from "../components/SideMenu";
+import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen } from "../components/SideMenu";
 import { catchupDays, inArchive } from "../data/catchup";
 import { appStorage } from "../data/settingsCopy";
 import { DAY, type ProgrammeDetails, type StoredProgramme } from "../data/guideCodec";
@@ -57,7 +57,7 @@ import { $t, $tn } from "../translate";
 import type { Rect } from "../videoWindow";
 import { BOLD, colors, radius } from "../theme";
 import { sayWhileFocused } from "../voiceGuide";
-import { GROUP_ROWS, GroupColumn, SEARCH_RECT } from "./guide/GroupColumn";
+import { GROUP_ROWS, GroupColumn, GROUPS_WIDTH, SEARCH_RECT } from "./guide/GroupColumn";
 import { GuideDetails } from "./guide/GuideDetails";
 import {
   ChannelOptions,
@@ -68,10 +68,10 @@ import {
   OVERLAY_Z,
 } from "./live/ChannelOptions";
 import { groupMenu, programmeOptions } from "./live/menus";
-import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
+import { CHANNEL_WIDTH, GuideRow, ROW_GAP, ROW_HEIGHT } from "./guide/GuideRow";
 
 // Live TV: the TV guide (PLAN.md, Phase 4). Channels run down and time
-// across, two hours at a time, with the highlighted channel playing in a
+// across, two and a half hours at a time, with the highlighted channel playing in a
 // preview at the top left and its programme described beside it.
 //
 // Up and Down move between channels, Left and Right between programmes, and
@@ -82,7 +82,8 @@ import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
 //
 // The guide fills the screen while you move through it. Left from the first
 // programme, or Back, brings back the menu and, beside it, a column of groups
-// over the guide (src/pages/guide/GroupColumn.tsx), with the focus on it, where Up and Down change
+// (src/pages/guide/GroupColumn.tsx), moving the guide right of them, with the
+// focus on the groups, where Up and Down change
 // group, Right returns to the guide, OK on the search field at its top
 // searches channel names with the TV's keyboard, and Left goes on to the
 // menu. Holding OK on a channel or a group, or the Tools key, opens its
@@ -101,7 +102,9 @@ import { CHANNEL_WIDTH, GuideRow, ROW_HEIGHT } from "./guide/GuideRow";
 // them as it scrolls, so 10,000 channels cost the same as 8.
 
 const HOUR = 3_600_000;
-export const SPAN = 2 * HOUR;
+// Two and a half hours across, from the half hour before now, so at least
+// two hours to come always show.
+export const SPAN = 2.5 * HOUR;
 export const STEP = HOUR / 2;
 /** How far ahead the guide goes. */
 const AHEAD = 7 * DAY;
@@ -115,17 +118,20 @@ const CLOCK_MS = 30_000;
 // The page lays out across the whole screen, under the menu (src/wholeScreen.ts),
 // so its pixels are the screen's.
 const PAGE_WIDTH = 1920;
-const LEFT = 64;
+const LEFT = 25;
 /** Where the words for no channels go, right of the menu, which stays then. */
 const EMPTY_X = MENU_WIDTH + 40;
-const PREVIEW: Rect = { x: LEFT, y: 40, width: 576, height: 324 };
+const PREVIEW: Rect = { x: LEFT, y: 25, width: 576, height: 324 };
 const DETAILS_X = LEFT + PREVIEW.width + 40;
-const TIMES_Y = 392;
-const ROWS_Y = 432;
+// The rows reach the bottom of the screen, and the grid its right edge.
+const ROWS_Y = 1080 - GUIDE_ROWS * ROW_HEIGHT + ROW_GAP;
+const TIMES_Y = ROWS_Y - 40;
 const GRID_X = LEFT + CHANNEL_WIDTH + 10;
-const GRID_WIDTH = PAGE_WIDTH - GRID_X - 30;
+const GRID_WIDTH = PAGE_WIDTH - GRID_X;
 const PX_PER_MS = GRID_WIDTH / SPAN;
 const SLOTS = Array.from({ length: GUIDE_ROWS }, (_, slot) => slot);
+/** Where the groups go: beside the menu, which pushes them right as it opens. */
+const groupsX = () => (menuOpen() ? MENU_OPEN_WIDTH : MENU_WIDTH);
 
 const ALL = "all";
 const SEARCH = "search";
@@ -373,7 +379,9 @@ export default () => {
 
   // "filters" is the groups' column; on it the cursor is on the group shown,
   // or on the search field above the groups.
-  const [area, setArea] = createSignal<"grid" | "filters">("grid");
+  // Opened from the menu, Right reaches the groups first; opened from full
+  // screen, the guide has the keys.
+  const [area, setArea] = createSignal<"grid" | "filters">(handoff ? "grid" : "filters");
   const [onSearch, setOnSearch] = createSignal(false);
   const filterIndex = createMemo(() =>
     Math.max(
@@ -474,7 +482,6 @@ export default () => {
   };
 
   onMount(() => {
-    player.setWindow(PREVIEW);
     // Opened from full screen: the guide takes the focus from the page it replaces.
     if (handoff) root?.setFocus();
   });
@@ -558,6 +565,9 @@ export default () => {
   // The menu and the groups show unless you're moving through the guide.
   const inGuide = () => focused() && area() === "grid";
   useWholeScreen(inGuide);
+  // Otherwise the guide moves right of them, and the preview video with it.
+  const guideX = () => (inGuide() || liveView().channels.length === 0 ? 0 : groupsX() + GROUPS_WIDTH);
+  createEffect(() => player.setWindow({ ...PREVIEW, x: PREVIEW.x + guideX() }));
 
   exposeToProbes("guidePage", {
     optionsFor,
@@ -731,125 +741,131 @@ export default () => {
           </>
         }
       >
-        <Show when={cursorBlocked() ? $t("live.locked") : previewId() ? statusText() : undefined}>
-          {text => (
-            <Text
-              x={LEFT + 20}
-              y={PREVIEW.y}
-              width={PREVIEW.width - 40}
-              height={PREVIEW.height}
-              lineHeight={PREVIEW.height}
-              maxLines={1}
-              contain="width"
-              textAlign="center"
-              fontSize={26}
-              color={colors.textDim}
-            >
-              {text()}
-            </Text>
-          )}
-        </Show>
-        <GuideDetails
-          x={DETAILS_X}
-          y={PREVIEW.y}
-          width={PAGE_WIDTH - DETAILS_X - 40}
-          channel={cursorChannel()}
-          number={cursorNumber()}
-          cell={focusedCell()}
-          details={focusedDetails()}
-          day={dayLabel(focusedDay(), now(), dayWords())}
-          now={now()}
-          note={detailsNote()}
-        />
-
-        <Text
-          x={LEFT + 16}
-          y={TIMES_Y}
-          width={CHANNEL_WIDTH - 16}
-          maxLines={1}
-          contain="width"
-          fontSize={24}
-          fontFamily={BOLD}
-          color={colors.accentText}
-        >
-          {dayLabel(from(), now(), dayWords())}
-        </Text>
-        <Index each={ticks()}>
-          {time => (
-            <>
-              <View
-                x={GRID_X + (time() - from()) * PX_PER_MS}
-                y={TIMES_Y + 6}
-                width={2}
-                height={22}
-                borderRadius={1}
-                color={colors.line}
-              />
+        {/* The guide, which moves right of the menu and groups while they show. */}
+        <View x={guideX()} width={PAGE_WIDTH} height={1080}>
+          <Show when={cursorBlocked() ? $t("live.locked") : previewId() ? statusText() : undefined}>
+            {text => (
               <Text
-                x={GRID_X + (time() - from()) * PX_PER_MS + 10}
-                y={TIMES_Y}
-                fontSize={24}
+                x={LEFT + 20}
+                y={PREVIEW.y}
+                width={PREVIEW.width - 40}
+                height={PREVIEW.height}
+                lineHeight={PREVIEW.height}
+                maxLines={1}
+                contain="width"
+                textAlign="center"
+                fontSize={26}
                 color={colors.textDim}
               >
-                {clockTime(time())}
+                {text()}
               </Text>
-            </>
-          )}
-        </Index>
+            )}
+          </Show>
+          <GuideDetails
+            x={DETAILS_X}
+            y={PREVIEW.y}
+            width={PAGE_WIDTH - DETAILS_X - 20}
+            channel={cursorChannel()}
+            number={cursorNumber()}
+            cell={focusedCell()}
+            details={focusedDetails()}
+            day={dayLabel(focusedDay(), now(), dayWords())}
+            now={now()}
+            note={detailsNote()}
+          />
 
-        <For each={SLOTS}>
-          {slot => (
-            <Show when={rows[slot]()}>
-              {row => (
-                <View x={LEFT} y={ROWS_Y + slot * ROW_HEIGHT} width={PAGE_WIDTH - LEFT} height={ROW_HEIGHT}>
-                  <GuideRow
-                    channel={row().channel}
-                    number={numberOf(row().channel)}
-                    playing={row().channel.id === previewId()}
-                    cells={row().cells}
-                    from={from()}
-                    to={to()}
-                    pxPerMs={PX_PER_MS}
-                    gridX={GRID_X - LEFT}
-                    now={now()}
-                    archiveFrom={archiveStart(row().channel)}
-                    reminded={start => reminders.has(row().channel.id, start)}
-                    current={top() + slot === cursor()}
-                    moving={moving()?.id === row().channel.id}
-                    focused={
-                      focused() && area() === "grid" && top() + slot === cursor() ? focusedCell() : undefined
-                    }
-                  />
-                </View>
-              )}
-            </Show>
-          )}
-        </For>
-        <Show when={list().length === 0}>
-          <Text x={LEFT} y={ROWS_Y + 20} fontSize={30} color={colors.textDim}>
-            {filter().id === SEARCH ? $t("guide.noMatches", { query: query() }) : $t("live.groupEmpty")}
+          <Text
+            x={LEFT + 16}
+            y={TIMES_Y}
+            width={CHANNEL_WIDTH - 16}
+            maxLines={1}
+            contain="width"
+            fontSize={24}
+            fontFamily={BOLD}
+            color={colors.accentText}
+          >
+            {dayLabel(from(), now(), dayWords())}
           </Text>
-        </Show>
-        <Show when={now() >= from() && now() < to()}>
-          <View
-            x={nowX() - 1}
-            y={TIMES_Y + 34}
-            width={3}
-            height={ROWS_Y - TIMES_Y - 34 + GUIDE_ROWS * ROW_HEIGHT}
-            borderRadius={1}
-            color={colors.live}
-          />
-          <View
-            x={nowX() - 6}
-            y={TIMES_Y + 28}
-            width={13}
-            height={13}
-            borderRadius={6.5}
-            color={colors.live}
-          />
-        </Show>
+          <Index each={ticks()}>
+            {time => (
+              <>
+                <View
+                  x={GRID_X + (time() - from()) * PX_PER_MS}
+                  y={TIMES_Y + 6}
+                  width={2}
+                  height={22}
+                  borderRadius={1}
+                  color={colors.line}
+                />
+                <Text
+                  x={GRID_X + (time() - from()) * PX_PER_MS + 10}
+                  y={TIMES_Y}
+                  fontSize={24}
+                  color={colors.textDim}
+                >
+                  {clockTime(time())}
+                </Text>
+              </>
+            )}
+          </Index>
+
+          <For each={SLOTS}>
+            {slot => (
+              <Show when={rows[slot]()}>
+                {row => (
+                  <View x={LEFT} y={ROWS_Y + slot * ROW_HEIGHT} width={PAGE_WIDTH - LEFT} height={ROW_HEIGHT}>
+                    <GuideRow
+                      channel={row().channel}
+                      number={numberOf(row().channel)}
+                      playing={row().channel.id === previewId()}
+                      cells={row().cells}
+                      from={from()}
+                      to={to()}
+                      pxPerMs={PX_PER_MS}
+                      gridX={GRID_X - LEFT}
+                      now={now()}
+                      archiveFrom={archiveStart(row().channel)}
+                      reminded={start => reminders.has(row().channel.id, start)}
+                      current={top() + slot === cursor()}
+                      moving={moving()?.id === row().channel.id}
+                      focused={
+                        focused() && area() === "grid" && top() + slot === cursor()
+                          ? focusedCell()
+                          : undefined
+                      }
+                    />
+                  </View>
+                )}
+              </Show>
+            )}
+          </For>
+          <Show when={list().length === 0}>
+            <Text x={LEFT} y={ROWS_Y + 20} fontSize={30} color={colors.textDim}>
+              {filter().id === SEARCH ? $t("guide.noMatches", { query: query() }) : $t("live.groupEmpty")}
+            </Text>
+          </Show>
+          <Show when={now() >= from() && now() < to()}>
+            <View
+              x={nowX() - 1}
+              y={TIMES_Y + 34}
+              width={3}
+              height={ROWS_Y - TIMES_Y - 34 + GUIDE_ROWS * ROW_HEIGHT}
+              borderRadius={1}
+              color={colors.live}
+            />
+            <View
+              x={nowX() - 6}
+              y={TIMES_Y + 28}
+              width={13}
+              height={13}
+              borderRadius={6.5}
+              color={colors.live}
+            />
+          </Show>
+        </View>
         <GroupColumn
-          x={MENU_WIDTH}
+          // Beside the menu, moving right as it opens.
+          x={groupsX()}
           shown={!inGuide()}
           items={filters().map(f => ({ label: f.label, count: f.channels.length }))}
           top={groupTop()}

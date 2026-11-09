@@ -2,7 +2,7 @@ import { Text, View } from "@solidtv/solid";
 import { For, type JSX, Show } from "solid-js";
 import { Glow } from "../../components/Glow";
 import { OVERLAY_Z } from "../live/ChannelOptions";
-import { BOLD, colors, motion, radius, RING } from "../../theme";
+import { BOLD, colors, radius, RING } from "../../theme";
 import { $t } from "../../translate";
 
 /** The column's width, which the guide starts right of. */
@@ -18,10 +18,6 @@ export const GROUP_ROWS = 12;
 const SLOTS = Array.from({ length: GROUP_ROWS }, (_, slot) => slot);
 const ICON_SIZE = 28;
 const COUNT_WIDTH = 56;
-/** The shade the column casts over the guide. */
-const SHADE_WIDTH = 260;
-/** How far it slides as it comes and goes. */
-const SLIDE = 40;
 
 /** Where the search field is, in the column's pixels, for the keyboard's input. */
 export const SEARCH_RECT = { x: ITEM_X, y: SEARCH_Y, width: ITEM_WIDTH, height: ITEM_HEIGHT };
@@ -49,7 +45,6 @@ const Item = (props: { y: number; focused: boolean; current: boolean; children: 
     height={ITEM_HEIGHT}
     borderRadius={radius.medium}
     color={props.focused ? colors.focus : props.current ? colors.accentWash : colors.transparent}
-    transition={{ color: motion.quick }}
   >
     <View
       x={RING}
@@ -64,13 +59,13 @@ const Item = (props: { y: number; focused: boolean; current: boolean; children: 
 );
 
 /**
- * Live TV's groups, in a column beside the menu, over the guide: a search
+ * Live TV's groups, in a column beside the menu, with the guide right of it: a search
  * field, then every channel, Favourites and the playlists' groups. The guide
  * page moves the cursor; this only draws. `cursor` is -1 on the search field.
  */
 export const GroupColumn = (props: {
   x: number;
-  /** Whether it shows; it slides in over the guide, and out. */
+  /** Whether it shows; the guide moves right of it then. */
   shown: boolean;
   items: readonly GroupItem[];
   /** The first group drawn. */
@@ -88,21 +83,13 @@ export const GroupColumn = (props: {
   return (
     // Its zIndex draws the guide's text before it (PLAN.md, Phase 5, step 1).
     <View
-      x={props.shown ? props.x : props.x - SLIDE}
+      x={props.x}
       width={GROUPS_WIDTH}
       height={1080}
       color={colors.menu}
       zIndex={OVERLAY_Z}
       alpha={props.shown ? 1 : 0}
-      transition={{ x: motion.normal, alpha: motion.normal }}
     >
-      <View
-        x={GROUPS_WIDTH}
-        width={SHADE_WIDTH}
-        height={1080}
-        colorLeft={colors.caption}
-        colorRight={colors.transparent}
-      />
       <View x={GROUPS_WIDTH - 1} width={1} height={1080} color={colors.line} />
       <Text x={ITEM_X + 12} y={56} fontSize={22} fontFamily={BOLD} letterSpacing={3} color={colors.textFaint}>
         {$t("guide.groups").toUpperCase()}

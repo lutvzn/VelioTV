@@ -8,9 +8,12 @@ import { progress } from "../../live/format";
 import { BOLD, colors, RING } from "../../theme";
 import { $t } from "../../translate";
 
-export const ROW_HEIGHT = 68;
-export const CHANNEL_WIDTH = 320;
-const INNER = ROW_HEIGHT - 6;
+export const ROW_HEIGHT = 74;
+// Room for 306 px of name beside a logo (170 px before, +80% as asked).
+export const CHANNEL_WIDTH = 456;
+/** The space under each row's cells. */
+export const ROW_GAP = 6;
+const INNER = ROW_HEIGHT - ROW_GAP;
 const CELL_GAP = 4;
 // Narrower cells have no room for a title.
 const MIN_TEXT_WIDTH = 56;
