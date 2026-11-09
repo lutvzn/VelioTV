@@ -315,16 +315,22 @@ async function probe(input) {
     press(KEYS.back);
     await sleep(400);
     await moving("groupsUpDown", async () => {
+      // Quick presses, which pass groups, and a rest, which shows one.
       await repeat(KEYS.down, 10, 150);
+      await sleep(600);
       await repeat(KEYS.up, 10, 150);
+      await sleep(600);
     });
     press(KEYS.left);
     await sleep(400);
     await measure("menuOpen");
     // Each section the menu's cursor passes is opened.
     await moving("menuUpDown", async () => {
-      await repeat(KEYS.down, 3, 300);
-      await repeat(KEYS.up, 3, 300);
+      // Quick presses, which pass sections, and a rest, which opens one.
+      await repeat(KEYS.down, 3, 150);
+      await sleep(600);
+      await repeat(KEYS.up, 3, 150);
+      await sleep(600);
     });
 
     for (const [section, grid, panel] of [

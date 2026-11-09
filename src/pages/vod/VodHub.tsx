@@ -5,6 +5,7 @@ import { Backdrop } from "../../components/Backdrop";
 import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen } from "../../components/SideMenu";
 import { exposeToProbes } from "../../devHooks";
 import { markEmpty } from "../../emptySection";
+import { createRestingCursor } from "../../restingCursor";
 import { fold } from "../../guide/search";
 import { scrollTop } from "../../live/listWindow";
 import { editText } from "../../textEntry";
@@ -185,9 +186,20 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   // column first.
   const [area, setArea] = createSignal<"grid" | "groups">(props.startInGrid ? "grid" : "groups");
   const [onSearch, setOnSearch] = createSignal(false);
+  // The column's cursor: the posters show the group it's on once it rests
+  // there (`CURSOR_REST_MS`), or at once on Right or OK.
+  const groupCursor = createRestingCursor(
+    () => currentId() ?? groupId(),
+    id => setGroupId(id),
+  );
+  const cursorIndex = createMemo(() => {
+    const index = groups().findIndex(one => one.id === groupCursor.at());
+    return index >= 0 ? index : groupIndex();
+  });
+  const cursorGroup = () => groups()[cursorIndex()];
   const [groupTop, setGroupTop] = createSignal(0);
   createEffect(() => {
-    const index = groupIndex();
+    const index = cursorIndex();
     setGroupTop(first => scrollTop(index, first, GROUP_ROWS, groups().length));
   });
   const toGroups = () => {
@@ -199,6 +211,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   };
   /** Into the posters, if the group has any. */
   const toGrid = () => {
+    groupCursor.settle();
     if (items().length === 0) return false;
     setArea("grid");
     return true;
@@ -206,10 +219,10 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   /** Moves the column's cursor by `step`, from the search field (-1) to the last group. */
   const moveGroup = (step: number) => {
     const all = groups();
-    const index = Math.max(-1, Math.min(all.length - 1, (onSearch() ? -1 : groupIndex()) + step));
+    const index = Math.max(-1, Math.min(all.length - 1, (onSearch() ? -1 : cursorIndex()) + step));
     batch(() => {
       setOnSearch(index < 0);
-      if (index >= 0) setGroupId(all[index].id);
+      if (index >= 0) groupCursor.move(all[index].id);
     });
   };
 
@@ -220,6 +233,16 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   // with nothing to show, or a page over it, it lays out as other pages do.
   const inGrid = () => focused() && area() === "grid";
   const wide = () => !empty() && !props.covered;
+  // Leaving the column, such as for the menu, shows the group the cursor is on.
+  createEffect(
+    on(
+      () => focused() && area() === "groups",
+      inColumn => {
+        if (!inColumn) groupCursor.settle();
+      },
+      { defer: true },
+    ),
+  );
   useWholeScreen(inGrid, wide);
   // Otherwise the page moves right of them.
   const pageX = () => (wide() && !inGrid() ? groupsX() + GROUPS_WIDTH : 0);
@@ -284,6 +307,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   exposeToProbes(props.probeName, {
     rows: groups,
     rowId: currentId,
+    groupAt: groupCursor.at,
     area,
     onSearch,
     current,
@@ -306,7 +330,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
       if (area() === "groups")
         return onSearch()
           ? [props.searchLabel, query()]
-          : [group()?.label, $tn("count.titles", items().length)];
+          : [cursorGroup()?.label, $tn("count.titles", cursorGroup()?.items.length ?? 0)];
       const item = current();
       if (!item) {
         const why = props.loading
@@ -570,7 +594,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
           shown={wide() && !inGrid()}
           items={groups().map(one => ({ label: one.label, count: one.items.length }))}
           top={groupTop()}
-          cursor={onSearch() ? -1 : groupIndex()}
+          cursor={onSearch() ? -1 : cursorIndex()}
           current={groupIndex()}
           focused={focused() && !props.covered && area() === "groups"}
           query={query()}

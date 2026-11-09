@@ -1,7 +1,8 @@
 import { type ElementNode, Text, View } from "@solidtv/solid";
 import { Column, type KeyHandler } from "@solidtv/solid/primitives";
-import { createSignal, For } from "solid-js";
+import { createEffect, createSignal, For, on } from "solid-js";
 import { OVERLAY_Z } from "../pages/live/ChannelOptions";
+import { createRestingCursor } from "../restingCursor";
 import type { Section } from "../sections";
 import { BOLD, colors, radius } from "../theme";
 import { $t, type TextKey } from "../translate";
@@ -27,7 +28,6 @@ const LOGO_X = (MENU_WIDTH - LOGO_SIZE) / 2;
 const ITEMS_Y = 200;
 /** The shade the open rail casts over the page. */
 const SHADE_WIDTH = 260;
-
 const MenuItem = (props: { label: TextKey; icon: string; current: boolean; open: boolean }) => {
   const [focused, setFocused] = createSignal(false);
   const width = () => (props.open ? OPEN_ITEM_WIDTH : ITEM_SIZE);
@@ -77,14 +77,15 @@ interface SideMenuProps {
   onSelect: (path: string) => void;
   /** A line at the bottom, such as an import in progress. */
   status?: string;
-  onRight?: KeyHandler;
+  /** Right: moves into the section, once it's open. */
+  onRight?: () => boolean;
   onBack?: KeyHandler;
 }
 
 /**
  * The menu: a rail of icons on the left that widens over the page, with the
- * sections' names, while it has the focus. Moving up and down opens each
- * section straight away.
+ * sections' names, while it has the focus. The section under the cursor
+ * opens once the cursor rests (`CURSOR_REST_MS`), or at once on Right.
  */
 export const SideMenu = (props: SideMenuProps) => {
   // Follows the page, which can also change from the pages themselves.
@@ -94,6 +95,30 @@ export const SideMenu = (props: SideMenuProps) => {
       props.sections.findIndex(section => section.path === props.currentPath),
     );
   const width = () => (open() ? OPEN_WIDTH : MENU_WIDTH);
+
+  // The section under the cursor opens once it rests there (`CURSOR_REST_MS`).
+  const cursor = createRestingCursor(
+    () => props.currentPath,
+    path => props.onSelect(path),
+  );
+  // A section opened by Right, to move into once it's there.
+  let enter: string | undefined;
+  createEffect(
+    on(
+      () => props.currentPath,
+      path => {
+        if (enter !== path) return;
+        enter = undefined;
+        // The router opens the page in a transition; it's in once the path changed.
+        setTimeout(() => props.onRight?.());
+      },
+      { defer: true },
+    ),
+  );
+  const onRight = () => {
+    enter = cursor.settle();
+    return enter ? true : (props.onRight?.() ?? false);
+  };
 
   return (
     // The rail's panel is its root. Its zIndex draws the page's text before
@@ -152,13 +177,20 @@ export const SideMenu = (props: SideMenuProps) => {
         gap={14}
         scroll="none"
         selected={currentIndex()}
-        onFocusChanged={setOpen}
+        onFocusChanged={hasFocus => {
+          setOpen(hasFocus);
+          // Leaving some other way, the section under the cursor opens, so the
+          // cursor is on the open one when the menu has the keys again.
+          if (!hasFocus) cursor.settle();
+        }}
         // Column also reports the selection each time the menu takes focus;
         // only an actual move opens a section.
         onSelectedChanged={(index, _menu, _item, lastIndex) => {
-          if (index !== lastIndex) props.onSelect(props.sections[index].path);
+          if (index === lastIndex) return;
+          enter = undefined;
+          cursor.move(props.sections[index].path);
         }}
-        onRight={props.onRight}
+        onRight={onRight}
         onBack={props.onBack}
       >
         <For each={props.sections}>

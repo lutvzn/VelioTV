@@ -20,6 +20,7 @@ import { DAY, type ProgrammeDetails, type StoredProgramme } from "../data/guideC
 import type { Channel, ChannelGroup } from "../data/lineup";
 import { exposeToProbes } from "../devHooks";
 import { markEmpty } from "../emptySection";
+import { createRestingCursor } from "../restingCursor";
 import { useWholeScreen } from "../wholeScreen";
 import { createGuideDays } from "../guide/guideDays";
 import { searchChannels } from "../guide/search";
@@ -389,9 +390,20 @@ export default () => {
       filters().findIndex(f => f.id === filter().id),
     ),
   );
+  // The column's cursor: the guide shows the group it's on once it rests
+  // there (`CURSOR_REST_MS`), or at once on Right or OK.
+  const groupCursor = createRestingCursor(
+    () => filter().id,
+    id => setFilterId(id),
+  );
+  const cursorIndex = createMemo(() => {
+    const at = filters().findIndex(f => f.id === groupCursor.at());
+    return at >= 0 ? at : filterIndex();
+  });
+  const cursorFilter = () => filters()[cursorIndex()] ?? filter();
   const [groupTop, setGroupTop] = createSignal(0);
   createEffect(() => {
-    const at = filterIndex();
+    const at = cursorIndex();
     setGroupTop(first => scrollTop(at, first, GROUP_ROWS, filters().length));
   });
   const toGroups = () => {
@@ -403,6 +415,7 @@ export default () => {
   };
   /** Back to the guide, if it has channels to show. */
   const toGrid = () => {
+    groupCursor.settle();
     if (list().length === 0) return false;
     setArea("grid");
     return true;
@@ -410,6 +423,7 @@ export default () => {
 
   const entry = createNumberEntry({
     onNumber: number => {
+      groupCursor.drop();
       const channel = liveNumbers().byNumber.get(number);
       if (!channel) return false;
       const index = list().findIndex(c => c.id === channel.id);
@@ -427,10 +441,10 @@ export default () => {
   /** Moves the column's cursor by `step`, from the search field (-1) to the last group. */
   const moveGroup = (step: number) => {
     const all = filters();
-    const at = Math.max(-1, Math.min(all.length - 1, (onSearch() ? -1 : filterIndex()) + step));
+    const at = Math.max(-1, Math.min(all.length - 1, (onSearch() ? -1 : cursorIndex()) + step));
     batch(() => {
       setOnSearch(at < 0);
-      if (at >= 0) setFilterId(all[at].id);
+      if (at >= 0) groupCursor.move(all[at].id);
     });
   };
 
@@ -526,6 +540,7 @@ export default () => {
     if (entry.active()) return false;
     if (area() === "filters") {
       if (onSearch()) return false;
+      groupCursor.settle();
       const key = filter().group;
       // Every channel, search results and Favourites have no group options.
       if (key === undefined || key === FAVOURITES) return false;
@@ -560,6 +575,16 @@ export default () => {
     holdRequiresRepeat: HOLD_REQUIRES_REPEAT,
   });
 
+  // Leaving the column, such as for the menu, shows the group the cursor is on.
+  createEffect(
+    on(
+      () => focused() && area() === "filters",
+      inColumn => {
+        if (!inColumn) groupCursor.settle();
+      },
+      { defer: true },
+    ),
+  );
   // With no channels (or while they load) the menu keeps the keys.
   markEmpty(() => liveView().channels.length === 0);
   // The menu and the groups show unless you're moving through the guide.
@@ -583,6 +608,7 @@ export default () => {
     openPast,
     onSearch,
     groupTop,
+    groupAt: groupCursor.at,
     list,
     filter,
     query,
@@ -630,7 +656,7 @@ export default () => {
     if (area() === "filters")
       return onSearch()
         ? [$t("guide.search"), query()]
-        : [filter().label, $tn("count.channels", list().length)];
+        : [cursorFilter().label, $tn("count.channels", cursorFilter().channels.length)];
     const channel = cursorChannel();
     if (!channel)
       return filter().id === SEARCH ? $t("guide.noMatches", { query: query() }) : $t("live.groupEmpty");
@@ -869,7 +895,7 @@ export default () => {
           shown={!inGuide()}
           items={filters().map(f => ({ label: f.label, count: f.channels.length }))}
           top={groupTop()}
-          cursor={onSearch() ? -1 : filterIndex()}
+          cursor={onSearch() ? -1 : cursorIndex()}
           current={filterIndex()}
           focused={focused() && area() === "filters"}
           query={query()}
