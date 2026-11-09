@@ -10,8 +10,8 @@ import { $t, $tn } from "../translate";
 import { type HubPlace, VodHub } from "./vod/VodHub";
 import { SeriesPanel } from "./vod/SeriesPanel";
 
-// Series (PLAN.md, Phase 6, step 4): every source's series in rows of
-// posters, by category, with the ones being watched first
+// Series (PLAN.md, Phase 6, step 4): every source's series by category, in
+// a column of groups beside a grid of posters, with the ones being watched first
 // (src/pages/vod/VodHub.tsx). OK opens a series' page, on the episode to
 // carry on with; OK there plays it, and the episodes after it follow on.
 
@@ -61,7 +61,9 @@ export default () => {
         categories={vod.seriesCategories()}
         loading={vod.loading()}
         emptyText={$t("vod.noSeries")}
+        searchLabel={$t("vod.searchSeries")}
         place={place}
+        startInGrid={back}
         onPlace={next => (place = next)}
         covered={open() !== undefined}
         onOpen={show => setOpen(show)}

@@ -873,6 +873,7 @@ export default () => {
           current={filterIndex()}
           focused={focused() && area() === "filters"}
           query={query()}
+          searchLabel={$t("guide.search")}
         />
       </Show>
 

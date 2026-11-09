@@ -11,8 +11,9 @@ import { $t } from "../translate";
 import { FilmPanel } from "./vod/FilmPanel";
 import { type HubPlace, VodHub } from "./vod/VodHub";
 
-// Movies (PLAN.md, Phase 6, step 4): every source's films in rows of
-// posters, by category, with Continue watching first (src/pages/vod/VodHub.tsx). OK opens a film's page, and Play
+// Movies (PLAN.md, Phase 6, step 4): every source's films by category, in a
+// column of groups beside a grid of posters, with Continue watching first
+// (src/pages/vod/VodHub.tsx). OK opens a film's page, and Play
 // there watches it full screen (src/pages/Play.tsx); Back from the film
 // comes back to its page here.
 
@@ -81,7 +82,9 @@ export default () => {
         categories={vod.filmCategories()}
         loading={vod.loading()}
         emptyText={$t("vod.noFilms")}
+        searchLabel={$t("vod.searchFilms")}
         place={place}
+        startInGrid={back}
         onPlace={next => (place = next)}
         covered={open() !== undefined}
         onOpen={film => setOpen(film)}

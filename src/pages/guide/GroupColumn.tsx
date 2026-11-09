@@ -59,9 +59,11 @@ const Item = (props: { y: number; focused: boolean; current: boolean; children: 
 );
 
 /**
- * Live TV's groups, in a column beside the menu, with the guide right of it: a search
- * field, then every channel, Favourites and the playlists' groups. The guide
- * page moves the cursor; this only draws. `cursor` is -1 on the search field.
+ * A page's groups, in a column beside the menu, with the page right of it: a
+ * search field, then the groups. On Live TV: every channel, Favourites and the
+ * playlists' groups; on Movies and Series: Continue watching, everything and
+ * each category. The page moves the cursor; this only draws. `cursor` is -1
+ * on the search field.
  */
 export const GroupColumn = (props: {
   x: number;
@@ -75,6 +77,8 @@ export const GroupColumn = (props: {
   current: number;
   focused: boolean;
   query: string;
+  /** What the search field says while it's empty. */
+  searchLabel: string;
 }) => {
   const slotY = (slot: number) => LIST_Y + slot * ITEM_STEP;
   const searchFocused = () => props.focused && props.cursor < 0;
@@ -122,7 +126,7 @@ export const GroupColumn = (props: {
           fontSize={24}
           color={props.query && !searchFocused() ? colors.text : inkFor(searchFocused(), false)}
         >
-          {props.query || $t("guide.search")}
+          {props.query || props.searchLabel}
         </Text>
       </Item>
       <View x={ITEM_X + 12} y={LIST_Y - 22} width={ITEM_WIDTH - 24} height={1} color={colors.line} />
