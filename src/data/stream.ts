@@ -41,12 +41,17 @@ async function* nativeGunzip(source: AsyncGenerator<Bytes>): AsyncGenerator<Uint
 }
 
 // Decompresses with fflate, for TVs whose browsers lack DecompressionStream.
-async function* fflateGunzip(source: AsyncGenerator<Bytes>): AsyncGenerator<Uint8Array> {
+async function* fflateGunzip(
+  source: AsyncGenerator<Bytes>,
+  timing?: { decodeMs: number },
+): AsyncGenerator<Uint8Array> {
   const out: Uint8Array[] = [];
   const gunzip = new Gunzip();
   gunzip.ondata = data => out.push(data);
   for await (const piece of source) {
+    const from = timing ? performance.now() : 0;
     gunzip.push(piece);
+    if (timing) timing.decodeMs += performance.now() - from;
     yield* out.splice(0);
   }
   gunzip.push(new Uint8Array(0), true);
@@ -57,12 +62,17 @@ async function* fflateGunzip(source: AsyncGenerator<Bytes>): AsyncGenerator<Uint
  * Yields a byte stream's text as it arrives, decompressing it first if it is
  * gzipped (whatever the URL or Content-Type say). `onBytes` gets the size of
  * each piece downloaded, before decompressing, to show progress against
- * Content-Length. `native: false` forces fflate's gunzip, for tests.
+ * Content-Length. `native: false` forces fflate's gunzip, for tests. With
+ * `timing`, the time spent decoding text (and in fflate's gunzip, which runs
+ * on this thread) is added to its decodeMs.
  */
 export async function* readText(
   body: ReadableStream<Bytes>,
   onBytes?: (bytes: number) => void,
-  { native = typeof DecompressionStream !== "undefined" } = {},
+  {
+    native = typeof DecompressionStream !== "undefined",
+    timing,
+  }: { native?: boolean; timing?: { decodeMs: number } } = {},
 ): AsyncGenerator<string> {
   const reader = body.getReader();
   const downloaded = pieces(reader, onBytes);
@@ -75,13 +85,15 @@ export async function* readText(
       yield* downloaded;
     };
     let source: AsyncGenerator<Uint8Array> = all();
-    if (isGzip(first.value)) source = native ? nativeGunzip(all()) : fflateGunzip(all());
+    if (isGzip(first.value)) source = native ? nativeGunzip(all()) : fflateGunzip(all(), timing);
 
     // TextDecoder with { stream: true } rather than TextDecoderStream, which
     // older TVs lack.
     const decoder = new TextDecoder();
     for await (const piece of source) {
+      const from = timing ? performance.now() : 0;
       const text = decoder.decode(piece, { stream: true });
+      if (timing) timing.decodeMs += performance.now() - from;
       if (text) yield text;
     }
     const tail = decoder.decode();

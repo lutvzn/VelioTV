@@ -52,9 +52,14 @@ type DetailsRow = [Column, Column];
  * (keeping the later one), and fills in missing stop times from the next
  * programme.
  */
+//
+// The workers run code lowered to ES5 on every TV, where spreads and for...of
+// become slow helpers, so this and gridRow() copy and loop by hand: a spread
+// here took a third of a guide's packing on the TV.
 export const tidy = (programmes: Unfinished[]): StoredProgramme[] => {
   // Not toSorted(): older TVs' browsers lack it, and workers get no polyfills.
-  const sorted = [...programmes];
+  // oxlint-disable-next-line unicorn/prefer-spread
+  const sorted = programmes.slice();
   // oxlint-disable-next-line unicorn/no-array-sort
   sorted.sort((a, b) => a.start - b.start);
   const list: StoredProgramme[] = [];
@@ -62,7 +67,15 @@ export const tidy = (programmes: Unfinished[]): StoredProgramme[] => {
     const p = sorted[i];
     const next = sorted[i + 1];
     if (next && next.start === p.start) continue;
-    list.push({ ...p, stop: p.stop ?? (next ? next.start : p.start + HOUR) });
+    const kept: StoredProgramme = {
+      start: p.start,
+      title: p.title,
+      stop: p.stop ?? (next ? next.start : p.start + HOUR),
+    };
+    if (p.episode !== undefined) kept.episode = p.episode;
+    if (p.subTitle !== undefined) kept.subTitle = p.subTitle;
+    if (p.description !== undefined) kept.description = p.description;
+    list.push(kept);
   }
   return list;
 };
@@ -75,7 +88,9 @@ const gridRow = (day: number, channel: string, programmes: StoredProgramme[]): G
   const starts: number[] = [];
   const lengths: number[] = [];
   let previous = day * DAY;
-  for (const p of programmes) {
+  // oxlint-disable-next-line unicorn/no-for-loop
+  for (let i = 0; i < programmes.length; i++) {
+    const p = programmes[i];
     starts.push(Math.round((p.start - previous) / 1000));
     lengths.push(Math.round((p.stop - p.start) / 1000));
     previous = p.stop;

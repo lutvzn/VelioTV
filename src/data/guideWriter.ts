@@ -156,6 +156,9 @@ export class GuideWriter {
   writeState = "none";
   /** How many guide channels the guide lists, for predicting its size. */
   expectedChannels = 0;
+  /** Time spent waiting for writes, and merging inside them, in ms (ImportTiming). */
+  storageWaitMs = 0;
+  mergeMs = 0;
 
   private db: IDBDatabase;
   private options: GuideWriterOptions;
@@ -472,7 +475,9 @@ export class GuideWriter {
         const request = store.get([guide, generation, day, block]);
         request.addEventListener("success", () => {
           const old: GuideBlock | undefined = request.result;
+          const from = performance.now();
           const merged = this.merge(day, old, extra.programmes);
+          this.mergeMs += performance.now() - from;
           const { channels, count } = merged;
           this.account({ day, block, bytes: packedBytes(merged) + RECORD_OVERHEAD, channels, count });
           const value: GuideBlock = { guide, generation, day, block, ...merged };
@@ -511,6 +516,7 @@ export class GuideWriter {
   // Waits for the batch being written. Full storage stops storing; any other
   // error ends the import.
   private async settle() {
+    const from = performance.now();
     try {
       await this.writing;
     } catch (error) {
@@ -518,6 +524,7 @@ export class GuideWriter {
       this.stop("quota");
     } finally {
       this.writing = Promise.resolve();
+      this.storageWaitMs += performance.now() - from;
     }
   }
 

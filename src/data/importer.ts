@@ -98,6 +98,8 @@ interface ImportCommon {
   guideBudgetBytes?: number;
   /** The user's hidden channels and groups, whose guides are left out. */
   guideFilter?: GuideFilter;
+  /** Measures where the import's time goes (ImportResult.timing), for probes. */
+  timing?: boolean;
 }
 
 export type ImportRequest = ImportCommon &
@@ -117,6 +119,31 @@ export interface ImportProgress {
   guide?: { bytes: number; lastDay: number; stopped?: "budget" | "quota"; write: string };
 }
 
+/**
+ * Where an import's time went, in milliseconds. The import runs on one
+ * thread, so the guide stage's parts add up to it.
+ */
+export interface ImportTiming {
+  /** The playlist or Xtream lists: downloading, parsing and storing them. */
+  channelsMs: number;
+  /** The guide, all of it; the parts below. */
+  guideMs: number;
+  /** Waiting for the download's next piece: the network, and the browser's gunzip. */
+  downloadWaitMs: number;
+  /** Turning the bytes into text, and fflate's gunzip on TVs without DecompressionStream. */
+  decodeMs: number;
+  /** Reading the XMLTV, not counting what is done with each programme. */
+  parseMs: number;
+  /** Sorting each channel's day and packing blocks: JSON and deflate. */
+  packMs: number;
+  /** Waiting for IndexedDB to store the blocks, merges of late programmes included. */
+  storageWaitMs: number;
+  /** Merging late programmes into stored blocks, inside storageWaitMs. */
+  mergeMs: number;
+  /** The rest: letting events run, progress, and choosing what to keep. */
+  otherMs: number;
+}
+
 export interface ImportResult extends ImportState {
   guideUrls: string[];
   /** Guide programmes read, including those not kept. */
@@ -128,6 +155,8 @@ export interface ImportResult extends ImportState {
   /** Why the guide wasn't downloaded, if it wasn't; see the top of this file. */
   guideSkipped?: "shared" | "unchanged";
   seconds: number;
+  /** With `timing` asked for. */
+  timing?: ImportTiming;
 }
 
 export interface ImportOptions {
@@ -190,6 +219,8 @@ const unchanged = async (
   return true;
 };
 
+const clock = () => performance.now();
+
 // Lets the thread handle events if parsing has held it for a while.
 const eventBreaks = () => {
   let last = Date.now();
@@ -247,6 +278,19 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
   };
 
   const letEventsRun = eventBreaks();
+  const timing: ImportTiming | undefined = input.timing
+    ? {
+        channelsMs: 0,
+        guideMs: 0,
+        downloadWaitMs: 0,
+        decodeMs: 0,
+        parseMs: 0,
+        packMs: 0,
+        storageWaitMs: 0,
+        mergeMs: 0,
+        otherMs: 0,
+      }
+    : undefined;
   let progress: ImportProgress = { stage: "channels", url: "", bytes: 0, channels: 0, programmes: 0 };
   let reported = 0;
   const report = (force = false) => {
@@ -283,6 +327,16 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
   // top of this file. `own` is what this source wants of it.
   const importGuide = async (key: string, urls: string[], own: Wanted) => {
     const counts = { read: 0, unmatched: 0, skipped: 0 };
+    // Time spent in writer.add() and in the writer's flush(), finish() and
+    // commit(), for `timing`.
+    let addMs = 0;
+    let writerMs = 0;
+    const timed = async (run: () => Promise<void>) => {
+      if (!timing) return run();
+      const from = clock();
+      await run();
+      writerMs += clock() - from;
+    };
     const meta = await readGuideMeta(db, key);
     const index = meta && (await readGuideIndex(db, key));
     const usable =
@@ -359,30 +413,42 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       progress = { ...progress, stage: "guide", url, bytes: 0, totalBytes };
       const parser = new XmltvParser({
         defaultOffsetMinutes: input.guideOffsetMinutes,
+        // Programmes of channels not kept go unread (parser.unwanted), and
+        // what the guide writer doesn't store isn't read.
+        channelOf: keep,
+        skipExtras: true,
         onChannel: (channel: GuideChannel) => {
           const id = keep(channel.id);
           if (id) kept.add(id);
         },
         onProgramme: programme => {
           counts.read++;
-          const channel = keep(programme.channel);
-          if (!channel) {
-            counts.unmatched++;
+          if (!timing) {
+            writer.add(programme);
             return;
           }
-          programme.channel = channel;
+          const from = clock();
           writer.add(programme);
+          addMs += clock() - from;
         },
       });
-      for await (const text of readText(body, bytes => (progress.bytes += bytes))) {
-        parser.push(text);
+      const decoding = timing ? { decodeMs: 0 } : undefined;
+      let bodyEnded = timing ? clock() : 0;
+      for await (const text of readText(body, bytes => (progress.bytes += bytes), { timing: decoding })) {
+        if (timing) {
+          const from = clock();
+          timing.downloadWaitMs += from - bodyEnded;
+          const added = addMs;
+          parser.push(text);
+          timing.parseMs += clock() - from - (addMs - added);
+        } else parser.push(text);
         if (writer.full) {
           writer.expectedChannels = kept.size;
           storing = "storing the guide";
-          await writer.flush();
+          await timed(() => writer.flush());
           storing = undefined;
         }
-        progress.programmes = counts.read;
+        progress.programmes = counts.read + parser.unwanted;
         progress.guide = {
           bytes: writer.bytes,
           lastDay: writer.lastDay,
@@ -391,15 +457,22 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
         };
         report();
         await letEventsRun();
+        if (timing) bodyEnded = clock();
         // Reading on would only skip everything; stop the download.
         if (writer.stopped) break;
       }
+      counts.read += parser.unwanted;
+      counts.unmatched += parser.unwanted;
+      if (timing && decoding) {
+        timing.downloadWaitMs += clock() - bodyEnded - decoding.decodeMs;
+        timing.decodeMs += decoding.decodeMs;
+      }
       storing = "storing the guide";
-      await writer.finish();
+      await timed(() => writer.finish());
       report(true);
     }
     storing = "storing the guide";
-    await writer.finish();
+    await timed(() => writer.finish());
     // When storage filled up, a batch may not have been stored: what is.
     const stored =
       writer.stopped === "quota"
@@ -419,6 +492,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       guideLastDay: stored.lastDay ?? writer.lastDay,
       guideTrimmed: writer.trimmed,
     };
+    const committing = timing ? clock() : 0;
     await writer.commit({
       guide: key,
       urls,
@@ -431,6 +505,12 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       validators,
       stored: counted,
     });
+    if (timing) {
+      // commit() only waits for IndexedDB.
+      timing.storageWaitMs += clock() - committing + writer.storageWaitMs;
+      timing.mergeMs += writer.mergeMs;
+      timing.packMs += addMs + writerMs - writer.storageWaitMs;
+    }
     abandonGuide = undefined;
     let ownKept = 0;
     for (const id of kept) if (own.from(id) !== undefined) ownKept++;
@@ -442,6 +522,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     previous = await readImport(db, source);
     if (previous?.lastDoneAt) state.lastDoneAt = previous.lastDoneAt;
     await putState(db, shownState("importing"));
+    const channelsFrom = clock();
     let guideUrls = input.guideUrls ?? [];
 
     // Kept until the channel stage ends, then stored as one record.
@@ -519,7 +600,15 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
     }
 
     const key = guideKey(guideUrls, input.guideOffsetMinutes);
+    const guideFrom = clock();
+    if (timing) timing.channelsMs = guideFrom - channelsFrom;
     const guide = key === undefined ? undefined : await importGuide(key, guideUrls, own);
+    if (timing) {
+      timing.guideMs = clock() - guideFrom;
+      const parts =
+        timing.downloadWaitMs + timing.decodeMs + timing.parseMs + timing.packMs + timing.storageWaitMs;
+      timing.otherMs = timing.guideMs - parts;
+    }
     if (key === undefined) {
       delete state.guide;
       Object.assign(state, { guideChannels: 0, programmes: 0, guideBytes: 0, guideTrimmed: false });
@@ -542,6 +631,7 @@ export const runImport = async (input: ImportRequest, options: ImportOptions = {
       seconds: (Date.now() - started) / 1000,
     };
     if (guide?.guideSkipped) result.guideSkipped = guide.guideSkipped;
+    if (timing) result.timing = timing;
     return result;
   } catch (error) {
     const reason = error instanceof Error ? error.message || error.name : String(error);

@@ -513,6 +513,66 @@ The user asked whether Velio could use Stremio add-ons: catalogs, details, strea
    - **So:** the app downloads the add-on's file, saves it in `wgt-private` and gives AVPlay its path. The other way, parsing the file and drawing each line by the player's time, stays for files AVPlay can't read, and for the desktop and LG.
    - Not tested yet: text with accents and other non-English letters, files that aren't UTF-8, styling tags such as `<i>`, MKV and HLS films, and Tizen 3, whose `tizen.filesystem` lacks `openFile()` and `toURI()` (the older `resolve()` API would be needed).
 
+## A Rust guide importer (tested 2026-11-09)
+
+The user asked whether anything in the app is limited by the processor, and whether Rust built for WebAssembly would help.
+
+**Decided (2026-11-09): no Rust.** The TypeScript was made about as fast (step 3), so the Rust crate, the `guide-bench` probe and its bench worker were removed; this section keeps their results. The workers stay ES5 on every TV (a modern build of them would save only about 14% of an import), and blocks stay at deflate level 6. `import-timing` stays, to time imports.
+
+1. **Where an import's time goes** (`import-timing` probe; `timing: true` on an import gives `ImportTiming`, `src/data/importer.ts`): the 2,000-channel test source, 340,471 programmes read, 291,906 stored, in 59.2 s.
+
+   | Part of the guide stage (58.8 s)       | Time   | Share | Programmes a second |
+   | -------------------------------------- | ------ | ----- | ------------------- |
+   | Parsing the XMLTV                      | 27.7 s | 47%   | 12,300              |
+   | Packing blocks (tidy, JSON, deflate)   | 24.8 s | 42%   | 13,700              |
+   | Other (events, progress, what to keep) | 2.7 s  | 5%    |                     |
+   | Waiting for the download               | 2.0 s  | 3%    |                     |
+   | Decoding text                          | 1.7 s  | 3%    |                     |
+   | Waiting for IndexedDB                  | 0.05 s | 0%    |                     |
+
+   The channel stage took 0.3 s. Downloaded alone, the 18 MB guide took 7.7 s, but during the import it came faster than it was read. So the import is limited by the processor alone, on the import worker's thread; the UI kept 60 fps (lowest 52).
+
+2. **Rust against TypeScript** (`guide-bench` probe, `src/data/guideBench.ts` and `experiments/wasm-guide/`, all since removed): the Rust crate reads XMLTV and packs blocks as `xmltv.ts`, `tidy()` and `BlockEncoder` do, with the same JSON rows (deflated by `miniz_oxide` instead of fflate), behind a plain WebAssembly API with no binding generator. In a worker, the same guide (2,000 test channels, 130 MB of XML) was downloaded once and read by each side, without storing:
+
+   | Side              | Whole  | Parse  | Pack   | Other                                         |
+   | ----------------- | ------ | ------ | ------ | --------------------------------------------- |
+   | TypeScript        | 60.4 s | 27.2 s | 29.3 s | decoding text 1.6 s, decompressing 2.3 s      |
+   | Rust, WebAssembly | 33.1 s | 12.0 s | 18.3 s | copying in and out 0.3 s, decompressing 2.4 s |
+   | Times faster      | 1.8×   | 2.3×   | 1.6×   |                                               |
+   - Both read 340,471 programmes and stored 338,656 (this packing keeps every channel's yesterday, so it stores more than the import), and their rows were the same on all 7 days. Rust's blocks came out 1.6% bigger (7.46 MB against 7.34). The `.wasm` is 148 KB and compiled in 55 ms. The UI kept 60 fps (lowest 49).
+   - A test checked the two gave the same rows, on the test guide and on one written with entities, CDATA, time zones, repeated start times, missing stop times, both episode systems and odd whitespace. That guide is now a parser test in `xmltv.test.ts`.
+   - **What adopting it would take:** Rust in CI and the build; the rest of the guide writer (late channels' merges, the budget and its prediction) kept in TypeScript around blocks from Rust, or moved too; and a fallback for TVs without WebAssembly (Tizen 3 and 4, webOS 3 and 4) or without the newer WebAssembly features Rust's standard library is built with (Tizen 5 and 5.5 would need it rebuilt for plain WebAssembly). So both readers would be kept, with the test above keeping them the same.
+   - At first, the TypeScript wasn't made faster; that came next.
+
+3. **The TypeScript, made faster** (same probes and guide, same day):
+   - **The parser** (`xmltv.ts`) read each programme's children by searching the programme from the start once for each name (title, sub-title, desc, category, episode-num, icon, new). It now reads them in one pass, finding each closing tag by looking at the next tag. Times in the usual two forms (`20261102143000 +0100`, `20261102143000`) are read with arithmetic instead of slices, `Number()` and `Date.UTC()`, and anything else the old way. Two new options leave out work: `channelOf` lets the importer leave a channel it doesn't keep unread (counted as unmatched, as before), and `skipExtras` leaves out categories, icons and "new" flags, which nothing stores. Its output is the old parser's: on 18,000 random guides (children in any order, nested, in CDATA, empty, unclosed; split at random) and 2 million random times, compared with a copy of the old one, there were no differences. On the desktop it went from about 145,000 programmes a second to 250,000.
+   - **`tidy()`** took 9.5 s of the packing on the TV. The workers are lowered to ES5 for Chromium 38 on every TV (Phase 8, step 4), the 2024 TV included, and there its `{ ...p, stop }` became Babel's object spread helper, which defines each field through `Object.keys`, `forEach` and `defineProperty`. Copying the fields by hand, and plain loops instead of spreads and `for...of` there and in `gridRow()`, brought it to 2.0 s.
+   - **Deflate** is most of what's left of the packing. On the TV, a quarter of the blocks' JSON (6.9 MB) deflated in:
+
+     | Deflate                                 | Time   | Size   |
+     | --------------------------------------- | ------ | ------ |
+     | fflate level 6 (now), one push per part | 2.67 s | 100%   |
+     | fflate level 6, a row at a time (now)   | 3.43 s | 101%   |
+     | fflate level 4                          | 1.86 s | 108.4% |
+     | fflate level 1                          | 1.15 s | 120.9% |
+     | the TV's `CompressionStream`            | 3.28 s | 102.6% |
+
+     The TV's own deflate is no faster than fflate, so it isn't worth its asynchronous API. A lower level trades storage for time, under the 80 MB limit; level 6 stays (decided 2026-11-09). The row-at-a-time cost is fflate's streaming, which flushes every 8 KB.
+
+   - **Results.** `guide-bench`, TypeScript against Rust, rows still the same on all 7 days:
+
+     | TypeScript                           | Whole  | Parse  | Pack   | `tidy()` |
+     | ------------------------------------ | ------ | ------ | ------ | -------- |
+     | Before                               | 60.4 s | 27.2 s | 29.3 s | 9.5 s    |
+     | New parser                           | 43.4 s | 10.6 s | 28.9 s | 9.5 s    |
+     | And `tidy()` and `gridRow()`         | 35.6 s | 10.5 s | 21.1 s | 2.0 s    |
+     | And workers not lowered (experiment) | 30.6 s | 10.2 s | 16.6 s | 0.6 s    |
+     | Rust, for comparison                 | 32.3 s | 11.3 s | 18.3 s |          |
+
+     The real import (`import-timing`, 2,000 channels, ES5 workers as shipped) went from 59.2 s to 34.9 s: parsing 27.7 s to 11.4 s, packing 24.8 s to 17.6 s; the UI kept 60 fps (lowest 53).
+
+   - **So Rust wasn't worth it:** the TypeScript parser is as fast as Rust's, and with workers not lowered to ES5 the whole is faster than Rust. That experiment built the workers without `workerPolyfills` and `lowerChunks` (so it can't run on old TVs, and wasn't kept). A modern build of the workers for the TVs that can run it would save another 14% of an import; not done, as too small to be worth a second build (decided 2026-11-09). What it does mean: in worker code on a hot path, avoid spreads and `for...of`, as `tidy()` now does.
+
 ## What you need before starting
 
 - **TVs:** at least one Samsung in developer mode now, and an LG in developer mode by Phase 9. The oldest models you own set the realistic support floor.
