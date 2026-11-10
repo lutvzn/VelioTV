@@ -4,6 +4,7 @@
 
 import { activeElement, type ElementNode } from "@solidtv/solid";
 import { onCleanup } from "solid-js";
+import nacl from "tweetnacl";
 import { channelKeys } from "./data/channelKey";
 import * as db from "./data/db";
 import { createGuideClient } from "./data/guideClient";
@@ -56,6 +57,8 @@ const hooks: Record<string, unknown> = {
   watched,
   reminders,
   handPlay,
+  /** TweetNaCl, as the app's build has it, for the `sync` probe (Velio Sync, Phase 0). */
+  nacl,
   /** The app's text, and the language it shows (settings.setLanguage() picks one). */
   text: $t,
   language,

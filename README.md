@@ -1,6 +1,8 @@
-# Starter Template for SolidTV
+# VelioTV
 
-Part of https://solidtv.dev/
+An IPTV app built with SolidTV, for Samsung Tizen first and LG webOS later.
+
+Based on the SolidTV starter template: https://solidtv.dev/
 
 Check out https://github.com/solid-tv/solid for additional support.
 

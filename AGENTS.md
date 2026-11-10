@@ -1,6 +1,6 @@
 # Notes for coding agents
 
-Velio is an IPTV app built with SolidTV, for Samsung Tizen first and LG webOS last. `PLAN.md` holds the plan, the phase in progress and every device test result. Read it before starting work, and record new results there. Device addresses and IDs are in `PRIVATE.md` (git-ignored, local only); don't copy them into tracked files.
+VelioTV is an IPTV app built with SolidTV, for Samsung Tizen first and LG webOS last. `PLAN.md` holds the plan, the phase in progress and every device test result. Read it before starting work, and record new results there. Device addresses and IDs are in `PRIVATE.md` (git-ignored, local only); don't copy them into tracked files.
 
 ## Tools
 

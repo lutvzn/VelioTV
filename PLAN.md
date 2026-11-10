@@ -36,7 +36,7 @@ TiviMate's site returned only its title, so this list comes from third-party gui
 - **Data:** parse playlists and XMLTV in a Web Worker, and store them in IndexedDB rather than in memory.
 - **TV guide:** build a custom time-based grid, because programme cells vary in width. `VirtualGrid` is still useful as a reference.
 - **Recording:** leave it out of v1, then add an optional self-hosted recorder so both platforms behave the same.
-- **Distribution:** sideload first. The app ships with no channels or content, and uses its own name and design rather than TiviMate's. It was first called "TiviPlayer", too close to that name, so it was renamed **Velio** in Phase 8, step 6.
+- **Distribution:** sideload first. The app ships with no channels or content, and uses its own name and design rather than TiviMate's. It was first called "TiviPlayer", too close to that name, so it was renamed **Velio** in Phase 8, step 6, then **VelioTV**.
 
 ## Fix these starter problems first
 
@@ -392,7 +392,7 @@ Storage first, as it's the one place users can lose data today; then older TVs, 
 3. **An import that runs out of space:** what the importer does when a write fails on the quota, so the last good import is never lost (Phase 4, step 6). Done, see below.
 4. **Older TVs:** the build, including the workers, for Tizen 3.0 (Chromium 47) and webOS 3.0 (Chromium 38); it was Tizen 5.5 until 2026-11-07. Only the 2024 TV is at hand, so this is checked on it, in old Chromium builds and in CI. Done, see below; older models and emulators are tested in Phase 9 (decided 2026-11-07).
 5. **Translations and accessibility:** the text ready for other languages, and the app with Samsung's voice guide. Done, see below.
-6. **Store packaging:** a name of its own (see Key decisions), icons and the store build. In progress: renamed to **Velio** (2026-11-08). Tizen package `VelioTVapp`, app `VelioTVapp.Velio`; storage keys `velio.*`, database `velio`, probes read `window.velio`. Backups made under the old name (`"app": "tiviplayer"`) still restore. The new package installs next to the old `TiviPlayer.TiviPlayer` on the TV, with storage of its own. The user has the velio.tv domain (2026-11-08), so the widget ID is `https://velio.tv/app` and the webOS ID will be `tv.velio.app` (Phase 9). Still to do: icons, store build.
+6. **Store packaging:** a name of its own (see Key decisions), icons and the store build. In progress: renamed to **Velio** (2026-11-08). Tizen package `VelioTVapp`, app `VelioTVapp.Velio`; storage keys `velio.*`, database `velio`, probes read `window.velio`. Backups made under the old name (`"app": "tiviplayer"`) still restore. The new package installs next to the old `TiviPlayer.TiviPlayer` on the TV, with storage of its own. The user has the velio.tv domain (2026-11-08), so the widget ID is `https://velio.tv/app` and the webOS ID will be `tv.velio.app` (Phase 9). The project is called **VelioTV** in the documentation. This is a documentation-only rename: app branding, display name, browser title, package metadata, folder name and internal identifiers stay unchanged. Still to do: icons, store build.
 7. **A new look** (asked 2026-11-08): a more modern, premium style, in the spirit of Stremio and Nuvio. Built, see below; the user's look on the TV is still to come.
 
 ### Phase 8 results
@@ -593,11 +593,15 @@ After the guide (above), the channel stage: a big M3U, made by the test server a
    | Storing films and series         | 2.5 s     | 1.3–1.6 s |
    | Reading them back, on the page   | 2.3 s     | 0.8–1.0 s |
 
-   The UI kept 53+ fps while reading back. What is left is spread out: `parseAttributes()` about 1 s (a version that skips needless lower-casing was no faster), garbage collection about 1.2 s.
+   The UI kept 53+ fps while reading back, and after a big import the Movies and Series pages open at once, with no freeze (checked on the TV by the user, 2026-11-09). What is left is spread out: `parseAttributes()` about 1 s (a version that skips needless lower-casing was no faster), garbage collection about 1.2 s.
 
    The guide stage gained too, from the timing and `push()`: the 2,000-channel test source's guide took 24.9 s (twice), against 34.9 s, with parsing 6.5 s (was 11.4 s) and packing 13.2 s (was 17.6 s). Part of that was the clock reads: the figures in "A Rust guide importer" above are inflated by them, the TypeScript side of `guide-bench` too. Deflating (fflate, level 6) is now 28% of the guide stage's profile. One run straight after deleting the big M3U's import took 33.2 s, with 9 s not in any part, so measure after a pause.
 
    With a guide, a `PROBE_PROFILE` run saved the import's profile but didn't finish after it; the runner was stopped by hand. Without one it finishes.
+
+## Velio Sync, Phase 0 (2026-11-10)
+
+Syncing sources from an account is planned in its own repo, VelioPlatform (its `PLAN.md`). For its first checks the app has `tweetnacl` (1.0.3, plain ES5), exposed to probes as `window.velio.nacl`, and the `sync` probe (`scripts/tv-probe/probes/sync.js`). The probe reaches the sync Worker, opens a made-up account with 3 profiles and 20 lists 5 times, and tries a WebSocket to it. On the test TV, against the Worker on the dev machine, the first open took 231 ms (141 ms of it the signature check) and the median 86 ms; the socket got every message. That is too long for the UI's thread, so the app will do it in a worker, and only when something changed. Results and next steps are in VelioPlatform's `PLAN.md`, "Phase 0 results".
 
 ## What you need before starting
 
