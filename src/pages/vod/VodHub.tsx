@@ -1,4 +1,5 @@
 import { type ElementNode, Text, View } from "@solidtv/solid";
+import { useHold } from "@solidtv/solid/primitives";
 import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { Artwork } from "../../components/Artwork";
 import { Backdrop } from "../../components/Backdrop";
@@ -6,9 +7,9 @@ import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen } from "../../components/SideMenu
 import { exposeToProbes } from "../../devHooks";
 import { markEmpty } from "../../emptySection";
 import { heldRacing, moveWhileHeld, stopHold } from "../../heldKey";
-import { settings } from "../../library";
+import { TITLE_SORTS, type TitleSort } from "../../data/vodSorts";
+import { settings, vodSorts } from "../../library";
 import { createRestingCursor } from "../../restingCursor";
-import { fold } from "../../guide/search";
 import { scrollTop } from "../../live/listWindow";
 import { editText } from "../../textEntry";
 import { BOLD, colors, focusShadow, motion, radius, RING } from "../../theme";
@@ -16,7 +17,10 @@ import { $t, $tn } from "../../translate";
 import { sayWhileFocused } from "../../voiceGuide";
 import { useWholeScreen } from "../../wholeScreen";
 import { GROUP_ROWS, GroupColumn, GROUPS_WIDTH, SEARCH_RECT } from "../guide/GroupColumn";
+import { HOLD_MS, HOLD_REQUIRES_REPEAT, OPTIONS_WIDTH, OptionsPanel } from "../live/ChannelOptions";
+import type { Menu } from "../live/menus";
 import { Facts } from "./FilmPanel";
+import { searchTitles, sortTitles } from "./hubOrder";
 
 // The Movies and Series pages (PLAN.md, Phase 6, step 4), laid out as Live
 // TV is: the menu, a column of groups (a search field, Continue watching,
@@ -31,6 +35,12 @@ import { Facts } from "./FilmPanel";
 // The Stremio add-ons' catalogs (src/stremio/) come after the categories,
 // each a group that asks for more as the cursor nears its end (onNearEnd),
 // and their search results join the search group's (searchItems).
+//
+// Everything, the categories and the page's other sortable groups can be
+// ordered by when their titles were added, name, year or rating, or as
+// listed (src/pages/vod/hubOrder.ts): holding OK on the group, or the Tools
+// key, offers it, and each profile keeps each group's (src/data/vodSorts.ts).
+// The cursor stays on its title, not its place, as the titles change.
 
 const PAGE_WIDTH = 1920;
 const LEFT = 64;
@@ -68,6 +78,8 @@ export interface HubItem {
   category?: string;
   rating?: number;
   year?: number;
+  /** When it was added, in milliseconds since 1970, for Recently added. */
+  added?: number;
   /** How far it was watched, from 0 to 1, for a bar on the poster. */
   progress?: number;
 }
@@ -86,6 +98,8 @@ interface Group<T> {
   items: T[];
   /** Asking for its titles, or more of them. */
   loading?: boolean;
+  /** Whether its order can be chosen; a catalog's or Popular's is its own. */
+  sortable?: boolean;
 }
 
 /** A group the page gives, such as an add-on's catalog. */
@@ -100,6 +114,8 @@ export interface HubPlace {
   query: string;
   /** The poster with the cursor in each group. */
   at: Record<string, number>;
+  /** The title with the cursor in each group, which it stays on as the titles change. */
+  keys?: Record<string, string>;
 }
 
 export interface VodHubProps<T extends HubItem> {
@@ -134,12 +150,17 @@ export interface VodHubProps<T extends HubItem> {
   covered?: boolean;
   ref?: (element: ElementNode) => void;
   probeName: string;
+  /** The page whose groups' orders are kept, such as "movies"; none can be chosen without it. */
+  sortPage?: string;
+  /** The order of a group none was chosen for. */
+  defaultSort?: TitleSort;
+  /** A title's other names to search, such as each source's for it. */
+  alsoNamed?: (item: T) => readonly string[];
+  /** The key a title the cursor was on has now, as when matched and joined with others. */
+  currentKey?: (key: string) => string | undefined;
 }
 
-const matches = (name: string, words: string[]) => {
-  const folded = fold(name);
-  return words.every(word => folded.includes(word));
-};
+const sortLabel = (sort: TitleSort) => $t(`vod.sort.${sort}`);
 
 /** Where the column is: beside the menu, moving right as it opens. */
 const groupsX = () => (menuOpen() ? MENU_OPEN_WIDTH : MENU_WIDTH);
@@ -148,9 +169,8 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   const [focused, setFocused] = createSignal(false);
   const [query, setQuery] = createSignal(props.place?.query ?? "");
   const results = createMemo(() => {
-    const words = fold(query()).split(/\s+/).filter(Boolean);
-    if (words.length === 0) return [];
-    const own = props.items.filter(item => matches(item.name, words));
+    if (!query().trim()) return [];
+    const own = searchTitles(props.items, query(), props.alsoNamed);
     const seen = new Set(own.map(item => item.key));
     return [...own, ...(props.searchItems ?? []).filter(item => !seen.has(item.key))];
   });
@@ -178,10 +198,17 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
       ...(props.continueItems.length > 0
         ? [{ id: CONTINUE, label: $t("vod.continue"), items: props.continueItems }]
         : []),
-      ...(props.items.length > 0 ? [{ id: ALL, label: props.allLabel, items: props.items }] : []),
+      ...(props.items.length > 0
+        ? [{ id: ALL, label: props.allLabel, items: props.items, sortable: true }]
+        : []),
       ...props.categories
         .filter(name => byCategory.has(name))
-        .map(name => ({ id: `category:${name}`, label: name, items: byCategory.get(name) ?? [] })),
+        .map(name => ({
+          id: `category:${name}`,
+          label: name,
+          items: byCategory.get(name) ?? [],
+          sortable: true,
+        })),
       ...extras(),
     ];
   });
@@ -196,16 +223,55 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   const group = () => groups()[groupIndex()];
   /** The group shown: the one asked for, or the first if it's gone. */
   const currentId = () => group()?.id;
-  const items = () => group()?.items ?? [];
+  /** A group's order, if it can be chosen. */
+  const sortOf = (one: Group<T> | undefined): TitleSort | undefined =>
+    one?.sortable && props.sortPage
+      ? (vodSorts.sortOf(props.sortPage, one.id) ?? props.defaultSort ?? "listed")
+      : undefined;
+  /** The group's titles, in its order. */
+  const items = createMemo((): readonly T[] => {
+    const one = group();
+    if (!one) return [];
+    const sort = sortOf(one);
+    return sort ? sortTitles(one.items, sort) : one.items;
+  });
   const [places, setPlaces] = createSignal<Record<string, number>>(props.place?.at ?? {});
+  const [keys, setKeys] = createSignal<Record<string, string>>(props.place?.keys ?? {});
   const placeOf = (id: string) => places()[id] ?? 0;
-  const at = () => (group() ? placeOf(group().id) : 0);
+  /** The cursor: on the title it was on, wherever that is now, or else at its place. */
+  const at = createMemo(() => {
+    const one = group();
+    if (!one) return 0;
+    const list = items();
+    const index = Math.max(0, Math.min(placeOf(one.id), list.length - 1));
+    const key = keys()[one.id];
+    if (key === undefined || list[index]?.key === key) return index;
+    let found = list.findIndex(item => item.key === key);
+    const now = found < 0 ? props.currentKey?.(key) : undefined;
+    if (now !== undefined && now !== key) found = list.findIndex(item => item.key === now);
+    return found >= 0 ? found : index;
+  });
   const placeAt = (index: number) => {
     const one = group();
     if (!one) return;
-    const place = Math.max(0, Math.min(index, one.items.length - 1));
-    setPlaces(all => ({ ...all, [one.id]: place }));
+    const list = items();
+    const place = Math.max(0, Math.min(index, list.length - 1));
+    const key = list[place]?.key;
+    batch(() => {
+      setPlaces(all => ({ ...all, [one.id]: place }));
+      if (key !== undefined) setKeys(all => ({ ...all, [one.id]: key }));
+    });
   };
+  /** A group's cursor back on its first title, as for a new search or order. */
+  const restart = (id: string) =>
+    batch(() => {
+      setPlaces(all => ({ ...all, [id]: 0 }));
+      setKeys(all => {
+        const next = { ...all };
+        delete next[id];
+        return next;
+      });
+    });
   // A group whose items changed keeps its cursor in range.
   createEffect(
     on(groups, list => {
@@ -215,7 +281,9 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
       }
     }),
   );
-  createEffect(() => props.onPlace?.({ groupId: currentId() ?? groupId(), query: query(), at: places() }));
+  createEffect(() =>
+    props.onPlace?.({ groupId: currentId() ?? groupId(), query: query(), at: places(), keys: keys() }),
+  );
 
   // "groups" is the column, with the cursor on the group shown or on the
   // search field above the groups. Opened from the menu, Right reaches the
@@ -345,7 +413,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         batch(() => {
           setQuery(typed);
           if (typed) {
-            setPlaces(all => ({ ...all, [SEARCH]: 0 }));
+            restart(SEARCH);
             setGroupId(SEARCH);
             setOnSearch(false);
           } else if (groupId() === SEARCH) setGroupId(CONTINUE);
@@ -354,6 +422,56 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         root?.setFocus();
       },
     });
+
+  // A group's order, from holding OK on it in the column, or the Tools key.
+  const [sorting, setSorting] = createSignal<Group<T>>();
+  const sortMenu = (one: Group<T>): Menu => ({
+    title: $t("vod.sortBy", { group: one.label }),
+    options: () =>
+      TITLE_SORTS.map(sort => ({
+        id: `sort:${sort}`,
+        label: `${sortOf(one) === sort ? "•  " : "    "}${sortLabel(sort)}`,
+        run: () => {
+          if (props.sortPage) vodSorts.set(props.sortPage, one.id, sort);
+          // A new order starts from its first title.
+          restart(one.id);
+        },
+      })),
+  });
+  /** Opens the group's order, if it can be chosen; returns whether it did. */
+  const openSort = (one: Group<T> | undefined) => {
+    if (!one || !sortOf(one)) return false;
+    // The group the column's cursor is on shows, to see its new order.
+    groupCursor.settle();
+    setSorting(one);
+    return true;
+  };
+  const closeSort = () => {
+    setSorting(undefined);
+    root?.setFocus();
+  };
+  /** The group the keys are on: the column's, unless on the search field, or the one shown. */
+  const keyGroup = () => {
+    if (area() !== "groups") return group();
+    return onSearch() ? undefined : cursorGroup();
+  };
+  const pressEnter = () => {
+    if (area() === "groups") {
+      if (onSearch()) search();
+      else toGrid();
+    } else {
+      const item = current();
+      if (item) props.onOpen(item);
+    }
+  };
+  const [holdEnter, releaseEnter] = useHold({
+    onEnter: pressEnter,
+    onHold: () => {
+      if (area() !== "groups" || !openSort(keyGroup())) pressEnter();
+    },
+    holdThreshold: HOLD_MS,
+    holdRequiresRepeat: HOLD_REQUIRES_REPEAT,
+  });
 
   exposeToProbes(props.probeName, {
     rows: groups,
@@ -372,16 +490,24 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
     items,
     cursor: at,
     place: placeAt,
+    sorting,
+    sortOf: () => sortOf(group()),
   });
 
   // What the voice guide reads: the group, then the title under the cursor.
   sayWhileFocused(
-    () => focused() && !props.covered,
+    () => focused() && !props.covered && !sorting(),
     () => {
-      if (area() === "groups")
+      if (area() === "groups") {
+        const sort = sortOf(cursorGroup());
         return onSearch()
           ? [props.searchLabel, query()]
-          : [cursorGroup()?.label, $tn("count.titles", cursorGroup()?.items.length ?? 0)];
+          : [
+              cursorGroup()?.label,
+              $tn("count.titles", cursorGroup()?.items.length ?? 0),
+              sort ? sortLabel(sort) : undefined,
+            ];
+      }
       const item = current();
       if (!item) {
         const why =
@@ -480,14 +606,15 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         else if (at() % COLUMNS < COLUMNS - 1 && at() + 1 < items().length) placeAt(at() + 1);
         return true;
       }}
-      onEnter={() => {
-        if (area() === "groups") {
-          if (onSearch()) search();
-          else toGrid();
-        } else {
-          const item = current();
-          if (item) props.onOpen(item);
-        }
+      onEnter={(event, target, handler) => {
+        // Holding OK on a group offers its order; OK on a poster opens it at once.
+        if (area() === "groups" && sortOf(keyGroup())) return holdEnter(event, target, handler);
+        pressEnter();
+        return true;
+      }}
+      onEnterRelease={releaseEnter}
+      onTools={() => {
+        openSort(keyGroup());
         return true;
       }}
       onBack={() => {
@@ -575,6 +702,13 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
                 ? $t("vod.loading")
                 : $tn("count.titles", items().length)}
             </Text>
+            <Show when={sortOf(group())}>
+              {sort => (
+                <Text fontSize={24} color={colors.textFaint}>
+                  {`·   ${sortLabel(sort())}`}
+                </Text>
+              )}
+            </Show>
           </View>
           <Show when={items().length === 0 && currentId() === SEARCH && !group()?.loading}>
             <Text x={LEFT} y={GRID_Y + 20} fontSize={28} color={colors.textDim}>
@@ -673,6 +807,9 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
           query={query()}
           searchLabel={props.searchLabel}
         />
+      </Show>
+      <Show when={sorting()}>
+        {one => <OptionsPanel menu={sortMenu(one())} x={PAGE_WIDTH - OPTIONS_WIDTH} onClose={closeSort} />}
       </Show>
     </View>
   );

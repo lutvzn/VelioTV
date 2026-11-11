@@ -64,6 +64,7 @@ const fromTmdb = (title: TmdbTitle | undefined, via: MatchedBy): TitleMatch | un
   const match: TitleMatch = { id: title.imdb, name: title.name, genres: title.genres, via };
   if (title.year) match.year = title.year;
   if (title.poster) match.poster = title.poster;
+  if (title.rating) match.rating = title.rating;
   return match;
 };
 
@@ -138,6 +139,7 @@ export const createMoreMatches = (options: MoreMatchesOptions) => {
     const match: TitleMatch = { id: imdb, name: meta.name, genres: meta.genres ?? [], via: "tmdb" };
     if (meta.year) match.year = meta.year;
     if (meta.poster) match.poster = meta.poster;
+    if (meta.rating) match.rating = meta.rating;
     return match;
   };
 

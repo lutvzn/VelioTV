@@ -24,6 +24,9 @@ describe("readTmdbResults", () => {
   });
 });
 
+const score = (vote_average: number, vote_count: number) =>
+  readTmdbTitle({ id: 1, title: "A", vote_average, vote_count }, "movie")?.rating;
+
 describe("readTmdbTitle", () => {
   it("gives the IMDb id, and genres as Cinemeta names them", () => {
     expect(
@@ -52,6 +55,12 @@ describe("readTmdbTitle", () => {
         "movie",
       ),
     ).toEqual({ tmdb: 1, name: "A", genres: ["Sci-Fi"] });
+  });
+
+  it("gives TMDB's score once enough have voted", () => {
+    expect(score(7.456, 1200)).toBe(7.5);
+    expect(score(9, 3)).toBeUndefined();
+    expect(score(0, 0)).toBeUndefined();
   });
 });
 

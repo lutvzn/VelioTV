@@ -20,6 +20,8 @@ const adventure: TitleMatch = {
   genres: ["Adventure", "Drama"],
 };
 
+const isAdventure = (item: { key: string }) => item.key === "a/m:1" || item.key === "b/m:7";
+
 const matchOf = (item: { key: string }) => (item.key === "b/m:8" ? undefined : adventure);
 
 const show = (source: string, id: string): SeriesEntry => ({
@@ -37,6 +39,30 @@ const episode = (season: number, number: number, id: string) => ({
 });
 
 describe("mergeFilms", () => {
+  it("takes when its newest copy was added, and a rating from its match or else its best copy", () => {
+    const films = [
+      film("a", "m:1", "The Great Adventure (1999)", { added: 1000, rating: 6 }),
+      film("b", "m:7", "The Great Adventure (1999)", { added: 3000, rating: 7.5 }),
+      film("b", "m:8", "Lonely Film (2001)", { added: 2000, rating: 5 }),
+      film("c", "m:9", "Lonely Film (2001)", { rating: 8 }),
+    ];
+    const rated = { ...adventure, rating: 7.1 };
+    const [title, lonely] = mergeFilms(films, item => (isAdventure(item) ? rated : undefined)).titles;
+    expect(title).toMatchObject({ added: 3000, rating: 7.1 });
+    expect(lonely).toMatchObject({ added: 2000, rating: 8, year: 2001 });
+    // Without the match's own rating, the best copy's.
+    const [unrated] = mergeFilms(films, item => (isAdventure(item) ? adventure : undefined)).titles;
+    expect(unrated.rating).toBe(7.5);
+  });
+
+  it("gives an unmatched title the year its name gives, over one read from the title", () => {
+    const [title] = mergeFilms(
+      [film("a", "m:1", "Blade Runner 2049 (2017)", { year: 2049 })],
+      () => undefined,
+    ).titles;
+    expect(title.year).toBe(2017);
+  });
+
   it("joins the sources' copies of a matched film, and the add-ons' title of its id", () => {
     const films = [
       film("a", "m:1", "EN - The Great Adventure (1999)", { category: "Films A" }),

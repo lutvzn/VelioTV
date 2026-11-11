@@ -7,6 +7,13 @@ import { createMemo, createRoot, createSignal } from "solid-js";
 
 export type VodLayout = "modern" | "classic";
 export const VOD_LAYOUT_KEY = "velio.vodLayout";
+/**
+ * Which titles the modern layout shows in their providers' categories:
+ * only those it couldn't match (the default), or every title, so a
+ * provider's "Kids" or "Turkish films" stays whole.
+ */
+export type VodCategories = "unmatched" | "all";
+export const VOD_CATEGORIES_KEY = "velio.vodCategories";
 
 export const createVodLayout = (options: { storage: Storage; profile: () => string | undefined }) =>
   createRoot(() => {
@@ -20,9 +27,27 @@ export const createVodLayout = (options: { storage: Storage; profile: () => stri
         return "modern";
       }
     });
+    const categories = createMemo((): VodCategories => {
+      options.profile();
+      saved();
+      try {
+        return options.storage.getItem(VOD_CATEGORIES_KEY) === "all" ? "all" : "unmatched";
+      } catch {
+        return "unmatched";
+      }
+    });
     return {
       layout,
       modern: () => layout() === "modern",
+      categories,
+      setCategories: (next: VodCategories) => {
+        try {
+          options.storage.setItem(VOD_CATEGORIES_KEY, next);
+        } catch (error) {
+          console.warn("Couldn't keep the categories setting:", error);
+        }
+        setSaved(n => n + 1);
+      },
       set: (next: VodLayout) => {
         try {
           options.storage.setItem(VOD_LAYOUT_KEY, next);

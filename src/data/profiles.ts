@@ -25,6 +25,8 @@ export const PER_PROFILE_KEYS: readonly string[] = [
   "velio.reminders",
   "velio.lastChannel",
   "velio.vodLayout",
+  "velio.vodCategories",
+  "velio.vodSorts",
 ];
 
 /** The key a profile keeps `key` under; the key itself with no profile or for a key every profile shares. */

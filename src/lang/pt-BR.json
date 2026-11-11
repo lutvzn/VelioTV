@@ -317,7 +317,16 @@
   "app.vodLayout.modern": "Moderno: cada título uma vez, por gênero",
   "app.vodLayout.classic": "Clássico: as categorias de cada fonte",
   "app.vodLayout.hint": "OK muda, só para este perfil",
+  "app.vodCategories": "Categorias das fontes, layout moderno",
+  "app.vodCategories.unmatched": "Só títulos sem correspondência",
+  "app.vodCategories.all": "Todos os títulos, com ou sem correspondência",
   "vod.popular": "Populares",
+  "vod.sortBy": "Ordem de {{ group }}",
+  "vod.sort.added": "Adicionados recentemente",
+  "vod.sort.name": "Por nome",
+  "vod.sort.year": "Mais novos primeiro",
+  "vod.sort.rating": "Mais bem avaliados",
+  "vod.sort.listed": "Como na lista",
   "vod.sources.one": "Em {{ count }} fonte",
   "vod.sources.other": "Em {{ count }} fontes"
 }

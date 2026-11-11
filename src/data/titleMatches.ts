@@ -49,6 +49,8 @@ export interface TitleMatch {
   year?: number;
   poster?: string;
   genres: string[];
+  /** Out of 10: IMDb's, from Cinemeta, or TMDB's when it was found there. */
+  rating?: number;
   via?: MatchedBy;
   /** When a match by TMDB was found: it's looked for again after KEEP_TMDB_MS, as TMDB's terms ask. */
   at?: number;
@@ -285,6 +287,7 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
           const match: TitleMatch = { id: meta.id, name: meta.name, genres: full.genres ?? [], via };
           if (full.year ?? meta.year) match.year = full.year ?? meta.year;
           if (full.poster ?? meta.poster) match.poster = full.poster ?? meta.poster;
+          if (full.rating ?? meta.rating) match.rating = full.rating ?? meta.rating;
           return match;
         })();
         asked.set(id, found);

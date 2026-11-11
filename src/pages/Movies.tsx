@@ -96,6 +96,7 @@ const Classic = () => {
       <VodHub
         ref={element => (grid = element)}
         probeName="moviesGrid"
+        sortPage="classic-movies"
         title={$t("menu.movies")}
         allLabel={$t("vod.allFilms")}
         items={items()}

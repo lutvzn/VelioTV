@@ -26,6 +26,10 @@ describe("cleanTitle", () => {
     expect(cleanTitle("EN - The Great Adventure [4K] (1999)").title).toBe("The Great Adventure");
     expect(cleanTitle("|PT| A Grande Aventura HD").title).toBe("A Grande Aventura");
     expect(cleanTitle("[MULTI] Night Train FHD").title).toBe("Night Train");
+    expect(cleanTitle("4K - Night Train").title).toBe("Night Train");
+    // A number isn't a tag.
+    expect(cleanTitle("300: Rise of an Empire (2014)").title).toBe("300: Rise of an Empire");
+    expect(cleanTitle("EN - 2012 (2009)")).toMatchObject({ title: "2012", year: 2009 });
   });
 
   it("drops hyphen tags, and the name again in another script", () => {
@@ -65,6 +69,35 @@ describe("cleanTitle", () => {
       year: 2017,
       others: [{ title: "The Blade Runner 2049", year: 2017 }],
     });
+  });
+
+  it("keeps a number far from the year it's given, as the title's own", () => {
+    // The provider's year field says 2017: 2049 is the title's.
+    expect(cleanTitle("Blade Runner 2049", 2017)).toMatchObject({ title: "Blade Runner 2049", year: 2017 });
+    // A year one off is still the year.
+    expect(cleanTitle("The Great Adventure 1999", 2000)).toMatchObject({
+      title: "The Great Adventure",
+      year: 2000,
+    });
+  });
+
+  it("takes the year in brackets over one read from the title before", () => {
+    // Imports before nameYear() read the first year-like number in the name.
+    expect(cleanTitle("Blade Runner 2049 (2017)", 2049)).toMatchObject({
+      title: "Blade Runner 2049",
+      year: 2017,
+    });
+    expect(cleanTitle("2001: A Space Odyssey (1968)", 2001)).toMatchObject({
+      title: "2001: A Space Odyssey",
+      year: 1968,
+    });
+    expect(cleanTitle("1917 (2019)", 1917)).toMatchObject({ title: "1917", year: 2019 });
+    expect(cleanTitle("1917 2019", 1917)).toMatchObject({ title: "1917", year: 2019 });
+    expect(cleanTitle("1917 2019", 1917).others[0]).toEqual({ title: "1917 2019" });
+    // The same year in the name and the field: as if only the name had it.
+    expect(cleanTitle("Tenet 2020", 2020)).toMatchObject({ title: "Tenet", year: 2020 });
+    // A year from the provider's own field that isn't in the name stays.
+    expect(cleanTitle("The Great Adventure (1999)", 2000).year).toBe(2000);
   });
 
   it("reads hyphens as spaces in a name written with no spaces", () => {

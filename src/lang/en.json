@@ -317,7 +317,16 @@
   "app.vodLayout.modern": "Modern: each title once, by genre",
   "app.vodLayout.classic": "Classic: each source's own categories",
   "app.vodLayout.hint": "OK changes it, for this profile only",
+  "app.vodCategories": "Sources' categories, modern layout",
+  "app.vodCategories.unmatched": "Only titles without a match",
+  "app.vodCategories.all": "Every title, matched or not",
   "vod.popular": "Popular",
+  "vod.sortBy": "Order of {{ group }}",
+  "vod.sort.added": "Recently added",
+  "vod.sort.name": "By name",
+  "vod.sort.year": "Newest first",
+  "vod.sort.rating": "Top rated",
+  "vod.sort.listed": "As listed",
   "vod.sources.one": "In {{ count }} source",
   "vod.sources.other": "In {{ count }} sources"
 }

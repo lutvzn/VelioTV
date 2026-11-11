@@ -70,6 +70,8 @@ export interface Series {
   rating?: number;
   year?: number;
   plot?: string;
+  /** When the server last changed it, as with a new episode, in milliseconds since 1970. */
+  added?: number;
   /** From an M3U playlist; an Xtream series' come with its details. */
   episodes?: Episode[];
   /** The Xtream series_id, for its episodes. */
@@ -121,6 +123,20 @@ const number = (value: unknown) => {
 const yearOf = (value: unknown) => {
   const match = text(value).match(/\b(19|20)\d\d\b/);
   return match ? Number(match[0]) : undefined;
+};
+const BRACKETED_YEAR = /[[(]\s*((?:19|20)\d\d)\s*[\])]/g;
+/**
+ * The year a name gives in brackets, the last if several: "Blade Runner
+ * 2049 (2017)" is 2017. A number outside brackets may be the title's own
+ * ("2001: A Space Odyssey"), so it's left to the matching's cleaning
+ * (cleanTitle() in src/stremio/cinemeta.ts), which tries it both ways.
+ */
+export const nameYear = (name: string) => {
+  let year: number | undefined;
+  for (let found = BRACKETED_YEAR.exec(name); found; found = BRACKETED_YEAR.exec(name))
+    year = Number(found[1]);
+  BRACKETED_YEAR.lastIndex = 0;
+  return year;
 };
 
 // --- From M3U playlists ---
@@ -249,7 +265,7 @@ export class M3uVod {
       const group = category(channel.group);
       if (group) film.category = group;
       if (channel.headers) film.headers = channel.headers;
-      const year = yearOf(channel.name);
+      const year = nameYear(channel.name);
       if (year) film.year = year;
       if (providerId) film.providerId = providerId;
       this.films.push(film);
@@ -351,7 +367,7 @@ export const xtreamVod = async (login: XtreamLogin, fetcher: typeof fetch) => {
       if (group) film.category = group;
       const rating = number(one.rating);
       if (rating) film.rating = rating;
-      const year = yearOf(one.year) ?? yearOf(name);
+      const year = yearOf(one.year) ?? nameYear(name);
       if (year) film.year = year;
       const added = number(one.added);
       if (added) film.added = added * 1000;
@@ -375,6 +391,8 @@ export const xtreamVod = async (login: XtreamLogin, fetcher: typeof fetch) => {
       if (year) show.year = year;
       const plot = text(one.plot);
       if (plot) show.plot = plot;
+      const changed = number(one.last_modified);
+      if (changed) show.added = changed * 1000;
       const tmdb = tmdbOf(one.tmdb_id ?? one.tmdb);
       if (tmdb) show.tmdb = tmdb;
       result.series.push(show);

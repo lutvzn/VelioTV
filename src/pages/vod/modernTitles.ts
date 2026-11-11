@@ -2,12 +2,16 @@
 // and Series by title", step 4): every source's copy of a title and the
 // add-ons' as one (src/data/titles.ts), then Popular, from Cinemeta, the
 // genres, most titles first, the add-ons' catalogs, and last the provider
-// categories of the titles Cinemeta doesn't have.
+// categories: of the titles Cinemeta doesn't have, or of every title, as
+// Settings has it (src/data/vodLayout.ts). A title is in the category of
+// each of its copies. While titles are being matched, the genres keep the
+// order they had, so the column doesn't shift as matches come in; new ones
+// go last, and the order is made again once matching ends.
 
 import { createEffect, createMemo } from "solid-js";
 import type { AddonItem, Merger, Titles } from "../../data/titles";
 import type { FilmEntry, SeriesEntry } from "../../data/vodLibrary";
-import { addons, cinemeta, library, titleMatcher } from "../../library";
+import { addons, cinemeta, library, titleMatcher, vodLayout } from "../../library";
 import type { TitleType } from "../../stremio/addons";
 import { $t } from "../../translate";
 import { useAddonGroups } from "./addonGroups";
@@ -124,6 +128,11 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
     if (page && !page.loading && !page.done && popularTitles().length < POPULAR_WANTED) morePopular();
   });
 
+  // Only when it starts or ends, not as each title is looked at.
+  const matching = createMemo(() => titleMatcher.progress().running);
+  /** The genres' order, kept while matching goes on. */
+  let genreOrder: string[] = [];
+
   const groups = createMemo((): ExtraGroup<T>[] => {
     const { titles: all, byKey } = titles();
     const out: ExtraGroup<T>[] = [];
@@ -146,7 +155,15 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
     }
     // oxlint-disable-next-line unicorn/no-array-sort
     const genres = [...byGenre].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
-    for (const [genre, items] of genres) out.push({ id: `genre:${genre}`, label: genre, items });
+    if (!matching() || genreOrder.length === 0) genreOrder = genres.map(([genre]) => genre);
+    else {
+      const known = new Set(genreOrder);
+      for (const [genre] of genres) if (!known.has(genre)) genreOrder.push(genre);
+    }
+    for (const genre of genreOrder) {
+      const items = byGenre.get(genre);
+      if (items) out.push({ id: `genre:${genre}`, label: genre, items, sortable: true });
+    }
 
     for (const group of fromAddons.extraGroups()) {
       const seen = new Set<T>();
@@ -157,17 +174,22 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
       out.push({ id: group.id, label: group.label, items: [...seen], loading: group.loading });
     }
 
-    // The sources' titles Cinemeta doesn't have, in their own categories.
+    // The sources' titles in their own categories: those Cinemeta doesn't have, or all.
+    const every = vodLayout.categories() === "all";
     const byCategory = new Map<string, T[]>();
     for (const title of all) {
-      if (title.imdb || title.links.length === 0 || !title.category) continue;
-      let list = byCategory.get(title.category);
-      if (!list) byCategory.set(title.category, (list = []));
-      list.push(title);
+      if (title.imdb && !every) continue;
+      for (const link of title.links) {
+        if (!link.category) continue;
+        let list = byCategory.get(link.category);
+        if (!list) byCategory.set(link.category, (list = []));
+        // Two copies in the same category: once. A title's are added together, so it'd be the last.
+        if (list[list.length - 1] !== title) list.push(title);
+      }
     }
     for (const name of options.categories()) {
       const items = byCategory.get(name);
-      if (items) out.push({ id: `category:${name}`, label: name, items });
+      if (items) out.push({ id: `category:${name}`, label: name, items, sortable: true });
     }
     return out;
   });

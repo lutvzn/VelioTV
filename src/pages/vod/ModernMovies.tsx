@@ -9,8 +9,9 @@ import { duration } from "../../live/format";
 import { watchVod } from "../../play/start";
 import { titleFilmPlay, type TitleChoice } from "../../play/titlePlay";
 import { filmKey, keptFilm } from "../../stremio/vodEntries";
-import { $t, $tn } from "../../translate";
+import { $t, $tn, language } from "../../translate";
 import { FilmPanel } from "./FilmPanel";
+import { orderLinks } from "./linkOrder";
 import { linkRow, useModernTitles } from "./modernTitles";
 import { StreamPicker } from "./StreamPicker";
 import { type HubPlace, VodHub } from "./VodHub";
@@ -98,6 +99,10 @@ export const ModernMovies = () => {
       <VodHub
         ref={element => (grid = element)}
         probeName="moviesGrid"
+        sortPage="movies"
+        defaultSort="added"
+        alsoNamed={title => title.links.map(link => link.name)}
+        currentKey={key => modern.titles().byKey.get(key)?.key}
         title={$t("menu.movies")}
         allLabel={$t("vod.allFilms")}
         items={items()}
@@ -137,7 +142,7 @@ export const ModernMovies = () => {
             title={asked.title.name}
             type="movie"
             id={asked.id}
-            links={asked.title.links.map(link =>
+            links={orderLinks(asked.title.links, link => link, language()).map(link =>
               linkRow(link, link.source, link.name, link.url, link.category),
             )}
             onClose={() => setPicking(undefined)}

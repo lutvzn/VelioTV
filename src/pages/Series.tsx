@@ -79,6 +79,7 @@ const Classic = () => {
       <VodHub
         ref={element => (grid = element)}
         probeName="seriesGrid"
+        sortPage="classic-series"
         title={$t("menu.series")}
         allLabel={$t("vod.allSeries")}
         items={vod.series()}

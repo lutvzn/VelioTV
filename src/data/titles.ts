@@ -42,20 +42,26 @@ export interface Titles<T> {
 
 type MatchOf = (item: { key: string; source: string }) => TitleMatch | undefined;
 
-/** The key an unmatched title is joined by: its cleaned name and year. */
-const groups = new Map<string, string>();
-const nameGroup = (name: string, year?: number) => {
+/** A name cleaned (cleanTitle()): the key an unmatched title is joined by, and its year. */
+interface Cleaned {
+  group: string;
+  year?: number;
+}
+const cleaned = new Map<string, Cleaned>();
+const cleanedOf = (name: string, year?: number) => {
   // Kept, as the titles are joined again each time matches come in.
   const asked = `${name}\u0000${year ?? ""}`;
-  let group = groups.get(asked);
-  if (group === undefined) {
+  let found = cleaned.get(asked);
+  if (found === undefined) {
     const clean = cleanTitle(name, year);
-    group = `n:${nameKey(clean.title)}:${clean.year ?? ""}`;
-    if (groups.size > 50_000) groups.clear();
-    groups.set(asked, group);
+    found = { group: `n:${nameKey(clean.title)}:${clean.year ?? ""}` };
+    if (clean.year !== undefined) found.year = clean.year;
+    if (cleaned.size > 50_000) cleaned.clear();
+    cleaned.set(asked, found);
   }
-  return group;
+  return found;
 };
+const nameGroup = (name: string, year?: number) => cleanedOf(name, year).group;
 
 type Joined<E> = E & { links: E[]; genres: string[]; imdb?: string };
 
@@ -74,6 +80,23 @@ const itemGroup = (item: AddonItem) =>
 const fillFrom = (title: Joined<FilmEntry | SeriesEntry>, item: AddonItem) => {
   if (!title.poster && item.meta.poster) title.poster = item.meta.poster;
   if (title.genres.length === 0 && item.meta.genres) title.genres = item.meta.genres;
+  if (!title.rating && item.meta.rating) title.rating = item.meta.rating;
+};
+
+/**
+ * What a title takes from all its copies, once it has them: when the
+ * newest was added, for Recently added, and, without a rating of its own
+ * from its match, the best its copies have.
+ */
+const settle = (title: Joined<FilmEntry | SeriesEntry>) => {
+  let added: number | undefined;
+  let rating: number | undefined;
+  for (const link of title.links) {
+    if (link.added !== undefined && (added === undefined || link.added > added)) added = link.added;
+    if (link.rating !== undefined && (rating === undefined || link.rating > rating)) rating = link.rating;
+  }
+  if (added !== undefined) title.added = added;
+  if (rating !== undefined && (title.imdb === undefined || title.rating === undefined)) title.rating = rating;
 };
 
 const merge = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
@@ -100,6 +123,7 @@ const merge = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
     title.links.push(entry);
     byKey.set(entry.key, title);
   }
+  for (const title of titles) settle(title);
   for (const item of addonItems) {
     const group = itemGroup(item);
     const title = byGroup.get(group);
@@ -158,6 +182,7 @@ const createMerger = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
       const match = matchOf(first);
       title = match ? make.matched(match, first) : make.unmatched(first);
       for (const entry of members) title.links.push(entry);
+      settle(title);
     }
     for (const item of one.addonsOf.get(group) ?? []) {
       if (title) fillFrom(title, item);
@@ -324,6 +349,14 @@ const createMerger = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
   };
 };
 
+/** A title of its first copy alone, with the year its name gives when cleaned (cleanTitle()). */
+const unmatched = <E extends FilmEntry | SeriesEntry>(first: E): Joined<E> => {
+  const title: Joined<E> = { ...first, links: [], genres: [] };
+  const { year } = cleanedOf(first.name, first.year);
+  if (year !== undefined) title.year = year;
+  return title;
+};
+
 const FILM_MAKER: Maker<FilmEntry, TitleFilm> = {
   matched: (match, first) => {
     const title: TitleFilm = {
@@ -339,13 +372,13 @@ const FILM_MAKER: Maker<FilmEntry, TitleFilm> = {
     };
     const poster = match.poster ?? first.poster;
     if (poster) title.poster = poster;
-    const year = match.year ?? first.year;
+    const year = match.year ?? cleanedOf(first.name, first.year).year;
     if (year) title.year = year;
-    if (first.rating) title.rating = first.rating;
-    if (first.added) title.added = first.added;
+    // The copies' rating and when they were added come in settle().
+    if (match.rating) title.rating = match.rating;
     return title;
   },
-  unmatched: first => ({ ...first, links: [], genres: [] }),
+  unmatched: first => unmatched(first),
   addon: ({ meta, addon }) => ({
     ...addonFilm(meta, addon),
     links: [],
@@ -376,14 +409,14 @@ const SERIES_MAKER: Maker<SeriesEntry, TitleSeries> = {
     };
     const poster = match.poster ?? first.poster;
     if (poster) title.poster = poster;
-    const year = match.year ?? first.year;
+    const year = match.year ?? cleanedOf(first.name, first.year).year;
     if (year) title.year = year;
-    if (first.rating) title.rating = first.rating;
+    if (match.rating) title.rating = match.rating;
     if (first.plot) title.plot = first.plot;
     return title;
   },
   // Without its episodes: they're joined from every copy's (mergeEpisodes).
-  unmatched: first => ({ ...first, links: [], genres: [] }),
+  unmatched: first => unmatched(first),
   addon: ({ meta, addon }) => ({
     ...addonSeries(meta, addon),
     links: [],

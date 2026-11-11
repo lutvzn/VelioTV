@@ -10,7 +10,8 @@ import { watchVod } from "../../play/start";
 import { titleEpisodePlay, type TitleChoice } from "../../play/titlePlay";
 import { episodeLabel } from "../../play/vodPlay";
 import { keptSeries, seriesKey } from "../../stremio/vodEntries";
-import { $t, $tn } from "../../translate";
+import { $t, $tn, language } from "../../translate";
+import { orderLinks } from "./linkOrder";
 import { linkRow, useModernTitles } from "./modernTitles";
 import { SeriesPanel } from "./SeriesPanel";
 import { StreamPicker } from "./StreamPicker";
@@ -131,6 +132,10 @@ export const ModernSeries = () => {
       <VodHub
         ref={element => (grid = element)}
         probeName="seriesGrid"
+        sortPage="series"
+        defaultSort="added"
+        alsoNamed={title => title.links.map(link => link.name)}
+        currentKey={key => modern.titles().byKey.get(key)?.key}
         title={$t("menu.series")}
         allLabel={$t("vod.allSeries")}
         items={items()}
@@ -177,7 +182,7 @@ export const ModernSeries = () => {
             title={`${asked.title.name}  ${episodeLabel(asked.episode)}`}
             type="series"
             id={asked.id}
-            links={(asked.episode.links ?? []).map(link =>
+            links={orderLinks(asked.episode.links ?? [], link => link.show, language()).map(link =>
               linkRow(link, link.show.source, link.show.name, link.episode.url),
             )}
             onClose={() => setPicking(undefined)}

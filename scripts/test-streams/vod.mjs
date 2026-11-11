@@ -215,7 +215,7 @@ export const xtreamVod = {
         director: show.director,
         genre: show.genre,
         releaseDate: `${show.year}-01-01`,
-        last_modified: "1767225600",
+        last_modified: String(1_767_225_600 + show.id * 7200),
         rating: String(show.rating),
         rating_5based: Math.round(show.rating * 5) / 10,
         category_id: String(show.genreId + 1),

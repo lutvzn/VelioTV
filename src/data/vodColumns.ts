@@ -87,6 +87,7 @@ const seriesTables = (series: readonly Series[]) => {
     rating: columnOf(count),
     year: columnOf(count),
     plot: columnOf(count),
+    added: columnOf(count),
     providerId: columnOf(count),
     tmdb: columnOf(count),
     episodes: columnOf(count),
@@ -111,6 +112,7 @@ const seriesTables = (series: readonly Series[]) => {
     all.rating[i] = show.rating ?? null;
     all.year[i] = show.year ?? null;
     all.plot[i] = show.plot ?? null;
+    all.added[i] = show.added ?? null;
     all.providerId[i] = show.providerId ?? null;
     all.tmdb[i] = show.tmdb ?? null;
     const own = show.episodes;
@@ -188,6 +190,7 @@ export const fromVodColumns = (columns: VodColumns): Pick<StoredVod, "films" | "
       rating: s.rating?.[i] ?? undefined,
       year: s.year?.[i] ?? undefined,
       plot: s.plot?.[i] ?? undefined,
+      added: s.added?.[i] ?? undefined,
       episodes,
       providerId: s.providerId?.[i] ?? undefined,
       tmdb: s.tmdb?.[i] ?? undefined,

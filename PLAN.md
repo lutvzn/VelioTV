@@ -667,6 +667,36 @@ The user chose:
     - "Harry-Potter-7-PT1-…" still isn't read.
   - Probes: `match-measure` (input `source`, the source's name; 10–25 minutes, `PROBE_TIMEOUT=1800`) and `join-time`.
 - **Still to check:** the user looks at the pages and at Settings → About on the TV. The `modern` probe's `wikidata` and `tmdb` inputs haven't been run against the test server, as the test TV's profile has the user's source.
+- **Ordering and sorting out titles (asked 2026-11-11), from a review of how Movies are sorted.** Until now, every group listed its titles in the sources' order, and a joined title took its rating and date from its first copy only.
+  - **Years (`CLEANING = 8`):**
+    - A film's year came from the first year-like number in its name, so "Blade Runner 2049 (2017)" was 2049, "2001: A Space Odyssey (1968)" 2001 and "1917 (2019)" 1917, and the right result was turned down as another year's. Now a year comes from the name only when it's in brackets (`nameYear()`, `src/data/vod.ts`).
+    - `cleanTitle()` ignores a stored year that is the first year-like number in the name, as the old reading gave, and reads the name's own year instead. So sources imported before don't need importing again.
+    - It keeps a number far from a known year as part of the title ("Blade Runner 2049", year 2017).
+    - First this only looked at bracketed years, and `CLEANING = 7` went to the TV with it. On the TV, "1917 2019" kept 1917, so the rule became the one above and `CLEANING` went to 8, for misses saved under 7 to be looked for again.
+    - Leading tags needed a letter added: "2001: " and "300: " were dropped as tags like "EN: ". "4K - " is still a tag.
+    - An unmatched title shows the year its cleaned name gives.
+  - **Joined titles** (`settle()`, `src/data/titles.ts`):
+    - A title's date added is its newest copy's.
+    - Its rating is its match's (IMDb's from Cinemeta, or TMDB's score with at least 10 votes), or else its best copy's. Matches found before have no rating of their own until they're matched again.
+    - Xtream series now keep `last_modified` as their date, which goes up when episodes are added.
+  - **Order within a group** (`src/pages/vod/hubOrder.ts`, `src/data/vodSorts.ts`):
+    - Everything, each genre and each category can be ordered by Recently added, By name, Newest first, Top rated, or As listed. Holding OK on the group in the column opens the choice, and so does the Tools key in the column or the posters. Continue watching, Popular, search and the add-ons' catalogs keep their own order.
+    - Each profile keeps each group's order (`velio.vodSorts`). The modern pages start on Recently added; the classic ones on As listed.
+    - The order shows after the count over the posters, and the voice guide reads it on the group.
+    - Titles without the value sort last, and titles alike keep the sources' order. Keys are worked out once per sort, as `sort()` is core-js's on Samsung.
+  - **The cursor stays on its title, not its place** (`HubPlace.keys`): when matches join copies or move titles, it follows the title, or the title its copy joined. Coming back from watching works the same way. A new order or a new search starts from the first title.
+  - **Genres hold their order while matching runs**, so the column no longer reshuffles as matches come in. New genres go last, and the order by count is made again when matching ends.
+  - **Categories** (Settings → Language, layout, start and clock → "Sources' categories, modern layout"): only titles without a match (as before, the default), or every title, so a provider's "Kids" or "TR: Turkish films" stays whole. A title is in the category of each of its copies, not only its first's.
+  - **Play choices** (`src/pages/vod/linkOrder.ts`): copies tagged with the app's language come first ("PT - ", "|BR|" for Portuguese, on the name or its category), then untagged ones, then the rest. Within those, the best quality comes first: 4K, then full HD, then HD or not stated, then SD.
+  - **Search:** a title is also found by its sources' names ("virgen" finds "The Red Virgin", from "ES - La virgen roja"). Results are ranked: the same name first, then names starting with what was typed, then names with words starting with it, then any name containing it.
+  - **Not done here:** showing new matches only at a quiet moment, which belongs with the long frames (above), after profiling.
+  - **On the TV** (`vod-order` probe, about half a minute; the user's own source, 2026-11-11, while matching ran again after the `CLEANING` bump):
+    - Movies opened on All films, by Recently added, newest first (19,153 titles, 15,341 with a rating).
+    - Tools on the posters opened the order menu with its five choices. By name put the titles in name order, and Recently added again restored it, each time with the cursor on the first title.
+    - The column showed Continue watching, All films, Popular, then the genres, most first (125 groups).
+    - "Blade Runner 2049" is 2017, "2001: A Space Odyssey" 1968, and "300: Rise of an Empire" matched. "1917 2019" joined the matched "1917" once `CLEANING` was 8. Names that are only a tag and a year ("KU-B (1917)") stay unmatched.
+    - The probe's first runs pressed keys while the side menu still had them, and then too soon after the order menu opened, so those keys went to the page behind it. It now moves into the page first, and waits for the menu to take the keys.
+  - **For the user to look at:** the order menu, the order beside the count, whether the column stays steady while matching runs, the new Settings choice, and the picker's order. `vod.js` still finds titles by key, so the new default order doesn't affect it.
 
 ## A Rust guide importer (tested 2026-11-09)
 

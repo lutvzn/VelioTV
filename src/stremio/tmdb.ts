@@ -29,7 +29,12 @@ export interface TmdbTitle {
   /** As Cinemeta names them, so the two make the same genre rows. */
   genres: string[];
   poster?: string;
+  /** TMDB's users' score out of 10, when enough have voted. */
+  rating?: number;
 }
+
+/** Votes a TMDB score needs to be shown: a few votes say little. */
+const MIN_VOTES = 10;
 
 /** TMDB's genres that Cinemeta names otherwise; a TV genre may be two. */
 const GENRES: Record<string, string[]> = {
@@ -92,6 +97,9 @@ export const readTmdbTitle = (value: unknown, type: TmdbType): TmdbTitle | undef
   if (year) title.year = year;
   const poster = text(value.poster_path);
   if (poster.startsWith("/")) title.poster = `${POSTERS}${poster}`;
+  const votes = typeof value.vote_count === "number" ? value.vote_count : 0;
+  if (typeof value.vote_average === "number" && value.vote_average > 0 && votes >= MIN_VOTES)
+    title.rating = Math.round(value.vote_average * 10) / 10;
   return title;
 };
 

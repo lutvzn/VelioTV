@@ -8,9 +8,13 @@ import type { AddonMeta } from "./addon";
 
 export const CINEMETA_URL = "https://v3-cinemeta.strem.io/manifest.json";
 
-/** Tags before a name, such as "EN - ", "|EN| ", "[4K] " or "KU-B--" (a name with hyphens for spaces). */
+/**
+ * Tags before a name, such as "EN - ", "|EN| ", "[4K] " or "KU-B--" (a name
+ * with hyphens for spaces). A tag has a letter, so a title's number stays,
+ * as in "2001: A Space Odyssey" or "300: Rise of an Empire".
+ */
 const LEADING_TAGS =
-  /^(?:\s*(?:\[[^\]]{1,12}\]|\|[^|]{1,12}\||[A-Z0-9]{2,4}\s*[-:|]\s+|[A-Z]{2}:|[A-Z]{2,4}(?:-[A-Z])?--(?=[A-Za-z0-9])))+/;
+  /^(?:\s*(?:\[[^\]]{1,12}\]|\|[^|]{1,12}\||(?=[0-9]*[A-Z])[A-Z0-9]{2,4}\s*[-:|]\s+|[A-Z]{2}:|[A-Z]{2,4}(?:-[A-Z])?--(?=[A-Za-z0-9])))+/;
 /** The first tag's letters, as above. */
 const FIRST_TAG =
   /^\s*(?:\[([A-Za-z]{2,4})\]|\|([A-Za-z]{2,4})\||([A-Z]{2,4})(?:-[A-Z])?(?:\s*[-:|]\s|:|--))/;
@@ -57,6 +61,8 @@ const TRAILING_WORDS =
   /(?:[\s\-_.|]+(?:4k|uhd|fhd|hd|sd|hq|2160p|1080p|720p|480p|hevc|h264|h265|x264|x265|hdr|hdr10|dv|multi|dual|vostfr|vost|subs?|dubbed|dub|leg|legendado|dublado|nf|amzn|web|webrip|web-dl|bluray|remux))+\s*$/i;
 const BRACKETS = /\s*[[(][^\])]*[\])]\s*/g;
 
+const FIRST_YEAR = /\b(?:19|20)\d\d\b/;
+
 const tidy = (text: string) => text.replace(/\s+/g, " ").replace(/^[\s\-:|]+|[\s\-:|]+$/g, "");
 
 /** Another name to search for, when the cleaned one finds nothing. */
@@ -97,12 +103,18 @@ const unhyphen = (name: string) =>
     : name.replace(/---/g, " & ").replace(/--/g, ": ").replace(/-s-/g, "'s ").replace(/-/g, " ");
 
 /** A provider's name for a film or series, as the title alone and its year. */
-export const cleanTitle = (name: string, year?: number) => {
+export const cleanTitle = (name: string, given?: number) => {
   const latin = OTHER_SCRIPT.exec(name);
   let title = unhyphen((latin ? latin[1] : name).replace(LEADING_TAGS, ""));
   // The year: in brackets, or the last word once quality words are gone.
   const inBrackets = /[[(]\s*(19\d\d|20\d\d)\s*[\])]/.exec(title)?.[1];
   title = title.replace(BRACKETS, " ").replace(/[_.]+/g, " ");
+  // A year that is the first year-like number in the name may be one read
+  // from the title's own number, as imports before nameYear() read "Blade
+  // Runner 2049 (2017)" or "1917 2019" (src/data/vod.ts): then
+  // the name's own year is taken, as when none is given. One the name
+  // doesn't hold, as from an Xtream year field, stays.
+  const year = given !== undefined && FIRST_YEAR.exec(name)?.[0] === String(given) ? undefined : given;
   const dropWords = () => {
     for (let i = 0; i < 3; i++) title = title.replace(TRAILING_WORDS, "");
   };
@@ -111,7 +123,8 @@ export const cleanTitle = (name: string, year?: number) => {
   /** The name with the number at its end, which may be the title's own, as in "Blade Runner 2049". */
   let whole: string | undefined;
   const last = inBrackets ? undefined : /^(.*\S)\s+((?:19|20)\d\d)\s*$/.exec(title.trim());
-  if (last) {
+  // With the year known, a number further from it is the title's own, as "Blade Runner 2049" of 2017.
+  if (last && (year === undefined || Math.abs(Number(last[2]) - year) <= 1)) {
     whole = tidy(title);
     title = last[1];
     atEnd = last[2];
@@ -142,7 +155,7 @@ export const cleanTitle = (name: string, year?: number) => {
  * How names are cleaned: titles that found nothing are looked for again
  * when it goes up, as they may now be found.
  */
-export const CLEANING = 6;
+export const CLEANING = 8;
 
 /** A name to compare: folded, "&" as "and", letters and digits only. */
 export const nameKey = (name: string) =>

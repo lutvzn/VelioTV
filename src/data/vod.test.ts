@@ -5,7 +5,7 @@ import { filmTmdb, seriesTmdb, vodLibrary, vodLines } from "../../scripts/test-s
 import { playerApi } from "../../scripts/test-streams/xtream.mjs";
 import { deleteDb, openDb, prepareDb, readChannels, readImport, readVod, request } from "./db";
 import { runImport } from "./importer";
-import { episodeTitle, parseEpisodeName, vodKind, xtreamFilmInfo, xtreamSeriesInfo } from "./vod";
+import { episodeTitle, nameYear, parseEpisodeName, vodKind, xtreamFilmInfo, xtreamSeriesInfo } from "./vod";
 import type { XtreamLogin } from "./xtream";
 
 const BASE = "http://vod.test:8080";
@@ -53,6 +53,18 @@ const mockServer = (count: number): typeof fetch => {
 
 afterEach(async () => {
   await deleteDb(DB);
+});
+
+describe("a film's year from its name", () => {
+  it("is the one in brackets, not a number that may be the title's own", () => {
+    expect(nameYear("Blade Runner 2049 (2017)")).toBe(2017);
+    expect(nameYear("2001: A Space Odyssey (1968)")).toBe(1968);
+    expect(nameYear("EN - 1917 [2019] [4K]")).toBe(2019);
+    expect(nameYear("Tenet 2020")).toBeUndefined();
+    expect(nameYear("The Great Adventure")).toBeUndefined();
+    // Asked again, the expression starts over.
+    expect(nameYear("1917 (2019)")).toBe(2019);
+  });
 });
 
 describe("films and series", () => {
