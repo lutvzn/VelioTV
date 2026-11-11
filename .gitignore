@@ -14,3 +14,7 @@ PRIVATE.md
 
 # The user's design references, kept local
 reference/
+
+# Local secrets, such as the TMDB key (never VITE_-prefixed, so they stay out of the build)
+.env
+.env.*

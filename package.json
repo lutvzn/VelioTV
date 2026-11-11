@@ -22,7 +22,7 @@
     "lint-fix": "oxlint --fix",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "check": "oxfmt --check && oxlint --deny-warnings && tsc && vitest run",
+    "check": "node scripts/sync-core/copy.mjs --check && oxfmt --check && oxlint --deny-warnings && tsc && vitest run",
     "deploy:tizen": "./scripts/deploy-tizen.sh",
     "test-streams": "node scripts/test-streams/server.mjs",
     "tv-probe": "./scripts/tv-probe/run.sh"
@@ -41,6 +41,7 @@
     "@vitest/coverage-v8": "^5.0.5",
     "fflate": "^0.8.3",
     "lodash-es": "^4.18.1",
+    "qrcode-generator": "1.4.4",
     "shaka-player": "^5.3.0",
     "solid-js": "^1.9.17",
     "storybook": "^10.6.2",

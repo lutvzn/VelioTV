@@ -6,6 +6,7 @@ import { episodeCode, episodeTitle } from "../data/vod";
 import type { FilmEntry, SeriesEntry } from "../data/vodLibrary";
 import type { Watched, WatchedItem } from "../data/watched";
 import type { VodPlay } from "./session";
+import { episodeKeyOf } from "../stremio/vodEntries";
 
 export const filmItem = (film: FilmEntry): WatchedItem => ({
   key: film.key,
@@ -21,7 +22,9 @@ export const filmPlay = (film: FilmEntry, startMs?: number): Omit<VodPlay, "kind
   back: "/movies",
 });
 
-export const episodeKey = (show: SeriesEntry, episode: Episode) => `${show.source}/${episode.id}`;
+/** "<source>/e:<id>", or "stremio:episode:<id>" for an add-on's episode, whichever add-on has it. */
+export const episodeKey = (show: SeriesEntry, episode: Episode) =>
+  episode.stremio ? episodeKeyOf(episode.stremio) : `${show.source}/${episode.id}`;
 
 /** "S01 E02  Title" */
 export const episodeLabel = (episode: Episode) => {

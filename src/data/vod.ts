@@ -39,6 +39,8 @@ export interface Film {
 export interface Episode {
   /** "e:<id>" */
   id: string;
+  /** From a Stremio add-on: its video id, to ask the add-ons for streams (src/stremio/). */
+  stremio?: string;
   season: number;
   episode: number;
   title: string;
@@ -46,6 +48,17 @@ export interface Episode {
   headers?: StreamHeaders;
   plot?: string;
   durationMs?: number;
+  /**
+   * In the modern layout, every source's copy of this episode (PLAN.md,
+   * "Movies and Series by title"): each source's series and its episode.
+   */
+  links?: EpisodeLink[];
+}
+
+/** An IPTV source's copy of an episode, for a title that joins several. */
+export interface EpisodeLink {
+  show: Series & { source: string; key: string };
+  episode: Episode;
 }
 
 export interface Series {
@@ -61,6 +74,8 @@ export interface Series {
   episodes?: Episode[];
   /** The Xtream series_id, for its episodes. */
   providerId?: string;
+  /** Its id on TMDB, which Xtream lists give, for matching it to Cinemeta (src/data/titleMatches.ts). */
+  tmdb?: number;
 }
 
 /** What the database keeps of a source's films and series. */
@@ -81,6 +96,8 @@ export interface FilmDetails {
   poster?: string;
   /** A wide picture from the film, for behind its page. */
   backdrop?: string;
+  /** Its id on TMDB. */
+  tmdb?: number;
 }
 
 /** A series' details and episodes, by season. */
@@ -358,10 +375,18 @@ export const xtreamVod = async (login: XtreamLogin, fetcher: typeof fetch) => {
       if (year) show.year = year;
       const plot = text(one.plot);
       if (plot) show.plot = plot;
+      const tmdb = tmdbOf(one.tmdb_id ?? one.tmdb);
+      if (tmdb) show.tmdb = tmdb;
       result.series.push(show);
     }
   }
   return result;
+};
+
+/** A TMDB id, which Xtream gives as a number or as text; 0 and junk are none. */
+const tmdbOf = (value: unknown) => {
+  const id = Number(text(value));
+  return Number.isInteger(id) && id > 0 ? id : undefined;
 };
 
 /** Xtream's `backdrop_path`: a list of addresses, or on some servers one. */
@@ -407,6 +432,8 @@ export const xtreamFilmInfo = async (
   if (poster) details.poster = poster;
   const backdrop = backdropOf(info);
   if (backdrop) details.backdrop = backdrop;
+  const tmdb = tmdbOf(info.tmdb_id ?? info.tmdb);
+  if (tmdb) details.tmdb = tmdb;
   return details;
 };
 

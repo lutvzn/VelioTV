@@ -1,6 +1,8 @@
 // The rows of the Live TV track panel (src/pages/live/TrackPanel.tsx):
 // a heading and the tracks for audio, then for subtitles, which also have
-// "Off". The cursor moves only between rows that can be chosen.
+// "Off", and after the stream's own, any files from add-ons (Play's
+// subtitles from src/stremio/). The cursor moves only between rows that
+// can be chosen.
 
 import type { Track, TrackKind } from "../player/player";
 import { languageName } from "../player/language";
@@ -8,7 +10,16 @@ import { languageName } from "../player/language";
 export type TrackRow =
   | { type: "heading"; text: string }
   | { type: "note"; text: string }
-  | { type: "choice"; kind: TrackKind; id: string | undefined; text: string; selected: boolean };
+  | { type: "choice"; kind: TrackKind; id: string | undefined; text: string; selected: boolean }
+  /** A subtitle file from an add-on, by its id. */
+  | { type: "file"; id: string; text: string; selected: boolean };
+
+/** A subtitle file to offer beside the stream's own. */
+export interface FileChoice {
+  id: string;
+  text: string;
+  selected: boolean;
+}
 
 export interface TrackRowText {
   audio: string;
@@ -23,7 +34,7 @@ export interface TrackRowText {
 const label = (track: Track, number: number, text: TrackRowText) =>
   track.label ?? languageName(track.language) ?? text.unnamed(number);
 
-export const trackRows = (tracks: Track[], text: TrackRowText): TrackRow[] => {
+export const trackRows = (tracks: Track[], text: TrackRowText, files: FileChoice[] = []): TrackRow[] => {
   const of = (kind: TrackKind) => tracks.filter(track => track.kind === kind);
   const choices = (list: Track[]): TrackRow[] => {
     const labels = list.map((track, at) => label(track, at + 1, text));
@@ -39,6 +50,7 @@ export const trackRows = (tracks: Track[], text: TrackRowText): TrackRow[] => {
   };
   const audio = of("audio");
   const subtitles = of("text");
+  const fileShown = files.some(file => file.selected);
   return [
     { type: "heading", text: text.audio },
     ...(audio.length ? choices(audio) : [{ type: "note" as const, text: text.noAudio }]),
@@ -48,9 +60,14 @@ export const trackRows = (tracks: Track[], text: TrackRowText): TrackRow[] => {
       kind: "text",
       id: undefined,
       text: text.off,
-      selected: !subtitles.some(track => track.selected),
+      selected: !fileShown && !subtitles.some(track => track.selected),
     },
-    ...(subtitles.length ? choices(subtitles) : [{ type: "note" as const, text: text.noSubtitles }]),
+    // A file shown hides the stream's own.
+    ...choices(subtitles).map(row =>
+      fileShown && row.type === "choice" ? { ...row, selected: false } : row,
+    ),
+    ...files.map((file): TrackRow => ({ type: "file", ...file })),
+    ...(subtitles.length || files.length ? [] : [{ type: "note" as const, text: text.noSubtitles }]),
   ];
 };
 
@@ -58,7 +75,8 @@ export const trackRows = (tracks: Track[], text: TrackRowText): TrackRow[] => {
 export const nextChoice = (rows: TrackRow[], at: number, step: 1 | -1) => {
   for (let moved = 1; moved <= rows.length; moved++) {
     const index = (((at + step * moved) % rows.length) + rows.length) % rows.length;
-    if (rows[index]?.type === "choice") return index;
+    const type = rows[index]?.type;
+    if (type === "choice" || type === "file") return index;
   }
   return at;
 };

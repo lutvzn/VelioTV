@@ -1,19 +1,21 @@
 import { useLocation, useNavigate } from "@solidjs/router";
 import { activeElement, View, ElementNode } from "@solidtv/solid";
 import { useMouse } from "@solidtv/solid/primitives";
-import { createEffect, on, onCleanup, type JSX } from "solid-js";
+import { createEffect, on, onCleanup, Show, type JSX } from "solid-js";
 import { PinPrompt } from "../components/PinPrompt";
 import { ReminderNotice } from "../components/ReminderNotice";
+import { SignedOutNotice } from "../components/SignedOutNotice";
 import { MENU_WIDTH, SideMenu } from "../components/SideMenu";
 import { device } from "../device";
 import { sectionEmpty } from "../emptySection";
 import { menuAway, wholeScreen } from "../wholeScreen";
-import { library } from "../library";
-import { SECTIONS } from "../sections";
+import { library, profiles } from "../library";
+import { PROFILES_SECTION, SECTIONS } from "../sections";
 import { colors } from "../theme";
 import { $t } from "../translate";
 import { smallVideoWindow, videoFillsScreen, videoWindow } from "../videoWindow";
 import { followVoiceGuide, readFocus } from "../voiceGuide";
+import { ProfilePicker } from "./Profiles";
 import { progressSummary } from "./settings/status";
 
 declare module "@solidtv/solid/primitives" {
@@ -59,6 +61,9 @@ const importStatus = () => {
   });
 };
 
+// Profiles shows in the menu while there's more than one to switch to.
+const sections = () => (profiles.list().length > 1 ? [...SECTIONS, PROFILES_SECTION] : SECTIONS);
+
 const closeApp = () => {
   device.then(d => d.closeApp()).catch(error => console.error("Couldn't close the app:", error));
   return true;
@@ -97,7 +102,7 @@ const App = (props: { children?: JSX.Element }) => {
     .then(d => followVoiceGuide(changed => d.watchVoiceGuide(changed)))
     .catch(error => console.error("Couldn't follow the voice guide:", error));
 
-  const startsInSection = SECTIONS.some(section => section.path === location.pathname);
+  const startsInSection = sections().some(section => section.path === location.pathname);
   let menu: ElementNode | undefined;
   let content: ElementNode | undefined;
 
@@ -142,39 +147,71 @@ const App = (props: { children?: JSX.Element }) => {
   );
   onCleanup(() => clearTimeout(check));
 
+  // Choosing a profile draws the app anew, and the picker's card that had
+  // the keys goes with it: they go to the menu, or the page without one.
+  let picked: ReturnType<typeof setTimeout> | undefined;
+  createEffect(
+    on(
+      () => profiles.needsPick(),
+      picking => {
+        clearTimeout(picked);
+        if (picking) return;
+        picked = setTimeout(() => {
+          if (!focusMenu()) content?.setFocus();
+        });
+      },
+      { defer: true },
+    ),
+  );
+  onCleanup(() => clearTimeout(picked));
+
+  // A signed-in TV with profiles asks whose it is before anything else
+  // (SYNC-PLAN.md, step 5); the pages start once one is chosen, with its data.
   return (
-    <View ref={window.APP}>
-      <View color={colors.background} shader={["holePunch", backgroundHole()]} />
-      <View
-        ref={element => (content = element)}
-        // Under the menu for a page that lays out across the whole screen.
-        x={wholeScreen() ? 0 : MENU_WIDTH}
-        width={wholeScreen() ? 1920 : 1920 - MENU_WIDTH}
-        height={1080}
-        // To the page's first node, which passes it on to what should have it.
-        forwardFocus={0}
-        onLeft={focusMenu}
-        onBack={focusMenu}
-      >
-        {props.children}
+    <Show
+      when={!profiles.needsPick()}
+      fallback={
+        <View ref={window.APP}>
+          <View color={colors.background} />
+          <ProfilePicker width={1920} autofocus />
+          <PinPrompt />
+        </View>
+      }
+    >
+      <View ref={window.APP}>
+        <View color={colors.background} shader={["holePunch", backgroundHole()]} />
+        <View
+          ref={element => (content = element)}
+          // Under the menu for a page that lays out across the whole screen.
+          x={wholeScreen() ? 0 : MENU_WIDTH}
+          width={wholeScreen() ? 1920 : 1920 - MENU_WIDTH}
+          height={1080}
+          // To the page's first node, which passes it on to what should have it.
+          forwardFocus={0}
+          onLeft={focusMenu}
+          onBack={focusMenu}
+        >
+          {props.children}
+        </View>
+        <SideMenu
+          ref={element => (menu = element)}
+          hidden={menuHidden()}
+          // Only when the app opens on a section. Other pages, such as full
+          // screen and developer pages, take focus themselves; and it's read
+          // once, since setting it later would take the focus from a page.
+          autofocus={startsInSection}
+          sections={sections()}
+          currentPath={location.pathname}
+          onSelect={path => navigate(path, { replace: true })}
+          status={importStatus()}
+          onRight={focusContent}
+          onBack={closeApp}
+        />
+        <ReminderNotice />
+        <SignedOutNotice />
+        <PinPrompt />
       </View>
-      <SideMenu
-        ref={element => (menu = element)}
-        hidden={menuHidden()}
-        // Only when the app opens on a section. Other pages, such as full
-        // screen and developer pages, take focus themselves; and it's read
-        // once, since setting it later would take the focus from a page.
-        autofocus={startsInSection}
-        sections={SECTIONS}
-        currentPath={location.pathname}
-        onSelect={path => navigate(path, { replace: true })}
-        status={importStatus()}
-        onRight={focusContent}
-        onBack={closeApp}
-      />
-      <ReminderNotice />
-      <PinPrompt />
-    </View>
+    </Show>
   );
 };
 

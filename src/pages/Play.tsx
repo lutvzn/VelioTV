@@ -10,9 +10,18 @@ import { guide, library, watched } from "../library";
 import { clockTime, duration, timeRange } from "../live/format";
 import { handOff, holdPlayer, statusText } from "../live/handoff";
 import { firstChoice, nextChoice, trackRows } from "../live/trackRows";
-import { takePlay, type CatchupPlay, type PlayRequest, type VodPlay } from "../play/session";
+import { createExternalSubtitles } from "../play/externalSubtitles";
+import {
+  takePlay,
+  type CatchupPlay,
+  type ExternalSubtitle,
+  type PlayRequest,
+  type VodPlay,
+} from "../play/session";
 import { createSeeker } from "../play/seeker";
 import { player } from "../player";
+import { languageName, sameLanguage } from "../player/language";
+import { storedPreferences } from "../player/player";
 import type { Stream } from "../player/player";
 import { BottomScrim } from "../components/BottomScrim";
 import { BOLD, colors, radius } from "../theme";
@@ -37,6 +46,11 @@ import { TrackPanel } from "./live/TrackPanel";
 // A film or episode seeks within the stream. Its place is saved every few
 // seconds and on leaving (src/data/watched.ts); at the end an episode goes
 // on to the next.
+//
+// A film or episode from an add-on can also have subtitle files, which are
+// offered after the stream's own and drawn by the app (PLAN.md, "Stremio
+// add-ons", step 6). One in the language last chosen is shown when the
+// stream has none in it.
 
 const BAR_MS = 5000;
 const SAVE_MS = 10_000;
@@ -66,6 +80,9 @@ const archiveStream = (channel: Channel, programme: StoredProgramme, from: numbe
     ? { url, userAgent: channel.headers?.userAgent, referer: channel.headers?.referer, live: false }
     : undefined;
 };
+
+/** A subtitle file's id among the choices. */
+const fileId = (file: ExternalSubtitle) => `${file.from}/${file.id}`;
 
 const playFilm = (film: VodPlay) => {
   void player.play({ ...film.stream, live: false, startMs: film.startMs });
@@ -147,7 +164,18 @@ export default () => {
     batch(() => {
       setRequest(next);
       setPaused(false);
+      setFiles([]);
     });
+    external.off();
+    if (next.kind === "vod" && next.subtitles) {
+      next
+        .subtitles()
+        .then(found => {
+          if (request() === next) setFiles(found);
+          return undefined;
+        })
+        .catch(() => undefined);
+    }
     catchupRetries = 0;
     if (next.kind === "catchup")
       playRecording(next, Math.max(next.programme.start, next.from ?? next.programme.start));
@@ -315,18 +343,46 @@ export default () => {
     goLive(current);
   };
 
+  // Subtitle files from add-ons, and the one shown.
+  const [files, setFiles] = createSignal<ExternalSubtitle[]>([]);
+  const external = createExternalSubtitles({ position: () => player.position() });
+  const showFile = (file: ExternalSubtitle) => {
+    player.selectTrack("text", undefined);
+    void external.show(fileId(file), file.url);
+    storedPreferences.save({ ...storedPreferences.load(), text: file.language });
+  };
+  // Once it plays and the files are known: one in the language last chosen,
+  // if the stream shows none of its own.
+  createEffect(
+    on([() => player.status().state === "playing", files], ([playing, found]) => {
+      if (!playing || found.length === 0 || external.chosen()) return;
+      const wanted = storedPreferences.load().text;
+      if (!wanted || player.tracks().some(track => track.kind === "text" && track.selected)) return;
+      const file = found.find(one => sameLanguage(one.language, wanted));
+      if (file) showFile(file);
+    }),
+  );
+
   // The audio and subtitle choices.
   const [tracksOpen, setTracksOpen] = createSignal(false);
   const [trackCursor, setTrackCursor] = createSignal(0);
   const rows = createMemo(() =>
-    trackRows(player.tracks(), {
-      audio: $t("live.tracks.audio"),
-      subtitles: $t("live.tracks.subtitles"),
-      off: $t("live.tracks.off"),
-      noAudio: $t("live.tracks.noAudio"),
-      noSubtitles: $t("live.tracks.noSubtitles"),
-      unnamed: number => $t("live.tracks.unnamed", { number }),
-    }),
+    trackRows(
+      player.tracks(),
+      {
+        audio: $t("live.tracks.audio"),
+        subtitles: $t("live.tracks.subtitles"),
+        off: $t("live.tracks.off"),
+        noAudio: $t("live.tracks.noAudio"),
+        noSubtitles: $t("live.tracks.noSubtitles"),
+        unnamed: number => $t("live.tracks.unnamed", { number }),
+      },
+      files().map(file => ({
+        id: fileId(file),
+        text: `${languageName(file.language) ?? file.language} · ${file.from}`,
+        selected: external.chosen() === fileId(file),
+      })),
+    ),
   );
   const openTracks = () => {
     hideBar();
@@ -347,6 +403,7 @@ export default () => {
     clearInterval(saver);
     clearTimeout(barTimer);
     seeker.cancel();
+    external.off();
   });
 
   exposeToProbes("playPage", {
@@ -361,6 +418,11 @@ export default () => {
     seek,
     jumpTo,
     togglePause,
+    files,
+    externalText: external.text,
+    externalChosen: external.chosen,
+    rows,
+    trackCursor,
   });
 
   // The bar's words and numbers.
@@ -416,7 +478,13 @@ export default () => {
       onEnter={() => {
         if (tracksOpen()) {
           const row = rows()[trackCursor()];
-          if (row?.type === "choice") player.selectTrack(row.kind, row.id);
+          if (row?.type === "choice") {
+            if (row.kind === "text") external.off();
+            player.selectTrack(row.kind, row.id);
+          } else if (row?.type === "file") {
+            const file = files().find(one => fileId(one) === row.id);
+            if (file) showFile(file);
+          }
         } else if (seeker.target() !== undefined) seeker.finish();
         else togglePause();
         return true;
@@ -498,7 +566,7 @@ export default () => {
           </View>
         )}
       </Show>
-      <Show when={player.subtitle()}>
+      <Show when={player.subtitle() ?? external.text()}>
         {text => (
           <View
             x={960}

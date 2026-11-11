@@ -109,6 +109,8 @@ export const createReminders = (options: { storage: Storage; now?: () => number 
     },
 
     replace: (list: unknown) => save(readReminders(list, now())),
+    /** Reads them again from storage, such as for another profile (src/data/profiles.ts). */
+    reload: () => setReminders(load()),
   };
 };
 

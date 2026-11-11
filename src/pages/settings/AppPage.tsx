@@ -7,7 +7,8 @@ import {
   tvLanguages,
   type LanguageSetting,
 } from "../../lang/languages";
-import { settings } from "../../library";
+import type { VodLayout } from "../../data/vodLayout";
+import { settings, vodLayout } from "../../library";
 import { $t } from "../../translate";
 import { SubPage } from "./SubPage";
 
@@ -26,7 +27,12 @@ const clocks = (): { value: ClockFormat; label: string }[] => [
   { value: "12h", label: $t("app.clock.12h") },
 ];
 
-/** The language, what the app opens on, and how times show (PLAN.md, Phase 5, step 6; Phase 8, step 5). */
+const layouts = (): { value: VodLayout; label: string }[] => [
+  { value: "modern", label: $t("app.vodLayout.modern") },
+  { value: "classic", label: $t("app.vodLayout.classic") },
+];
+
+/** The language, what the app opens on, and how times show (PLAN.md, Phase 5, step 6; Phase 8, step 5), and the Movies and Series layout ("Movies and Series by title", step 6). */
 export const AppPage = (props: { onClose: () => void }) => {
   return (
     <SubPage title={$t("app.title")} onClose={props.onClose}>
@@ -50,6 +56,13 @@ export const AppPage = (props: { onClose: () => void }) => {
         value={settings.clock()}
         onChange={settings.setClock}
         hint={$t("source.change")}
+      />
+      <ChoiceField
+        label={$t("app.vodLayout")}
+        choices={layouts()}
+        value={vodLayout.layout()}
+        onChange={vodLayout.set}
+        hint={$t("app.vodLayout.hint")}
       />
     </SubPage>
   );

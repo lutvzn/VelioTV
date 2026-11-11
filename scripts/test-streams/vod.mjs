@@ -100,6 +100,10 @@ const libraries = new Map();
  * Films and series: about one film per 8 channels and one series per 150, at
  * least 24 and 6, unless `films` and `series` give the counts.
  */
+/** The made-up TMDB ids Xtream gives, which the made-up Wikidata (stremio.mjs) knows. */
+export const filmTmdb = id => 100_000 + id;
+export const seriesTmdb = id => 200_000 + id;
+
 export const vodLibrary = (channelCount, { films, series } = {}) => {
   const filmCount = films ?? Math.max(24, Math.min(2000, Math.round(channelCount / 8)));
   const seriesCount = series ?? Math.max(6, Math.min(80, Math.round(channelCount / 150)));
@@ -173,6 +177,7 @@ export const xtreamVod = {
     if (!film) return { info: [], movie_data: [] };
     return {
       info: {
+        tmdb_id: String(filmTmdb(film.id)),
         movie_image: film.poster ? `${base}${film.poster}` : "",
         // Films with a poster have a backdrop too; real servers often send none.
         backdrop_path: film.poster ? [`${base}${backdropPath(film.poster)}`] : [],
@@ -203,6 +208,7 @@ export const xtreamVod = {
         num: at + 1,
         name: show.name,
         series_id: show.id,
+        tmdb_id: String(seriesTmdb(show.id)),
         cover: `${base}${show.poster}`,
         plot: show.plot,
         cast: show.cast.join(", "),

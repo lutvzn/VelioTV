@@ -52,4 +52,27 @@ describe("the track panel's rows", () => {
     expect(nextChoice(some, 3, 1)).toBe(1);
     expect(nextChoice(some, 1, -1)).toBe(3);
   });
+
+  it("offers add-on files after the stream's own, and a file shown hides them", () => {
+    const rows = trackRows(
+      [
+        { id: "1", kind: "audio", language: "eng", selected: true },
+        { id: "3", kind: "text", language: "en", selected: true },
+      ],
+      text,
+      [{ id: "a/srt", text: "English · Test", selected: true }],
+    );
+    expect(
+      rows.map(row =>
+        row.type === "heading" || row.type === "note"
+          ? `[${row.text}]`
+          : `${row.text}${row.selected ? " *" : ""}`,
+      ),
+    ).toEqual(["[Audio]", "English *", "[Subtitles]", "Off", "English", "English · Test *"]);
+    expect(nextChoice(rows, 4, 1)).toBe(5);
+    // Files alone: no "No subtitles" note.
+    const only = trackRows([], text, [{ id: "a/vtt", text: "Portuguese · Test", selected: false }]);
+    expect(only.map(row => row.text)).toEqual(["Audio", "No audio", "Subtitles", "Off", "Portuguese · Test"]);
+    expect(only[3]).toMatchObject({ selected: true });
+  });
 });

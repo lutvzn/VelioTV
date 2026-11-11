@@ -162,6 +162,8 @@ export const createWatched = (options: { storage: Storage; now?: () => number })
 
     /** Puts a restored list in place of this one. */
     replace: (list: unknown) => save(readWatched(list)),
+    /** Reads it again from storage, such as for another profile (src/data/profiles.ts). */
+    reload: () => setEntries(load(options.storage)),
 
     /** Forgets a removed source's items. */
     forgetSource: (source: string) => save(entries().filter(entry => !entry.key.startsWith(`${source}/`))),

@@ -2,7 +2,13 @@
 // sources, and importing them, one at a time, when they are added or
 // changed, when asked, and when their data gets old. It checks at startup,
 // every quarter of an hour, and whenever the app comes back into view (the
-// TV may have been off).
+// TV may have been off), after pulling the Velio account's lists, if signed
+// in (beforeCheck).
+//
+// Synced lists (SYNC-PLAN.md, step 4) are sources too, with `synced`: a pull
+// puts them in with applySynced(), after the TV's own sources, in the
+// account's order. The TV doesn't edit, move or turn them off, and a backup
+// doesn't hold them.
 //
 // The UI reads it through signals; see sources() and statusOf().
 
@@ -68,6 +74,8 @@ export interface SourceManagerOptions {
   listConfirmed?: () => boolean;
   /** The user's hidden channels and groups, whose guides imports leave out. */
   guideFilter?: () => GuideFilter;
+  /** Runs before each scheduled check, such as pulling the account's lists. */
+  beforeCheck?: () => Promise<unknown>;
 }
 
 export const createSourceManager = (options: SourceManagerOptions) => {
@@ -199,6 +207,16 @@ export const createSourceManager = (options: SourceManagerOptions) => {
     }
   };
 
+  /** Pulls first (beforeCheck), then checks; a failed pull still checks. */
+  const pullAndCheck = async () => {
+    try {
+      await options.beforeCheck?.();
+    } catch (error) {
+      console.warn("The check's pull failed:", error);
+    }
+    check();
+  };
+
   const remove = async (id: string) => {
     cancel(id);
     setPendingRemovals([...new Set([...pendingRemovals(), id])]);
@@ -265,10 +283,10 @@ export const createSourceManager = (options: SourceManagerOptions) => {
       } else if (unknown.length > 0) {
         console.warn("Keeping the data of sources not in the list:", unknown);
       }
-      check();
-      const timer = setInterval(check, CHECK_EVERY_MS);
+      void pullAndCheck();
+      const timer = setInterval(() => void pullAndCheck(), CHECK_EVERY_MS);
       const onVisible = () => {
-        if (document.visibilityState === "visible") check();
+        if (document.visibilityState === "visible") void pullAndCheck();
       };
       document.addEventListener("visibilitychange", onVisible);
       return () => {
@@ -289,7 +307,7 @@ export const createSourceManager = (options: SourceManagerOptions) => {
     /** Saves a source's settings, and imports it again if they change its data. */
     update: (id: string, draft: SourceDraft) => {
       const before = find(id);
-      if (!before) return;
+      if (!before || before.synced) return;
       // The form doesn't edit whether the source is on.
       const next: Source = { ...draft, id };
       if (before.disabled) next.disabled = true;
@@ -303,12 +321,14 @@ export const createSourceManager = (options: SourceManagerOptions) => {
 
     remove,
 
-    /** Moves a source `step` places in the order, which is the lineup's. */
+    /** Moves one of the TV's own sources `step` places in the order, which is the lineup's. */
     move: (id: string, step: number) => {
       const list = sources().slice();
       const from = list.findIndex(source => source.id === id);
-      const to = Math.max(0, Math.min(list.length - 1, from + step));
-      if (from < 0 || from === to) return;
+      // Among the TV's own, which come first; synced lists keep the account's order.
+      const own = list.filter(source => !source.synced).length;
+      const to = Math.max(0, Math.min(own - 1, from + step));
+      if (from < 0 || from >= own || from === to) return;
       const [source] = list.splice(from, 1);
       list.splice(to, 0, source);
       save(list);
@@ -317,7 +337,7 @@ export const createSourceManager = (options: SourceManagerOptions) => {
     /** Turns a source off, keeping it and its data, or on again (importing it if due). */
     setDisabled: (id: string, disabled: boolean) => {
       const before = find(id);
-      if (!before || Boolean(before.disabled) === disabled) return;
+      if (!before || before.synced || Boolean(before.disabled) === disabled) return;
       save(
         sources().map(source => {
           if (source.id !== id) return source;
@@ -332,18 +352,52 @@ export const createSourceManager = (options: SourceManagerOptions) => {
     },
 
     /**
-     * Puts a restored list in place of the sources (PLAN.md, Phase 5,
-     * step 7): sources not in it are removed with their data, and the rest
-     * import if they're due, as new ones are.
+     * Puts a restored list in place of the TV's own sources (PLAN.md,
+     * Phase 5, step 7): sources not in it are removed with their data, and
+     * the rest import if they're due, as new ones are. Synced lists stay as
+     * they are (SYNC-PLAN.md, open choice 4), and a backup's are left out.
      */
     replaceAll: async (list: unknown) => {
-      const next = readSources(list);
+      const synced = sources().filter(source => source.synced);
+      const syncedIds = new Set(synced.map(source => source.id));
+      const next = readSources(list).filter(source => !source.synced && !syncedIds.has(source.id));
       const keep = new Set(next.map(source => source.id));
-      const gone = sources().filter(source => !keep.has(source.id));
-      save(next);
+      const gone = sources().filter(source => !source.synced && !keep.has(source.id));
+      save([...next, ...synced]);
       await Promise.all(gone.map(source => remove(source.id)));
       check();
       return next;
+    },
+
+    /**
+     * Puts the account's lists in place of the synced sources (SYNC-PLAN.md,
+     * step 4), after the TV's own: new ones and those whose address or login
+     * changed import, and those gone are removed with their data. Resolves
+     * with the ids removed.
+     */
+    applySynced: async (synced: readonly Source[]) => {
+      const before = new Map(
+        sources().flatMap(source => (source.synced ? [[source.id, source] as const] : [])),
+      );
+      const own = sources().filter(source => !source.synced);
+      const ownIds = new Set(own.map(source => source.id));
+      const incoming = synced.filter(source => source.synced && !ownIds.has(source.id));
+      const incomingIds = new Set(incoming.map(source => source.id));
+      save([...own, ...incoming]);
+      for (const source of incoming) {
+        const old = before.get(source.id);
+        if (source.disabled) {
+          cancel(source.id);
+        } else if (old && !old.disabled && changesData(old, source)) {
+          cancel(source.id);
+          enqueue(source.id, true);
+        }
+      }
+      const gone = [...before.keys()].filter(id => !incomingIds.has(id));
+      await Promise.all(gone.map(remove));
+      // New ones, and any turned on again.
+      check();
+      return gone;
     },
 
     /**

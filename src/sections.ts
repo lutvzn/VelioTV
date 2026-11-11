@@ -7,4 +7,11 @@ export const SECTIONS = [
   { path: "/settings", label: "menu.settings", icon: "assets/icons/settings.png" },
 ] as const;
 
-export type Section = (typeof SECTIONS)[number];
+export type Section = (typeof SECTIONS)[number] | typeof PROFILES_SECTION;
+
+/** Switching profile: in the menu while the TV has more than one (src/pages/Profiles.tsx). */
+export const PROFILES_SECTION = {
+  path: "/profiles",
+  label: "menu.profiles",
+  icon: "assets/icons/profile.png",
+} as const;

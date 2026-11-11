@@ -44,7 +44,7 @@ export const TrackPanel = (props: TrackPanelProps) => (
             color={
               at() === props.cursor
                 ? colors.onFocus
-                : row.type === "choice"
+                : row.type === "choice" || row.type === "file"
                   ? colors.text
                   : row.type === "heading"
                     ? colors.accentText
@@ -60,7 +60,7 @@ export const TrackPanel = (props: TrackPanelProps) => (
             height={18}
             borderRadius={9}
             color={at() === props.cursor ? colors.onFocus : colors.accent}
-            alpha={row.type === "choice" && row.selected ? 1 : 0}
+            alpha={(row.type === "choice" || row.type === "file") && row.selected ? 1 : 0}
           />
         </View>
       )}

@@ -6,14 +6,23 @@ import { MENU_WIDTH } from "../components/SideMenu";
 import { exposeToProbes } from "../devHooks";
 import type { Channel } from "../data/lineup";
 import { inArchive } from "../data/catchup";
-import { appStorage } from "../data/settingsCopy";
 import { duration } from "../live/format";
 import { channelStream, handOff, holdPlayer, playChannel, statusText, takeHandoff } from "../live/handoff";
 import { centredTop, clampIndex, scrollTop, wrapIndex } from "../live/listWindow";
 import { firstChoice, nextChoice, trackRows } from "../live/trackRows";
 import { createNowNext } from "../live/nowNext";
 import { createZapper } from "../live/zapper";
-import { groupTitle, guide, isBlocked, library, lineup, liveGroups, liveNumbers, liveView } from "../library";
+import {
+  groupTitle,
+  guide,
+  isBlocked,
+  library,
+  lineup,
+  liveGroups,
+  liveNumbers,
+  liveView,
+  profileData,
+} from "../library";
 import { askPin } from "../pin";
 import { canPlaySecond, player, secondPlayer } from "../player";
 import { programmeAt, watchRecording } from "../play/start";
@@ -105,7 +114,7 @@ export default () => {
       setLockedChannel(undefined);
       playChannel(channel, { keep });
     },
-    storage: appStorage,
+    storage: profileData,
   });
   // Plays it once the PIN is entered, or the lock comes off.
   createEffect(() => {

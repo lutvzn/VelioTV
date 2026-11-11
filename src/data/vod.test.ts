@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { catalog, guideWindow } from "../../scripts/test-streams/catalog.mjs";
 import { m3u } from "../../scripts/test-streams/playlist.mjs";
-import { vodLibrary, vodLines } from "../../scripts/test-streams/vod.mjs";
+import { filmTmdb, seriesTmdb, vodLibrary, vodLines } from "../../scripts/test-streams/vod.mjs";
 import { playerApi } from "../../scripts/test-streams/xtream.mjs";
 import { deleteDb, openDb, prepareDb, readChannels, readImport, readVod, request } from "./db";
 import { runImport } from "./importer";
@@ -137,7 +137,10 @@ describe("films and series", () => {
       director: film.director,
       durationMs: 360_000,
       backdrop: `${BASE}${film.poster?.replace("/poster/", "/backdrop/")}`,
+      tmdb: filmTmdb(film.id),
     });
+    // The list gives a series' TMDB id, and it's kept.
+    expect(vod.series[1].tmdb).toBe(seriesTmdb(library.series[1].id));
     const show = library.series[1];
     const details = await xtreamSeriesInfo(LOGIN, String(show.id), fetcher);
     expect(details.backdrop).toBe(`${BASE}${show.poster.replace("/poster/", "/backdrop/")}`);

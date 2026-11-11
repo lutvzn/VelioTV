@@ -513,6 +513,161 @@ The user asked whether Velio could use Stremio add-ons: catalogs, details, strea
    - **So:** the app downloads the add-on's file, saves it in `wgt-private` and gives AVPlay its path. The other way, parsing the file and drawing each line by the player's time, stays for files AVPlay can't read, and for the desktop and LG.
    - Not tested yet: text with accents and other non-English letters, files that aren't UTF-8, styling tags such as `<i>`, MKV and HLS films, and Tizen 3, whose `tizen.filesystem` lacks `openFile()` and `toURI()` (the older `resolve()` API would be needed).
 
+### Building it (asked 2026-11-10)
+
+The user chose: add-ons' films and series inside Movies and Series, as groups; catalogs, details, streams and subtitles in the first version; and add-ons added through Velio Sync from the start.
+
+1. **VelioPlatform:** a third list kind, `"stremio"`, whose `url` is the add-on's manifest (an install link, `stremio://…`, means `https://`, and `/manifest.json` is added when it's missing). The web form has "Stremio add-on" beside M3U and Xtream, with no guide or refresh. Then `src/sync-core/` is copied again. An app built before this can't open a pull with an add-on in it (`readList()` refuses the kind); none is released, so that's accepted.
+2. **The add-on client** (`src/stremio/`): reading manifests (resources as names or objects, types, id prefixes, catalogs and their extras), the request addresses, and reading catalogs, metas, streams and subtitles into the app's own types. Tests with made-up answers.
+3. **Add-ons on the TV:** a synced list of kind `"stremio"` is an add-on for the profiles that have it, not a source to import. Manifests are kept in localStorage (small) and asked for again at start once a day old. Settings lists them with the synced sources, read-only.
+4. **Movies and Series:** each add-on catalog for films or series is a group after the categories, named with its add-on, loading its first page when the page opens and the next as the cursor nears its end. Search also asks the add-ons that can search. Their titles are keyed `stremio:<type>:<id>`, so where one was left is kept whichever catalog it was found in, and Continue watching shows it without the catalog.
+5. **A title's page:** details from the first add-on with metas for its type and id (the catalog's own first); a series' episodes from its `videos`. Play lists the streams of every add-on that has streams for it, in the account's order. Only streams with an `http(s)` `url` show; torrents (`infoHash`), YouTube ids and external links don't, nor streams whose headers need a Referer (no engine can send one). A User-Agent in `proxyHeaders` is sent. The next episode takes the stream with the same `bingeGroup`, or else the first.
+6. **Subtitles:** the add-ons' subtitles for the title (and those a stream carries) are added to the player's subtitle choices. The app downloads the one chosen, reads it (SRT or WebVTT) and draws each line by the player's time, on every TV. This replaces the plan above of giving AVPlay a saved copy: a subtitle can be picked while watching, without opening the stream again; it works on Tizen 3, which lacks `openFile()`; and nothing is written to the TV's 80 MB.
+7. **Test data:** `pnpm test-streams` serves a made-up add-on at `/stremio/manifest.json`, with film and series catalogs (paged, and searchable), metas, streams that play the labelled test films (plus a torrent-only one and one needing a Referer, to check they're hidden), and subtitles (`/vod/film.srt` and `.vtt`). The mock account's `/sync/add-list` can add it.
+8. **On the TV:** a probe that opens Movies with the add-on, times its catalogs, opens a film, lists its streams, plays one, and checks a subtitle's timing; the same in Chromium 47 and 38 for the legacy build.
+
+**Built (2026-11-10).** Steps 1–8 are done; `pnpm check` (303 tests) and `check:old-tvs` pass, and VelioPlatform's `pnpm check` passed with the new kind.
+
+- **Where it lives:** the client in `src/stremio/` (`addon.ts`, `addons.ts`, `subtitleFile.ts`, `vodEntries.ts`); Movies and Series groups in `src/pages/vod/addonGroups.ts`; the stream picker in `src/pages/vod/StreamPicker.tsx`; play in `src/play/addonPlay.ts`; drawn subtitles in `src/play/externalSubtitles.ts`.
+- **Changed from the plan:** Settings has its own page, "Stremio add-ons" (under More settings), instead of listing them with the sources. It shows each add-on's name, host, catalogs or problem, and has Check again.
+- **A stream is picked** each time Play is pressed (Up and Down, OK, Back). When none can play, the picker says how many were torrents or links, how many needed a Referer, and which add-ons didn't answer.
+- **A subtitle file** shows in the track panel (Down) after the stream's own, as "<language> · <add-on>". Choosing one turns off the stream's own, and remembers the language. When the stream has no subtitles in the language last chosen, a file in that language shows by itself.
+- **Bug found on the TV:** the manifest was stored already read, then read again at the next start as if raw, so every catalog lost its search and paging. The raw manifest is stored now, with a test.
+- **`stremio` probe** (Samsung 2024, modern build, against the test add-on, about 40 s):
+  - The catalog showed as a group in 0.5 s, 20 titles. The second page made it 40, and search found 20 in 27 ms.
+  - Details came from the add-on.
+  - The picker listed the MP4 and HLS streams in 52 ms. The MP4 one played in 0.2–0.6 s, and both subtitle files were offered.
+  - The SRT file, chosen with the keys, showed in 51 ms and agreed with the film's clock to the second at every check.
+  - The torrent-and-Referer film offered nothing, and gave the counts (1 and 1). Back closed the picker.
+  - Back from watching reopened the film's page.
+  - Both episodes' streams carried their binge groups.
+- **Chromium 47 and 38, legacy build** (the sign-in and the `stremio` probe joined, about 50 s each):
+  - The manifest, the group (0.2 s), the second page (40), search (20), details, the picker's streams, the subtitle files, the unplayable counts and the episodes all matched the TV.
+  - Neither browser has H.264, so the film didn't play there and the subtitle timing wasn't checked.
+  - The common build doesn't map the TV's Back key code, so the picker's Back wasn't checked there.
+- **Still for the user to look at on the TV:**
+  - The add-on group and its posters.
+  - The stream picker.
+  - The add-on subtitles over the film.
+  - The Settings page.
+- **Not done yet:** add-ons that need setting up first (`configurationRequired`) are only flagged in Settings. Streams are kept for the run, so a link that expires needs the app restarted.
+
+## Movies and Series by title (asked 2026-11-10)
+
+The user asked for a modern Movies and Series page like Stremio's, where each film or series is one title holding every link to it: the IPTV sources' and the add-ons' streams. IPTV titles take their genres from Cinemeta, not their provider's category. The classic layout stays, as a choice in Settings.
+
+The user chose:
+
+- a column of groups beside a grid, as now;
+- every IPTV title matched to Cinemeta in the background, the match kept on the TV;
+- titles Cinemeta can't match kept in their provider's category;
+- modern by default, chosen per profile.
+
+1. **Cinemeta** (`v3-cinemeta.strem.io`) is a built-in add-on for details and search, used only while the modern layout is on. Every film's and series' name and year are sent to it, once each.
+2. **Matching:**
+   - The name is cleaned of language tags, quality and the year (`EN - The Great Adventure (1999) [4K]` is "The Great Adventure", 1999). Cinemeta's search for it gives the title with the same folded name, and a year no more than one off when both have one.
+   - A few titles are matched at a time, and the same name is asked for only once.
+   - Matches are kept in a database record per source (`titleMatches`), written every 30 seconds while it matches, so a record is large or seldom written. One with no match is tried again after 30 days.
+3. **Titles:**
+   - IPTV films and series with the same IMDb id are one title, with the add-ons' titles of that id. Unmatched ones with the same cleaned name and year are one title too.
+   - A matched title uses Cinemeta's name, poster, genres and details.
+   - Its key is the add-on's (`stremio:movie:<imdb id>`), and an unmatched one keeps its first link's. In the modern layout, where a title was left is kept under the title's key, so it isn't shared with the classic layout.
+4. **The page:**
+   - Search, Continue watching, all titles, and Popular (Cinemeta's top titles the profile can play).
+   - Then each genre, the most titles first, and the add-ons' catalogs.
+   - Then the unmatched titles' provider categories.
+5. **Playing:**
+   - Play lists the title's IPTV links (source and name) before the add-ons' streams.
+   - A title with only one IPTV link, and no add-on to ask, plays at once.
+   - A series' episodes are Cinemeta's, with each IPTV episode of the same season and number as a link. The next episode stays with the same source, or the same kind of add-on stream.
+6. **Settings:** Language, start and clock (now "Language, layout, start and clock") gets "Movies and series": Modern or Classic, for each profile.
+7. **Test data:** the test server gets a made-up Cinemeta (`/cinemeta/manifest.json`) over its films and series, with IMDb-like ids, and the test add-on uses the same ids. A dev setting points the app at it.
+8. **On the TV:** a probe that times the matching of the test sources, checks a title with IPTV and add-on links, and plays each kind; and the same in Chromium 47 and 38.
+
+**Built (2026-11-10).** Matching is `src/data/titleMatches.ts`, with name cleaning in `src/stremio/cinemeta.ts` and joining in `src/data/titles.ts`. The pages are `src/pages/vod/ModernMovies.tsx` and `ModernSeries.tsx`, sharing `modernTitles.ts`, and the setting is in `src/data/vodLayout.ts`. The test server's Cinemeta leaves out every film whose id divides by 11 and every fifth series, and moves every seventh film's year by one. Its films are `tt00<id>` and its series `tt09<id>`, in the test add-on too. The `modern` probe drives it; `setCinemetaUrl()` on `window.velio` points the app at the test server's Cinemeta, and `""` points it back.
+
+- **Changes from the steps above:**
+  - A name ending in a year-like number ("Blade Runner 2049") is searched without it first, then whole.
+  - Matches are saved every 30 s, not every few seconds: a 37,000-film source's record is megabytes.
+  - Each source's titles are matched in turn, so a big source doesn't hold up the rest.
+  - The pages are redrawn only when a match is found, at most every `titles` ms (about 15 s for 15,000 due), and every 22.5 s while only providers are asked for TMDB ids (below).
+  - Popular asks for up to 8 of Cinemeta's pages, until it has 40 titles the profile can play.
+- **Test TV**, with the user's own big source (36,842 films and 1,062 series) and the test Xtream source, against the test server's Cinemeta:
+  - Matching ran at about 170 titles a second; the worst frame meanwhile was 83 ms, with none over 100 ms.
+  - All 22 of the test source's films that the test Cinemeta has matched, the 2 left out stayed in their category, and 4 of its 6 series matched.
+  - Joining every title again takes 240–270 ms for 37,000 films, and Movies opened in 1.9 s.
+  - Groups, in order: Continue watching, All films, Popular (50), 8 genres, the test add-on's catalog, then the provider categories.
+  - A joined film's picker listed "Test Xtream · <name> — MP4 · Comedy", then the add-on's MP4 and HLS streams. The IPTV copy played in 0.43 s and the add-on's stream in 0.47 s, and Back reopened the film.
+  - A joined series had Cinemeta's 8 episodes, each with the source's episode as a link, in 110 ms.
+  - The `stremio` probe (now on the classic layout) gave the same results as before.
+- **Chromium 47 and 38**, legacy build, against the same server: the same matches (22 of 24 films, 4 of 6 series) in 0.2–0.3 s, the same groups and picker rows, and the same joined episodes. Neither plays the films (no H.264), as before.
+- **Two bugs found on the TV, fixed with tests:**
+  - Matching didn't start at first, as the matcher didn't watch for its kept matches being read.
+  - After switching Cinemeta's address, searches already made were used again. A save waiting at the switch could also overwrite the old address's matches with an empty record.
+- **Against the real Cinemeta (2026-11-10), the user's own source:** at first 70.5% of the films looked up matched (6,699 of 9,496). Most misses were the provider's naming: hyphens for spaces (`Batman--The-Dark-Knight`, `Angels---Demons`), a "1" on the first film, and "Franchise N Title" (`Avengers-2-Age-Of-Ultron`). The cleaning (`CLEANING = 3` then) reads those, and tries other names: the part after a colon or the franchise, the name without "1", sequels as "II" and "Part II", and "The" in front. Those names are tried only when the title has a year, and are taken only from a result with a year within one, after the first try gave "Endgame" (no year) for `Avengers-4-Endgame (2019)`. A record saved with an older cleaning has its misses looked for again, and its matches under another name checked again. Then 85.4% of 14,808 matched, and 30 of a sample of 40 earlier misses, all rightly. What still misses: other spellings (`Bāhubali`, Cinemeta "Baahubali"), a wrong year in the name, and titles Cinemeta doesn't have.
+- **Matching by TMDB id (asked 2026-11-10).** Xtream gives a series' TMDB id in its list (`tmdb_id`, 911 of the user's 1,056 series), and a film's only in its details (`get_vod_info`). The posters are TMDB's, but by an image path, which can't be looked up. Cinemeta doesn't search by TMDB id, so Wikidata gives the IMDb id for it (`src/stremio/wikidata.ts`: TMDB's film id P4947 or TV id P4983 to IMDb's P345, up to 200 ids a SPARQL query, one query at a time, ids gathered for 5 s). Cinemeta's details for that id give the name, genres and poster.
+  - A series with a TMDB id is matched by it first, then by name. Every due series' id is asked for when matching starts, so a query carries 200 ids.
+  - A film's provider is asked for its TMDB id one film at a time, only for a film its name didn't find or found only by a guessed name; the TMDB id's match replaces a guess.
+  - Each match records how it was found (`via`: name, guess or tmdb). `CLEANING = 4`, so earlier misses were tried again.
+  - Films waiting for their provider stay waiting when the titles change, as when a source is imported again; only turning matching off or another Cinemeta's address ends them.
+  - The test server's Xtream gives TMDB ids (100000 + film id, 200000 + series id), its Cinemeta search misses films whose id divides by 13 and series by 3, and a made-up Wikidata (`/wikidata/sparql`) knows every id but films' whose id divides by 17. `setWikidataUrl()` on `window.velio` points the app at it.
+- **Test TV, the user's own source (36,818 films, 1,056 series), real Cinemeta and Wikidata, 2026-11-10:**
+  - **Films: 90.0% matched (33,143 of 36,818, every film looked at), from 85.4% of those looked at before.** 4,517 were found by TMDB id, 174 by a guessed name, the rest by name.
+  - **Series: 82% (866 of 1,056), 779 by TMDB id** and 87 by name (series weren't measured before).
+  - In a spread sample of 40 TMDB matches, 37 are clearly right, many from names in another language ("Ich - Einfach unverbesserlich 4" is "Despicable Me 4", "Dolor y dinero" "Pain & Gain", "Bastille-Day" "The Take"). The doubtful 3 come from the provider's own TMDB id ("Notebook 2019" gave "The Notebook (2004)").
+  - Wikidata answered 200 ids in 0.4–0.7 s, and knew 76–92% of the series' ids. The provider gave about 3.4 film ids a second, so the 5,016 films it was asked about took about 25 minutes. Names were looked up at about 55 a second meanwhile.
+  - Each probe restarts the app, so a long measure is one probe (it waits on the Movies page). Films waiting for their provider when the app closes are looked for again next time.
+  - Frames on Movies while matching: each time matches are shown, a 500–870 ms frame (joining 37,000 films takes about 250 ms of it). It happened about 16 times a minute before showing matches less often, and 3–5 times a minute after. It only happens while a big source is first matched.
+  - Still missing: the provider's names with no TMDB id and Cinemeta's US titles ("Harry-Potter-1-Harry-Potter-And-The-Philosopher-s-Stone"), concerts and specials Cinemeta doesn't have, and a wrong year in the name.
+- **TMDB (asked 2026-11-11).** TMDB's API matches better than Cinemeta's search: it knows titles in many languages and other names. It's used only with an API key, and the key never goes in the repo. It sits in the git-ignored root `.env` as `TMDB_API_KEY`, and `vite.config.js` puts only that value in the build as `__TMDB_KEY__`. It is empty in tests, and without it the app works as before. The key is sent only to TMDB's own address.
+  - Order (`src/data/moreMatches.ts`, `src/stremio/tmdb.ts`):
+    1. Cinemeta's name search first, as before.
+    2. A title it missed, or found only by a guessed name, is searched for on TMDB. The search is in the language its tag gives, from the name or the category ("ES - ", "TR:", "KRD-B--"). It is filtered by year first, then searched again without the year. A result is taken only if it has the same name, in English or its own language, and a year no more than one off.
+    3. Then an Xtream film's provider is asked for its TMDB id.
+    - A TMDB id, the provider's or a series' from the import, gives TMDB's details with the IMDb id, English name, genres and poster, all in one request. A title with no IMDb id isn't taken.
+    - Without a key, the ids go through Wikidata and Cinemeta, as before.
+    - TMDB's genre names are mapped to Cinemeta's ("Science Fiction" is "Sci-Fi"; "Action & Adventure" is both).
+    - Eight requests at a time.
+    - Matches found by search record `via: "tmdbSearch"`.
+  - Cleaning (`CLEANING = 5`):
+    - Tags like `KU-B--` and `KRD-S--` are dropped.
+    - So is the name again in Arabic, Kurdish, Hebrew or Cyrillic after the Latin one ("Flushed Away 2006 مشكو").
+  - Terms: TMDB is free for non-commercial apps, and the app takes no donations for now; ask TMDB (sales@themoviedb.org) before taking any. Its logo (`scripts/credits/tmdb.svg`, the approved one, as `public/assets/credits/tmdb.png`) and its notice are on a new Settings → About page, which shows them only while TMDB is used. Each panel takes the focus with a cyan ring, and the voice guide reads it. A match by TMDB (`via` tmdb or tmdbSearch) records when it was found (`at`), and is looked for again after six months (`KEEP_TMDB_MS`), as the terms allow no longer; one kept from before counts from when the app first sees it.
+  - The test server has a made-up TMDB (`/tmdb/3/search/(movie|tv)`, `/tmdb/3/(movie|tv)/<id>`). It knows every film and series; those Cinemeta leaves out have no IMDb id there. `setTmdbUrl()` on `window.velio`, or the `modern` probe's `tmdb` input, points the app at it, with a dummy key.
+- **Test TV, the user's own source, real Cinemeta and TMDB, 2026-11-11:**
+  - **Films: 94.4% matched (34,771 of 36,818), from 90.0%.** Of these, 1,070 were found by TMDB's search, 4,725 by TMDB id, 182 by a guessed name and the rest by name.
+  - **Series: 87.1% (920 of 1,056), from 82%.** Of these, 827 were found by TMDB id, 85 by name and 7 by TMDB's search. The search found French and anime names, such as "L'Attaque des Titans [VF]" (Attack on Titan) and "Valkyrie Apocalypse" (Record of Ragnarok).
+  - 3,671 titles were looked at again, and 3,357 went on to TMDB or the provider. This took 11 minutes, against about 25 for the provider-only route.
+  - Accuracy: a spread sample of 40 TMDB search matches came out about 39 right. Many matched through the category's language, such as "ES - La virgen roja" (The Red Virgin), "PL: Nagi peryskop" (Down Periscope), "So High" (How High, its German title) and "TR: Truy Sat" (Tracer). The doubtful one is "36 (2024)", which gave "Sector 36".
+  - Frames: in the first minute, while names were searched again, 18 frames took over 100 ms, the worst 1.55 s. After that, 3–5 a minute at 750–980 ms, as before.
+  - Still missing: names that are the provider's own invention ("Blade-Runner-2-Blade-Runner (2049)", "Wonder-Woman (1984)", "Harry-Potter-1-Harry-Potter-And-The-Philosopher-s-Stone"), other spellings ("Bāhubali"), concerts, and Kurdish-only names.
+- **More matching, and joining again only what changed (asked 2026-11-11), `CLEANING = 6`:**
+  - TMDB is also searched by the cleaning's other names and with the year as part of the name ("Wonder Woman 1984"), up to 6 searches a title, the likeliest first.
+  - A name spelled a little differently is taken from TMDB when it's of the same year exactly and the only one that close (`via: "tmdbClose"`; 1 letter off for 8+ letters, 2 for 16+, none for shorter names).
+  - A TMDB id, the provider's or the list's, is refused when its year is more than one off and the name differs ("Notebook 2019" had "The Notebook", 2004), and kept ones are checked again.
+  - TMDB's searches and the provider each have their own queue, so the provider's slow answers no longer hold up the searches; turning matching off stops what's queued.
+  - The modern pages join the titles again only for the copies whose match changed (`createFilmMerger`, `createSeriesMerger` in `src/data/titles.ts`; the matcher logs the keys it records). A test checks it gives what a full join gives over 40 random rounds.
+- **Test TV, the user's own source, 2026-11-11, after these:** 9 minutes for 2,157 titles.
+  - **Films: 94.6% (34,831), from 94.4%.** 70 new matches by TMDB's search and 18 by a close spelling. 30 matches by the provider's TMDB id were refused as another year's title, and 42 were replaced by a search match.
+  - Series: unchanged at 87.1%.
+  - Close spellings: 18 of 18 in the sample look right, mostly Spanish and Dutch names with a word dropped ("ES - Paddington Aventura la selva" is Paddington in Peru, "NL: Utoya 22 Juli" Utøya: July 22).
+  - The search sample has about 3 wrong in 40. The worst: "The Anthrax Attacks In the Shadow of 9 11 (2022)" gave "11" (2022), from a guessed name that is only a number. Other names that short should not go to TMDB. Providers' "Multi- : " tag isn't dropped yet.
+  - Frames: still 2–5 a minute over 100 ms, the worst 830–1,150 ms. Joining again only what changed didn't remove them, so most of the time goes after the join: the groups and drawing. To look at next.
+- **Next: the long frames while matching (written 2026-11-11).**
+  - What they are: the TV draws a frame every 16.7 ms when the app's one thread is free. A "long frame" in the probes is a gap over 100 ms between frames: the screen freezes and keys wait. A 900 ms one is about 54 frames dropped at once.
+  - When: only on Movies or Series while a big source is matched (its first import, or after `CLEANING` goes up), each time matches are shown, every few seconds. Now 2–5 a minute, 830–1,150 ms, for the 9–11 minutes it lasts; none once matching ends.
+  - What's known (`join-time` probe, 36,818 films): the full join took about 250 ms and the genre and category rows about 30 ms. Joining again only what changed didn't shorten the frames, so most of the time is after: the hub's groups (`VodHub` loops every title by category, `GroupColumn` gets a new list), the posters' updates, and drawing. Not profiled yet.
+  - Plan:
+    1. Profile a short matching run on the TV with the DevTools Profiler (through the probe's inspector connection; about 2 minutes, with a few hundred titles sent to be matched again), to see how the time splits between working out the lists and drawing.
+    2. If it's the lists: make the groups and rows update only what changed, as the join does. If that's still slow, move the join and grouping to a worker. The worker must send back only what changed (titles moved, groups changed), as copying 37,000 titles between threads would itself cost 100 ms or more.
+    3. If it's drawing: a worker won't help, as only the main thread draws (WebGL). Keep the group list and posters that didn't change, and show new matches at a quiet moment (no key for a few seconds, or when the page is opened again).
+  - Small fixes to make with it:
+    - Guessed names with few letters (such as "11", from "…Shadow of 9 11 (2022)") shouldn't go to TMDB.
+    - Drop the "Multi- : " tag before names.
+    - "Harry-Potter-7-PT1-…" still isn't read.
+  - Probes: `match-measure` (input `source`, the source's name; 10–25 minutes, `PROBE_TIMEOUT=1800`) and `join-time`.
+- **Still to check:** the user looks at the pages and at Settings → About on the TV. The `modern` probe's `wikidata` and `tmdb` inputs haven't been run against the test server, as the test TV's profile has the user's source.
+
 ## A Rust guide importer (tested 2026-11-09)
 
 The user asked whether anything in the app is limited by the processor, and whether Rust built for WebAssembly would help.
@@ -602,6 +757,16 @@ After the guide (above), the channel stage: a big M3U, made by the test server a
 ## Velio Sync, Phase 0 (2026-11-10)
 
 Syncing sources from an account is planned in its own repo, VelioPlatform (its `PLAN.md`). For its first checks the app has `tweetnacl` (1.0.3, plain ES5), exposed to probes as `window.velio.nacl`, and the `sync` probe (`scripts/tv-probe/probes/sync.js`). The probe reaches the sync Worker, opens a made-up account with 3 profiles and 20 lists 5 times, and tries a WebSocket to it. On the test TV, against the Worker on the dev machine, the first open took 231 ms (141 ms of it the signature check) and the median 86 ms; the socket got every message. That is too long for the UI's thread, so the app will do it in a worker, and only when something changed. Results and next steps are in VelioPlatform's `PLAN.md`, "Phase 0 results".
+
+## Velio Sync in the app (2026-11-10)
+
+Built from `SYNC-PLAN.md`, steps 1–7; its "Results" section has the detail. In short: `sync-core` is copied into `src/sync-core/` by `scripts/sync-core/copy.mjs` (checked by `pnpm check`), Settings → Velio account signs the TV in by QR code or typed code, pulls are opened in a worker, the account's lists become read-only sources, profiles each keep their own favourites, edits, watched, reminders and last channel, a WebSocket brings changes within a second, and a TV removed from the account signs itself out. `pnpm test-streams` now serves a made-up account (`/v1/` and `/sync/`), and the `sync-signin` probe drives it.
+
+- **Chromium 47 (Tizen 3), legacy build, against the test server:** sign-in in 131 ms; the first pull opened in the worker in 85–89 ms (231 ms with starting the worker), 15 frames in 266 ms with the worst 17 ms, so no frame dropped. The socket opened at once. A list added on the "web" was a source 0.3 s later; a PIN set there arrived in 0.3 s; removing the TV signed it out within the same second, with the notice.
+- **Test TV**, against the test server: sign-in in 1.6 s; the pull opened in the worker in 201 ms (652 ms with starting it), the worst frame 20 ms; the socket opened at once, and a list added on the "web" was a source 1.5 s later, importing at once. The picker worked with the remote. The visual check is the user's.
+- **Signing in by phone (2026-11-10):** the user scanned the TV's QR code with a phone and approved the TV on the test server's `/pair` page (added for this; at first the QR opened "Not found", as only velio.tv had the page). The TV signed in. Then the keys stopped working: choosing a profile on the picker redraws the app, and the picker's card that had the keys went with it. The app now gives the keys to the menu (or the page, without one) once a profile is chosen; a probe signing in from Settings by key presses then moved through the menu and into the page.
+- **OK on the side menu (2026-11-10, reported by the user):** OK did nothing there; only Right moved into a section. OK now does what Right does (`src/components/SideMenu.tsx`), as in the group columns. On the TV, OK and Right from the menu reached the same node in Live TV and Movies, and OK straight after Down opened the next section and moved into it.
+- **A bug found in the old Chromium:** the build's hex-colour transform also turns `sync-core`'s `PROFILE_COLORS` into numbers, so `ProfileBadge` takes either.
 
 ## What you need before starting
 

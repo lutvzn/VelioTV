@@ -11,11 +11,11 @@ The design, the server, and what each server phase built are in VelioPlatform's 
 | 0 TV checks                       | Done                      | Speed, HTTPS and the socket checked; 2 items left (step 9) |
 | 1 Accounts                        | Deployed                  | Nothing: TVs never sign in with a password                 |
 | 2 Profiles and lists              | Deployed                  | Nothing                                                    |
-| 3 TV sign-in and pull             | Deployed                  | **To do** (steps 1–4)                                      |
-| 4 Profiles on the TV              | Deployed (pictures, PINs) | **To do** (step 5)                                         |
-| 5 Live updates                    | Deployed                  | **To do** (step 6)                                         |
-| 6 Devices                         | Deployed                  | **To do** (step 7): sign out when removed, take new keys   |
-| 7 Hardening                       | Deployed                  | **To do** (step 8): a full run on the TV                   |
+| 3 TV sign-in and pull             | Deployed                  | Built (steps 1–4); the test TV's run is left               |
+| 4 Profiles on the TV              | Deployed (pictures, PINs) | Built (step 5); the test TV's run is left                  |
+| 5 Live updates                    | Deployed                  | Built (step 6); hours-long runs are left                   |
+| 6 Devices                         | Deployed                  | Built (step 7)                                             |
+| 7 Hardening                       | Deployed                  | **To do** (step 8): a full run on the TV against velio.tv  |
 | 8 Legal and abuse                 | Deployed                  | Nothing new: a closed account looks like a removed TV      |
 
 Everything above is deployed on velio.tv (version a0b0e0ed, 2026-11-10), including `POST /v1/signout`. VelioPlatform is a git repo (branch `master`) since 2026-11-10, with no remote yet.
@@ -184,3 +184,30 @@ VelioPlatform's Phase 7 check, on the test TV against velio.tv: **sign up on the
 2. **Which settings are per profile** (step 5).
 3. **Where synced lists sit** in the source list (step 4).
 4. **Restoring a backup on a signed-in TV:** keep the synced sources and sign-in as they are (recommended), or sign out.
+
+## Results (2026-11-10)
+
+Steps 1 to 7 are built, with tests, and run end to end in Chromium 47 against the test server. Step 8 (the full run on the test TV against velio.tv) and step 9's certificate check are left.
+
+**What was built:**
+
+- **Step 1:** `scripts/sync-core/copy.mjs` copies `sync-core` (without `login.ts` and `export.ts`) into `src/sync-core/`; `pnpm check` runs it with `--check`. `newId()` in VelioPlatform no longer uses `replaceAll()`, which Chromium 38 lacks (VelioPlatform's checks pass). `instanceof` isn't relied on: errors cross the worker by name.
+- **Step 2:** `src/data/sync.ts` (what's kept as `velio.sync`, one pull at a time, 304s with no writes, sign-out on 401 or `DeviceRemoved`), `sync.worker.ts` and `syncOpen.ts` (a worker per open). 15 tests against `scripts/test-streams/sync.ts`, a mock `/v1` built from `sync-core`'s server side.
+- **Step 3:** `src/data/pairing.ts` (7 tests) and Settings → Velio account (`AccountPage.tsx`): the QR code (`qrcode-generator` 1.4.4, ES5, error correction M, a GIF `data:` URL, 480 px on a white frame), the typed code, which the voice guide reads out a character at a time in groups, the profiles, the last check, Check for changes, and Sign out (asks twice).
+- **Step 4:** `Source.synced` and `profiles`; `library.applySynced()`; the TV's own sources come first, then the account's (open choice 3). Synced sources open read-only (`SyncedSourcePage.tsx`, "Edited at velio.tv") and have a "Velio" badge. Backups leave them out, and restoring a backup keeps them and the sign-in (open choice 4).
+- **Step 5:** `src/data/profiles.ts` (7 tests). Per-profile keys are `velio.channelEdits`, `velio.watched`, `velio.reminders` and `velio.lastChannel`, as `key@<profile id>`. **The settings stay per TV** (open choice 2): language, clock, start page, scrolling, tracks and the parental PIN, as they're about the TV; a profile's own PIN is set at velio.tv. The TV's data so far is copied to the first profile at the first pull. The picker (`src/pages/Profiles.tsx`) opens at start when there's more than one profile, or one with a PIN; Profiles is in the side menu while there's more than one.
+- **Step 6:** `src/data/syncEvents.ts` (7 tests with a fake socket), connected while signed in and in view.
+- **Step 7:** removal forgets the keys, the synced sources and every profile's data, keeps the TV's own, and shows "This TV was signed out of your Velio account" once (OK opens Settings).
+- **Test server:** `pnpm test-streams` answers `/v1/` and `/v1/events` from the made-up account, with the owner's side as GET requests under `/sync/` (`scripts/test-streams/syncServer.mjs`). The `sync-signin` probe signs in, adds a list, sets a PIN and removes the TV through it.
+
+**Chromium 47, legacy build** (`scripts/old-chrome/run.mjs` with the `sync-signin` probe): sign-in in 131 ms. The pull opened in the worker in 85–89 ms, or 231 ms with starting the worker. That's 15 frames in 266 ms, the worst 17 ms, so step 2's "under 1 s at 60 fps" holds on the oldest Tizen's browser. Choosing a profile showed only its lists, and favourites stayed per profile. A list added on the "web" was a source in 0.3 s through the socket, and a PIN set there arrived in 0.3 s. Removing the TV signed it out within a second, with the notice.
+
+**The test TV** (modern build, against the test server, 2026-11-10): sign-in in 1.6 s. The first pull took 1.3 s in all; the open took 201 ms in the worker (652 ms with starting it), with 42 frames and the worst 20 ms, so the UI kept its 60 fps. The socket opened at once. A list added on the "web" was a source 1.5 s later and its import started at once. The picker opened at start and a profile was chosen with the remote. `webapis.productinfo` needs a privilege the app doesn't have ("Permission denied"), so the TV calls itself "Samsung TV" without its model.
+
+**Left:**
+
+- **QR sign-in from a phone, test TV (2026-11-10):** the user scanned the QR code and approved the TV on `/pair`, the test server's made-up copy of velio.tv's phone page; the TV signed in.
+
+1. The test TV's visual check: the same probe (`./scripts/tv-probe/run.sh <tv-ip> sync-signin '{"step": "signin", "base": "http://<dev machine>:8090", "profiles": "Living room,Kids"}'`), then a look at the Account page, the QR code from a phone at 3 m, the picker and the PIN prompt.
+2. Step 8 against velio.tv, and the socket kept up for hours.
+3. Step 9: the certificate on a 2017 TV.

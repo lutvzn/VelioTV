@@ -10,22 +10,41 @@ import * as db from "./data/db";
 import { createGuideClient } from "./data/guideClient";
 import { importSource } from "./data/importClient";
 import {
+  addons,
   backUpTo,
+  cinemeta,
+  cinemetaUrl,
+  setCinemetaUrl,
+  wikidataUrl,
+  setWikidataUrl,
+  tmdbUrl,
+  setTmdbUrl,
+  tmdbOn,
+  titleMatcher,
+  vodLayout,
   currentBackup,
   edits,
+  events,
   guide,
   guideReader,
   isBlocked,
   library,
   lineup,
   liveView,
+  profiles,
   reminders,
   restoreFrom,
   settings,
+  shownSources,
+  sync,
   vod,
   watched,
 } from "./library";
 import { settingsCopy } from "./data/settingsCopy";
+import { mergeFilms, mergeSeries } from "./data/titles";
+import { cleanTitle, nameKey } from "./stremio/cinemeta";
+import { startPairing, tvName, waitForOwner } from "./data/pairing";
+import { lastOpen } from "./data/syncOpen";
 import { handPlay } from "./play/session";
 import { player, secondPlayer } from "./player";
 import { $t, language } from "./translate";
@@ -57,6 +76,33 @@ const hooks: Record<string, unknown> = {
   watched,
   reminders,
   handPlay,
+  /** Velio Sync (SYNC-PLAN.md): the sign-in, profiles and live updates, for the sync-signin probe. */
+  sync,
+  profiles,
+  events,
+  shownSources,
+  /** The current profile's Stremio add-ons, for the `stremio` probe. */
+  addons,
+  /** The modern Movies and Series (PLAN.md, "Movies and Series by title"), for the `modern` probe. */
+  cinemeta,
+  cinemetaUrl,
+  setCinemetaUrl,
+  wikidataUrl,
+  setWikidataUrl,
+  tmdbUrl,
+  setTmdbUrl,
+  tmdbOn,
+  titleMatcher,
+  vodLayout,
+  /** The modern layout's joining of titles (src/data/titles.ts), to time it. */
+  mergeFilms,
+  mergeSeries,
+  /** The names as matching cleans them, for trying other ways to match. */
+  cleanTitle,
+  nameKey,
+  pairing: { startPairing, tvName, waitForOwner },
+  /** How long the last pull took to open, in the worker and in all. */
+  syncOpen: lastOpen,
   /** TweetNaCl, as the app's build has it, for the `sync` probe (Velio Sync, Phase 0). */
   nacl,
   /** The app's text, and the language it shows (settings.setLanguage() picks one). */

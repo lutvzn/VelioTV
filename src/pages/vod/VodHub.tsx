@@ -27,6 +27,10 @@ import { Facts } from "./FilmPanel";
 // row's first poster, or Back, shows the menu and the column again, moving
 // the page right of them. Only the grid's rows near the cursor are drawn, so
 // 2,000 films cost the same as 20.
+//
+// The Stremio add-ons' catalogs (src/stremio/) come after the categories,
+// each a group that asks for more as the cursor nears its end (onNearEnd),
+// and their search results join the search group's (searchItems).
 
 const PAGE_WIDTH = 1920;
 const LEFT = 64;
@@ -80,7 +84,15 @@ interface Group<T> {
   id: string;
   label: string;
   items: T[];
+  /** Asking for its titles, or more of them. */
+  loading?: boolean;
 }
+
+/** A group the page gives, such as an add-on's catalog. */
+export type ExtraGroup<T> = Group<T>;
+
+/** Rows from a group's end at which more is asked for. */
+const MORE_ROWS = 3;
 
 /** Where the page was, to come back to after watching. */
 export interface HubPlace {
@@ -102,6 +114,15 @@ export interface VodHubProps<T extends HubItem> {
   loading: boolean;
   /** Says there's nothing, and how to get something. */
   emptyText: string;
+  /** Groups after the categories, such as add-ons' catalogs; shown once they have titles, or while loading. */
+  extraGroups?: ExtraGroup<T>[];
+  /** The cursor is near the end of an extra group (or it's shown with none): ask for more. */
+  onNearEnd?: (groupId: string) => void;
+  /** More search results, such as from add-ons, after the page's own; and whether they're coming. */
+  searchItems?: T[];
+  searching?: boolean;
+  /** The search typed, for the page to ask others with. */
+  onQuery?: (query: string) => void;
   /** A title's details for the top of the page; asked for once the cursor rests on it. */
   details: (item: T) => Promise<HeroInfo>;
   onOpen: (item: T) => void;
@@ -128,8 +149,13 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   const [query, setQuery] = createSignal(props.place?.query ?? "");
   const results = createMemo(() => {
     const words = fold(query()).split(/\s+/).filter(Boolean);
-    return words.length === 0 ? [] : props.items.filter(item => matches(item.name, words));
+    if (words.length === 0) return [];
+    const own = props.items.filter(item => matches(item.name, words));
+    const seen = new Set(own.map(item => item.key));
+    return [...own, ...(props.searchItems ?? []).filter(item => !seen.has(item.key))];
   });
+  createEffect(on(query, typed => props.onQuery?.(typed), { defer: !props.place?.query }));
+  const extras = () => (props.extraGroups ?? []).filter(one => one.items.length > 0 || one.loading);
   const groups = createMemo((): Group<T>[] => {
     const byCategory = new Map<string, T[]>();
     for (const item of props.items) {
@@ -140,7 +166,14 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
     }
     return [
       ...(query()
-        ? [{ id: SEARCH, label: $t("guide.searchResults", { query: query() }), items: results() }]
+        ? [
+            {
+              id: SEARCH,
+              label: $t("guide.searchResults", { query: query() }),
+              items: results(),
+              loading: props.searching,
+            },
+          ]
         : []),
       ...(props.continueItems.length > 0
         ? [{ id: CONTINUE, label: $t("vod.continue"), items: props.continueItems }]
@@ -149,6 +182,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
       ...props.categories
         .filter(name => byCategory.has(name))
         .map(name => ({ id: `category:${name}`, label: name, items: byCategory.get(name) ?? [] })),
+      ...extras(),
     ];
   });
 
@@ -243,7 +277,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
     );
   onCleanup(stopHold);
 
-  const empty = () => props.items.length === 0 && props.continueItems.length === 0;
+  const empty = () => props.items.length === 0 && props.continueItems.length === 0 && extras().length === 0;
   // With no titles at all (or while they load) the menu keeps the keys.
   markEmpty(empty);
   // The menu and the column show unless you're moving through the posters;
@@ -350,11 +384,12 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
           : [cursorGroup()?.label, $tn("count.titles", cursorGroup()?.items.length ?? 0)];
       const item = current();
       if (!item) {
-        const why = props.loading
-          ? $t("vod.loading")
-          : currentId() === SEARCH
-            ? $t("vod.noMatches", { query: query() })
-            : props.emptyText;
+        const why =
+          props.loading || group()?.loading
+            ? $t("vod.loading")
+            : currentId() === SEARCH
+              ? $t("vod.noMatches", { query: query() })
+              : props.emptyText;
         return [group()?.label, why];
       }
       return [
@@ -375,6 +410,14 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
     placeAt(row * COLUMNS + (at() % COLUMNS));
     return true;
   };
+  // An extra group asks for more as the cursor nears its end, and for its
+  // first titles when it's shown with none.
+  createEffect(() => {
+    const shownGroup = group();
+    if (!shownGroup || shownGroup.loading || !props.extraGroups?.some(one => one.id === shownGroup.id))
+      return;
+    if (gridRow() >= rowCount() - MORE_ROWS) props.onNearEnd?.(shownGroup.id);
+  });
   const holdRows = (event: KeyboardEvent, step: number) =>
     moveWhileHeld(
       event,
@@ -528,10 +571,12 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
               {group()?.label ?? ""}
             </Text>
             <Text fontSize={24} color={colors.textFaint}>
-              {$tn("count.titles", items().length)}
+              {group()?.loading && items().length === 0
+                ? $t("vod.loading")
+                : $tn("count.titles", items().length)}
             </Text>
           </View>
-          <Show when={items().length === 0 && currentId() === SEARCH}>
+          <Show when={items().length === 0 && currentId() === SEARCH && !group()?.loading}>
             <Text x={LEFT} y={GRID_Y + 20} fontSize={28} color={colors.textDim}>
               {$t("vod.noMatches", { query: query() })}
             </Text>

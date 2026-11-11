@@ -5,6 +5,8 @@
 import { createSignal } from "solid-js";
 import { PIN_LENGTH } from "./data/appSettings";
 import { settings } from "./library";
+import type { DeviceProfile } from "./sync-core/device";
+import { profilePinMatches } from "./sync-core/records";
 import { $t } from "./translate";
 
 export interface PinRequest {
@@ -56,3 +58,12 @@ export const askNewPin = async () => {
 };
 
 export { PIN_LENGTH };
+
+/** Asks for a profile's PIN, set at velio.tv; resolves true at once when it has none. */
+export const askProfilePin = async (profile: DeviceProfile) => {
+  if (!profile.pin) return true;
+  const pin = await prompt($t("profiles.pin", { name: profile.name }), typed =>
+    profilePinMatches(profile, typed),
+  );
+  return pin !== undefined;
+};

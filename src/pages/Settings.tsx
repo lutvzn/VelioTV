@@ -2,34 +2,43 @@ import { Text, View } from "@solidtv/solid";
 import { Column } from "@solidtv/solid/primitives";
 import { createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
 import { FormButton } from "../components/Form";
-import type { Source } from "../data/sources";
+import { sourcesFor, type Source } from "../data/sources";
 import { exposeToProbes } from "../devHooks";
-import { library } from "../library";
+import { library, profiles } from "../library";
 import { $t, type TextKey } from "../translate";
+import { AccountPage } from "./settings/AccountPage";
+import { AddonsPage } from "./settings/AddonsPage";
 import { AppPage } from "./settings/AppPage";
 import { BackupPage } from "./settings/BackupPage";
 import { HiddenPage } from "./settings/HiddenPage";
 import { PinPage } from "./settings/PinPage";
 import { RemindersPage } from "./settings/RemindersPage";
 import { ScrollingPage } from "./settings/ScrollingPage";
+import { AboutPage } from "./settings/AboutPage";
 import { SourceForm } from "./settings/SourceForm";
+import { SyncedSourcePage } from "./settings/SyncedSourcePage";
 import { progressFraction, statusLines } from "./settings/status";
 import { Glow } from "../components/Glow";
 import { BOLD, colors, radius, RING } from "../theme";
 
 // Settings: the sources, in the order the lineup takes them, then pages for
 // hidden channels and groups, the parental PIN, the app's own settings,
-// backup and restore (PLAN.md, Phase 5), and the reminders (Phase 6). Each opens in the list's place, and
-// Back comes back to the row it was opened from.
+// backup and restore (PLAN.md, Phase 5), the reminders (Phase 6) and the
+// Velio account (SYNC-PLAN.md) and its Stremio add-ons. Each opens in the list's place, and Back
+// comes back to the row it was opened from. The sources are the ones the
+// current profile sees: the TV's own, then its account lists, read-only.
 
-type Page = "hidden" | "pin" | "app" | "scrolling" | "reminders" | "backup";
+type Page = "account" | "addons" | "hidden" | "pin" | "app" | "scrolling" | "reminders" | "backup" | "about";
 const PAGES: { page: Page; label: TextKey }[] = [
+  { page: "account", label: "settings.account" },
+  { page: "addons", label: "settings.addons" },
   { page: "hidden", label: "settings.hidden" },
   { page: "pin", label: "settings.pin" },
   { page: "app", label: "settings.app" },
   { page: "scrolling", label: "settings.scrolling" },
   { page: "reminders", label: "settings.reminders" },
   { page: "backup", label: "settings.backup" },
+  { page: "about", label: "settings.about" },
 ];
 
 const LEFT = 64;
@@ -115,7 +124,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
         flexBoundary="contain"
         padding={[0, 16]}
         borderRadius={18}
-        color={props.source.disabled ? colors.surfaceRaised : colors.accentWash}
+        color={props.source.disabled && !props.source.synced ? colors.surfaceRaised : colors.accentWash}
       >
         <Text
           height={36}
@@ -123,9 +132,14 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
           fontSize={20}
           fontFamily={BOLD}
           letterSpacing={2}
-          color={props.source.disabled ? colors.textDim : colors.accentText}
+          color={props.source.disabled && !props.source.synced ? colors.textDim : colors.accentText}
         >
-          {(props.source.disabled ? $t("source.off") : $t("source.on")).toUpperCase()}
+          {(props.source.synced
+            ? $t("source.syncedBadge")
+            : props.source.disabled
+              ? $t("source.off")
+              : $t("source.on")
+          ).toUpperCase()}
         </Text>
       </View>
       <Text
@@ -172,6 +186,9 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
   );
 };
 
+/** The sources the current profile sees, in order. */
+const shownList = () => sourcesFor(library.sources(), profiles.currentId());
+
 const SourceList = (props: {
   /** The row to select, for coming back from the form. */
   selected: number;
@@ -195,7 +212,7 @@ const SourceList = (props: {
           selected={props.selected}
           autofocus={props.autofocus}
         >
-          <For each={library.sources()}>
+          <For each={shownList()}>
             {(source, index) => (
               <SourceRow source={source} now={now()} onEnter={() => props.onOpen(index(), source.id)} />
             )}
@@ -203,9 +220,9 @@ const SourceList = (props: {
           <FormButton
             label={$t("settings.addSource")}
             width={LIST_WIDTH}
-            onEnter={() => props.onOpen(library.sources().length)}
+            onEnter={() => props.onOpen(shownList().length)}
           />
-          <Show when={library.sources().length === 0}>
+          <Show when={shownList().length === 0}>
             <Text width={LIST_WIDTH} contain="width" fontSize={28} color={colors.textDim} skipFocus>
               {$t("settings.noSources")}
             </Text>
@@ -229,7 +246,7 @@ const SourceList = (props: {
                 label={$t(entry.label)}
                 width={LIST_WIDTH}
                 opens
-                onEnter={() => props.onPage(library.sources().length + 1 + at(), entry.page)}
+                onEnter={() => props.onPage(shownList().length + 1 + at(), entry.page)}
               />
             )}
           </For>
@@ -291,6 +308,12 @@ export default () => {
         }
       >
         <Switch>
+          <Match when={page() === "account"}>
+            <AccountPage onClose={close} />
+          </Match>
+          <Match when={page() === "addons"}>
+            <AddonsPage onClose={close} />
+          </Match>
           <Match when={page() === "hidden"}>
             <HiddenPage onClose={close} />
           </Match>
@@ -308,6 +331,12 @@ export default () => {
           </Match>
           <Match when={page() === "backup"}>
             <BackupPage onClose={close} />
+          </Match>
+          <Match when={page() === "about"}>
+            <AboutPage onClose={close} />
+          </Match>
+          <Match when={editing() && library.sources().find(source => source.id === editing())?.synced}>
+            <SyncedSourcePage id={editing() ?? ""} onClose={close} />
           </Match>
           <Match when={editing() !== undefined}>
             <SourceForm id={editing() ?? undefined} onClose={close} />

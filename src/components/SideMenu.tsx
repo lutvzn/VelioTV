@@ -85,7 +85,8 @@ interface SideMenuProps {
 /**
  * The menu: a rail of icons on the left that widens over the page, with the
  * sections' names, while it has the focus. The section under the cursor
- * opens once the cursor rests (`CURSOR_REST_MS`), or at once on Right.
+ * opens once the cursor rests (`CURSOR_REST_MS`), or at once on Right or
+ * OK, which also move into it.
  */
 export const SideMenu = (props: SideMenuProps) => {
   // Follows the page, which can also change from the pages themselves.
@@ -191,6 +192,8 @@ export const SideMenu = (props: SideMenuProps) => {
           cursor.move(props.sections[index].path);
         }}
         onRight={onRight}
+        // OK too, as in the group columns beside the guide and the posters.
+        onEnter={onRight}
         onBack={props.onBack}
       >
         <For each={props.sections}>

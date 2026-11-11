@@ -22,6 +22,16 @@ export interface CatchupPlay {
   fromLive?: boolean;
 }
 
+/** A subtitle file from a Stremio add-on, which the player page reads and draws (src/play/externalSubtitles.ts). */
+export interface ExternalSubtitle {
+  id: string;
+  url: string;
+  /** As the add-on gives it, such as "eng". */
+  language: string;
+  /** Which add-on has it. */
+  from: string;
+}
+
 export interface VodPlay {
   kind: "vod";
   /** What it is, as the resume list keeps it (src/data/watched.ts). */
@@ -33,6 +43,8 @@ export interface VodPlay {
   next?: () => Promise<VodPlay | undefined>;
   /** The page Back returns to. */
   back: "/movies" | "/series";
+  /** Subtitle files from add-ons, asked for as it starts. */
+  subtitles?: () => Promise<ExternalSubtitle[]>;
 }
 
 export type PlayRequest = CatchupPlay | VodPlay;

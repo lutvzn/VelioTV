@@ -7,6 +7,7 @@
 
 import type { ImportState } from "./db";
 import type { ImportRequest } from "./importer";
+import type { SyncedList } from "../sync-core/records";
 import { normalizeServer } from "./xtream";
 
 export type SourceKind = "m3u" | "xtream";
@@ -27,10 +28,40 @@ export interface Source {
   refreshHours: number;
   /** Turned off: kept, with its data, but out of the lineup and not refreshed. */
   disabled?: boolean;
+  /**
+   * From the Velio account the TV is signed in to (src/data/sync.ts), and
+   * edited there: the TV doesn't change it, and a pull replaces it.
+   */
+  synced?: true;
+  /** A synced list's profiles on this TV, by id: the lineups it is in. */
+  profiles?: string[];
 }
 
 /** A source's settings, as the form edits them. */
-export type SourceDraft = Omit<Source, "id">;
+export type SourceDraft = Omit<Source, "id" | "synced" | "profiles">;
+
+/** A list from the account as a source, used by these profiles. Not a Stremio add-on (src/stremio/). */
+export const syncedSource = (list: SyncedList, profiles: string[]): Source => {
+  const source: Source = {
+    id: list.id,
+    name: list.name,
+    kind: list.kind === "xtream" ? "xtream" : "m3u",
+    refreshHours: list.refreshHours > 0 ? list.refreshHours : DEFAULT_REFRESH_HOURS,
+    synced: true,
+    profiles,
+  };
+  for (const key of ["url", "server", "username", "password"] as const) {
+    const text = list[key];
+    if (text) source[key] = text;
+  }
+  if (list.guideUrls && list.guideUrls.length > 0) source.guideUrls = list.guideUrls.slice();
+  if (list.disabled) source.disabled = true;
+  return source;
+};
+
+/** The sources a profile's lineup has: the TV's own, and the synced ones the profile uses. */
+export const sourcesFor = (sources: readonly Source[], profile: string | undefined) =>
+  sources.filter(source => !source.synced || (profile !== undefined && source.profiles?.includes(profile)));
 
 const HOUR = 3_600_000;
 export const REFRESH_CHOICES = [6, 12, 24, 48, 168];
@@ -63,6 +94,12 @@ const readSource = (value: unknown): Source | undefined => {
     if (text !== undefined) source[key] = text;
   }
   if (value.disabled === true) source.disabled = true;
+  if (value.synced === true) {
+    source.synced = true;
+    source.profiles = Array.isArray(value.profiles)
+      ? value.profiles.filter((id): id is string => typeof id === "string")
+      : [];
+  }
   if (Array.isArray(value.guideUrls)) {
     const urls = value.guideUrls.filter((url): url is string => typeof url === "string" && url !== "");
     if (urls.length > 0) source.guideUrls = urls;

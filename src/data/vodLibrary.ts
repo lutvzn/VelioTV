@@ -22,16 +22,31 @@ import { ensureFetch } from "../polyfills/fetch";
 
 ensureFetch();
 
+/** A title from a Stremio add-on (src/stremio/): its type and id there. */
+export interface StremioTitle {
+  type: "movie" | "series";
+  id: string;
+}
+
 export interface FilmEntry extends Film {
+  /** The source's id, or the add-on's list id for one from an add-on. */
   source: string;
-  /** "<source>/m:<id>", as the resume list keys it. */
+  /** "<source>/m:<id>", as the resume list keys it; "stremio:movie:<id>" from an add-on. */
   key: string;
+  stremio?: StremioTitle;
 }
 
 export interface SeriesEntry extends Series {
   source: string;
-  /** "<source>/s:<id>" */
+  /** "<source>/s:<id>"; "stremio:series:<id>" from an add-on. */
   key: string;
+  stremio?: StremioTitle;
+}
+
+/** Details of the add-ons' titles, which the add-ons give (src/stremio/vodEntries.ts). */
+export interface AddonDetails {
+  film: (film: FilmEntry) => Promise<FilmDetails>;
+  series: (show: SeriesEntry) => Promise<SeriesDetails>;
 }
 
 export interface VodLibraryOptions {
@@ -40,6 +55,7 @@ export interface VodLibraryOptions {
   read?: (source: string) => Promise<StoredVod>;
   fetch?: typeof fetch;
   dbName?: string;
+  addons?: AddonDetails;
 }
 
 const versionOf = (state: ImportState) => `${state.status}:${state.startedAt}`;
@@ -157,14 +173,27 @@ export const createVodLibrary = (options: VodLibraryOptions) =>
 
       /** A film's details; an M3U film has none. */
       filmDetails: (film: FilmEntry): Promise<FilmDetails> => {
+        if (film.stremio) return options.addons?.film(film) ?? Promise.resolve({});
         const login = loginOf(sourceOf(film.source));
         const id = film.providerId;
         if (!login || !id) return Promise.resolve({});
         return cached(filmInfo, film.key, () => xtreamFilmInfo(login, id, fetcher));
       },
 
+      /**
+       * A film's TMDB id from its Xtream account, which the list of films
+       * doesn't give, for matching it to Cinemeta. Not kept.
+       */
+      filmTmdb: async (film: FilmEntry): Promise<number | undefined> => {
+        const login = loginOf(sourceOf(film.source));
+        const id = film.providerId;
+        if (film.stremio || !login || !id) return undefined;
+        return (await xtreamFilmInfo(login, id, fetcher)).tmdb;
+      },
+
       /** A series' details and episodes: an M3U series has its episodes already. */
       seriesDetails: (show: SeriesEntry): Promise<SeriesDetails> => {
+        if (show.stremio) return options.addons?.series(show) ?? Promise.resolve({ seasons: [] });
         if (show.episodes) return Promise.resolve({ plot: show.plot, seasons: seasonsOf(show.episodes) });
         const login = loginOf(sourceOf(show.source));
         const id = show.providerId;

@@ -10,6 +10,8 @@ import {
   refreshDue,
   saveSources,
   sourceProblem,
+  sourcesFor,
+  syncedSource,
   splitGuideUrls,
   type Source,
 } from "./sources";
@@ -140,5 +142,52 @@ describe("guideBudget", () => {
     expect(guideBudget(100, 2, 40)).toBe(60);
     expect(guideBudget(100, 2, 70)).toBe(50);
     expect(guideBudget(100, 5, 100)).toBe(20);
+  });
+});
+
+describe("synced lists", () => {
+  it("become sources that keep their id, profiles and settings", () => {
+    const source = syncedSource(
+      {
+        format: 1,
+        id: "list-1",
+        rev: 3,
+        name: "Account list",
+        kind: "xtream",
+        server: "http://xtream.example.invalid",
+        username: "u",
+        password: "p",
+        guideUrls: ["http://guide.example.invalid/a.xml"],
+        refreshHours: 12,
+        disabled: true,
+      },
+      ["p1"],
+    );
+    expect(source).toEqual({
+      id: "list-1",
+      name: "Account list",
+      kind: "xtream",
+      server: "http://xtream.example.invalid",
+      username: "u",
+      password: "p",
+      guideUrls: ["http://guide.example.invalid/a.xml"],
+      refreshHours: 12,
+      disabled: true,
+      synced: true,
+      profiles: ["p1"],
+    });
+    const storage = memoryStorage();
+    saveSources(storage, [source]);
+    expect(loadSources(storage)).toEqual([source]);
+  });
+
+  it("are in the lineups of their profiles only, with the TV's own sources in every one", () => {
+    const own = { id: "own", name: "Own", kind: "m3u" as const, url: "http://a.invalid", refreshHours: 24 };
+    const shared = { ...own, id: "s", synced: true as const, profiles: ["p1", "p2"] };
+    const kids = { ...own, id: "k", synced: true as const, profiles: ["p2"] };
+    const all = [own, shared, kids];
+    expect(sourcesFor(all, "p1").map(s => s.id)).toEqual(["own", "s"]);
+    expect(sourcesFor(all, "p2").map(s => s.id)).toEqual(["own", "s", "k"]);
+    expect(sourcesFor(all, undefined).map(s => s.id)).toEqual(["own"]);
   });
 });

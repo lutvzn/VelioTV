@@ -55,9 +55,17 @@
 //   /fs/<id>/index-<s>-<seconds>.m3u8,                     and its archive
 //   /fs/<id>/timeshift_abs-<s>.ts
 //   /timeshift/...                                         Xtream (xtream.mjs)
+// A made-up Stremio add-on over the same films and series (stremio.mjs):
+//   /stremio/manifest.json
+// and a made-up Cinemeta, Wikidata and TMDB, for the modern Movies and Series:
+//   /cinemeta/manifest.json
+//   /wikidata/sparql
+//   /tmdb/3
 // /catchup/log lists the last recordings asked for, to check their times.
 // /echo answers with the request's method and headers, to see which headers
 // a TV really sends.
+// A made-up Velio Sync account (syncServer.mjs) answers /v1/ as velio.tv
+// does, with the owner's side under /sync/ and the phone's /pair page.
 // /backup/<name>.json keeps an app backup (PLAN.md, Phase 5, step 7): PUT
 // stores it, in memory until the server stops, and GET answers with it.
 // /backup/sample.json is a made-up one, with a 50-channel playlist from
@@ -95,6 +103,8 @@ import {
   sources,
   subtitles,
 } from "./streams.mjs";
+import { handleSync, upgradeSync } from "./syncServer.mjs";
+import { handleCinemeta, handleStremio, handleTmdb, handleWikidata } from "./stremio.mjs";
 import { handleXtream } from "./xtream.mjs";
 import { backdropSvg, FILM_SECONDS, filmSubtitles, posterSvg, vodLibrary, vodLines } from "./vod.mjs";
 
@@ -541,8 +551,18 @@ const index = host => {
       stalker: { portal: `${base}/c/`, macs: ["00:1A:79:00:00:01", `00:1A:79:00:00:02 (${SMALL} channels)`] },
     },
     backup: { sample: `${base}/backup/sample.json`, yours: `${base}/backup/<name>.json` },
+    sync: {
+      site: base,
+      pair: `${base}/pair`,
+      account: `${base}/sync/`,
+      approve: `${base}/sync/approve?code=<code>&profiles=Kids,Guest`,
+    },
     film: ["mp4", "mkv", "ts", "m3u8"].map(ext => `${base}/vod/film.${ext}`),
     filmSubtitles: ["srt", "vtt"].map(ext => `${base}/vod/film.${ext}`),
+    stremioAddon: `${base}/stremio/manifest.json`,
+    cinemeta: `${base}/cinemeta/manifest.json`,
+    wikidata: `${base}/wikidata/sparql`,
+    tmdb: `${base}/tmdb/3`,
     catchupLog: `${base}/catchup/log`,
   };
 };
@@ -834,6 +854,11 @@ const handle = (req, res) => {
     return send(res, 200, JSON.stringify({ method: req.method, headers: req.headers }), "application/json");
   }
   const base = `http://${req.headers.host ?? "localhost"}`;
+  if (handleSync(req, res, url, base)) return;
+  if (handleStremio(res, url, base, send)) return;
+  if (handleCinemeta(res, url, base, send)) return;
+  if (handleWikidata(res, url, send)) return;
+  if (handleTmdb(res, url, send)) return;
   if (serveBackup(req, res, url, base)) return;
   if (serveSource(req, res, url, base)) return;
   if (serveFilm(req, res, url) || serveCatchup(req, res, url)) return;
@@ -908,7 +933,11 @@ for (const stream of STREAMS) await encodeClip(stream);
 await encodeFilm();
 for (const stream of STREAMS) startHls(stream);
 
-http.createServer(handle).listen(PORT, () => {
+const server = http.createServer(handle);
+server.on("upgrade", (req, socket) => {
+  if (!upgradeSync(req, socket, `http://${req.headers.host ?? "localhost"}`)) socket.destroy();
+});
+server.listen(PORT, () => {
   const addresses = Object.values(networkInterfaces())
     .flat()
     .filter(address => address?.family === "IPv4" && !address.internal)

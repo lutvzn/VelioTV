@@ -16,12 +16,14 @@ export interface Table<T> {
 
 /** A series' episodes are stored apart, in one table: this is how many are its. */
 type StoredSeries = Omit<Series, "episodes"> & { episodes?: number };
+/** Only an add-on's episodes have a Stremio id, and they aren't stored. */
+type StoredEpisode = Omit<Episode, "stremio" | "links">;
 
 export interface VodColumns {
   films: Table<Film>;
   series: Table<StoredSeries>;
   /** Every series' episodes, a series after another, in the order of `series`. */
-  episodes: Table<Episode>;
+  episodes: Table<StoredEpisode>;
 }
 
 // The import's worker runs as ES5 (PLAN.md, Phase 8, step 4), so these loop
@@ -86,9 +88,10 @@ const seriesTables = (series: readonly Series[]) => {
     year: columnOf(count),
     plot: columnOf(count),
     providerId: columnOf(count),
+    tmdb: columnOf(count),
     episodes: columnOf(count),
   };
-  const episodes: Columns<Episode> = {
+  const episodes: Columns<StoredEpisode> = {
     id: [],
     season: [],
     episode: [],
@@ -109,6 +112,7 @@ const seriesTables = (series: readonly Series[]) => {
     all.year[i] = show.year ?? null;
     all.plot[i] = show.plot ?? null;
     all.providerId[i] = show.providerId ?? null;
+    all.tmdb[i] = show.tmdb ?? null;
     const own = show.episodes;
     all.episodes[i] = own ? own.length : null;
     if (!own) continue;
@@ -186,6 +190,7 @@ export const fromVodColumns = (columns: VodColumns): Pick<StoredVod, "films" | "
       plot: s.plot?.[i] ?? undefined,
       episodes,
       providerId: s.providerId?.[i] ?? undefined,
+      tmdb: s.tmdb?.[i] ?? undefined,
     };
   }
   return { films, series };

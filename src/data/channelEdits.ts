@@ -145,6 +145,8 @@ export const createChannelEdits = (options: { storage: Storage; newKey?: () => s
       all: edits,
       /** Replaces everything, as a restore does. */
       replace: (next: ChannelEdits) => save(readEdits(next)),
+      /** Reads them again from storage, such as for another profile (src/data/profiles.ts). */
+      reload: () => setEdits(load(options.storage)),
 
       // Favourites.
       favourites: () => edits().favourites,

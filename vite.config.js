@@ -3,12 +3,32 @@ import solidPlugin from "vite-plugin-solid";
 import hexColorTransform from "@lightningtv/vite-hex-transform";
 import legacy from "@vitejs/plugin-legacy";
 import path from "path";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { playwright } from "@vitest/browser-playwright";
 import deviceConfigPlugin from "./devices/deviceConfigPlugin.js";
 import { lowerChunks, workerPolyfills } from "./scripts/build/oldTvs.mjs";
 
 const envDir = "./environments";
+
+/**
+ * The TMDB key for matching titles (src/stremio/tmdb.ts), from TMDB_API_KEY
+ * in the environment or the git-ignored .env, read on its own: Vite's env
+ * files are in environments/, and nothing else in .env goes in the build.
+ * Without it, the app matches without TMDB.
+ */
+const tmdbKey = () => {
+  if (process.env.TMDB_API_KEY) return process.env.TMDB_API_KEY;
+  if (!existsSync(".env")) return "";
+  const line = readFileSync(".env", "utf8")
+    .split(/\r?\n/)
+    .find(one => one.startsWith("TMDB_API_KEY="));
+  return line
+    ? line
+        .slice("TMDB_API_KEY=".length)
+        .trim()
+        .replace(/^["']|["']$/g, "")
+    : "";
+};
 // webOS 3's Chromium; Tizen 3 has 47.
 const OLDEST_CHROME = "chrome >= 38";
 
@@ -28,6 +48,7 @@ export default defineConfig(({ mode }) => {
     envDir,
     define: {
       __DEV__: mode !== "production",
+      __TMDB_KEY__: JSON.stringify(mode === "test" ? "" : tmdbKey()),
     },
     plugins: [
       deviceConfigPlugin(targetDevice),

@@ -31,6 +31,7 @@
 // A source's films and series are one record too, in columns (vod.ts,
 // vodColumns.ts; PLAN.md, Phase 6).
 
+import type { MatchRecord } from "./titleMatches";
 import { type ChannelColumns, fromColumns, type StoredChannel, toColumns } from "./channelList";
 import { DAY, decodeBlock, type StoredProgramme } from "./guideCodec";
 import { ensureGetAll, keyCursor } from "../polyfills/indexedDb";
@@ -44,8 +45,8 @@ export { DAY, type StoredChannel, type StoredProgramme };
 ensureGetAll();
 
 export const DB_NAME = "velio";
-const VERSION = 6;
-const STORES = ["imports", "channelLists", "guide", "guideIndex", "guides", "vod"];
+const VERSION = 7;
+const STORES = ["imports", "channelLists", "guide", "guideIndex", "guides", "vod", "titleMatches"];
 
 /** How a source's last import went. */
 export interface ImportState {
@@ -221,6 +222,9 @@ export const openDb = (name = DB_NAME): Promise<IDBDatabase> => {
     // Version 4 adds films and series, keeping what version 3 holds; they
     // come with each source's next import.
     if (!db.objectStoreNames.contains("vod")) db.createObjectStore("vod", { keyPath: "source" });
+    // Version 7 adds each source's titles matched to Cinemeta (src/data/titleMatches.ts).
+    if (!db.objectStoreNames.contains("titleMatches"))
+      db.createObjectStore("titleMatches", { keyPath: "source" });
     if (event.oldVersion < 6) {
       // Version 5 stored the guide in blocks, and version 6 in blocks of two
       // parts, keyed by the guide rather than the source. The guide from
@@ -452,6 +456,17 @@ export const deleteSource = async (db: IDBDatabase, source: string) => {
   }
   transaction.objectStore("channelLists").delete(source);
   transaction.objectStore("vod").delete(source);
+  transaction.objectStore("titleMatches").delete(source);
   imports.delete(source);
+  await finished(transaction);
+};
+
+/** Each source's titles matched to Cinemeta (src/data/titleMatches.ts). */
+export const readTitleMatches = (db: IDBDatabase) =>
+  request<MatchRecord[]>(db.transaction("titleMatches").objectStore("titleMatches").getAll());
+
+export const writeTitleMatches = async (db: IDBDatabase, record: MatchRecord) => {
+  const transaction = writeTransaction(db, "titleMatches");
+  transaction.objectStore("titleMatches").put(record);
   await finished(transaction);
 };

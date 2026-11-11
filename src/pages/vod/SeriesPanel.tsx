@@ -48,12 +48,14 @@ export const SeriesPanel = (props: {
   show: SeriesEntry;
   onClose: () => void;
   onPlay: (details: SeriesDetails, episode: Episode, startMs?: number) => void;
+  /** Its details and episodes, if not the library's, as every copy's joined (src/data/titles.ts). */
+  load?: (show: SeriesEntry) => Promise<SeriesDetails>;
 }) => {
   let root: ElementNode | undefined;
   const [focused, setFocused] = createSignal(false);
   const [details] = createResource(
     () => props.show,
-    show => vod.seriesDetails(show).catch((): SeriesDetails => ({ seasons: [] })),
+    show => (props.load ?? vod.seriesDetails)(show).catch((): SeriesDetails => ({ seasons: [] })),
   );
   const seasons = () => details()?.seasons ?? [];
   const [seasonAt, setSeasonAt] = createSignal(0);

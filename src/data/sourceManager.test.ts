@@ -306,4 +306,85 @@ describe("the source manager", () => {
     expect(await readChannels(db, source.id)).toEqual([]);
     db.close();
   });
+
+  it("puts the account's lists after the TV's own, and imports the new and changed ones", async () => {
+    const storage = memoryStorage();
+    const { importer, requests } = recording();
+    manager = createSourceManager({ dbName: DB, storage, importer });
+    const own = manager.add(draft("Own", `${BASE}/b.m3u`));
+    await manager.whenIdle();
+    const list = (id: string, url: string, profiles = ["p1"]): Source => ({
+      ...draft(id.toUpperCase(), url),
+      id,
+      synced: true,
+      profiles,
+    });
+
+    await manager.applySynced([list("s1", `${BASE}/a.m3u`), list("s2", `${BASE}/b.m3u`, ["p1", "p2"])]);
+    await manager.whenIdle();
+    expect(manager.sources().map(s => s.id)).toEqual([own.id, "s1", "s2"]);
+    expect(requests.map(r => r.source)).toEqual([own.id, "s1", "s2"]);
+    // Kept as they came, with their profiles.
+    expect(loadSources(storage)[2]).toMatchObject({ id: "s2", synced: true, profiles: ["p1", "p2"] });
+
+    // The same again imports nothing; a renamed one neither; a new address does.
+    await manager.applySynced([
+      { ...list("s1", `${BASE}/a.m3u`), name: "Renamed" },
+      list("s2", `${BASE}/a.m3u`, ["p2"]),
+    ]);
+    await manager.whenIdle();
+    expect(requests.slice(3).map(r => r.source)).toEqual(["s2"]);
+    expect(manager.sources()[1].name).toBe("Renamed");
+
+    // The TV can't edit, move or turn them off.
+    manager.update("s1", draft("Mine", `${BASE}/b.m3u`));
+    manager.setDisabled("s1", true);
+    manager.move("s1", -1);
+    manager.move(own.id, 1);
+    expect(manager.sources().map(s => [s.id, s.name, s.disabled])).toEqual([
+      [own.id, "Own", undefined],
+      ["s1", "Renamed", undefined],
+      ["s2", "S2", undefined],
+    ]);
+
+    // A list gone from the account goes, with its data; one turned off there stays, unimported.
+    await manager.applySynced([{ ...list("s2", `${BASE}/a.m3u`), disabled: true }]);
+    expect(manager.sources().map(s => s.id)).toEqual([own.id, "s2"]);
+    const db = await openDb(DB);
+    expect(await readChannels(db, "s1")).toEqual([]);
+    expect((await readChannels(db, own.id)).length).toBeGreaterThan(0);
+    db.close();
+
+    // A restore replaces the TV's own and keeps the synced; signing out takes the synced away.
+    await manager.replaceAll([{ id: "r1", ...draft("R1", `${BASE}/b.m3u`) }, list("s9", `${BASE}/b.m3u`)]);
+    expect(manager.sources().map(s => s.id)).toEqual(["r1", "s2"]);
+    await manager.applySynced([]);
+    await manager.whenIdle();
+    expect(manager.sources().map(s => s.id)).toEqual(["r1"]);
+  });
+
+  it("pulls before each check", async () => {
+    const storage = memoryStorage();
+    const { importer, requests } = recording();
+    const order: string[] = [];
+    manager = createSourceManager({
+      dbName: DB,
+      storage,
+      importer: (request, onProgress, signal) => {
+        order.push(`import ${request.source}`);
+        return importer(request, onProgress, signal);
+      },
+      beforeCheck: async () => {
+        order.push("pull");
+        await manager?.applySynced([{ ...draft("S", `${BASE}/b.m3u`), id: "s", synced: true, profiles: [] }]);
+      },
+    });
+    const stop = await manager.start();
+    await manager.whenIdle();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await manager.whenIdle();
+    stop();
+    expect(order[0]).toBe("pull");
+    expect(requests.map(r => r.source)).toEqual(["s"]);
+  });
 });
