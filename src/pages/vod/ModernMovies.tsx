@@ -49,7 +49,7 @@ export const ModernMovies = () => {
     merge: mergeFilms,
     createMerger: createFilmMerger,
     keyOf: filmKey,
-    progressOf: key => progress().get(key),
+    progress,
   });
   const items = () => modern.titles().titles;
   const continueItems = createMemo(() => {

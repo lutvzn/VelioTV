@@ -178,11 +178,14 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   const extras = () => (props.extraGroups ?? []).filter(one => one.items.length > 0 || one.loading);
   const groups = createMemo((): Group<T>[] => {
     const byCategory = new Map<string, T[]>();
-    for (const item of props.items) {
-      if (!item.category) continue;
-      let list = byCategory.get(item.category);
-      if (!list) byCategory.set(item.category, (list = []));
-      list.push(item);
+    // The modern pages give their categories as extra groups, so none are made here.
+    if (props.categories.length > 0) {
+      for (const item of props.items) {
+        if (!item.category) continue;
+        let list = byCategory.get(item.category);
+        if (!list) byCategory.set(item.category, (list = []));
+        list.push(item);
+      }
     }
     return [
       ...(query()

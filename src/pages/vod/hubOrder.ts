@@ -47,24 +47,74 @@ const foldedNames = <T extends Ordered>(item: T, namesOf?: NamesOf<T>) => {
 /** Newest or highest first; titles without one go last. */
 const descending = (value: number | undefined) => (value === undefined ? Infinity : -value);
 
+/** Runs sorted by insertion before they're merged. */
+const RUN = 16;
+
+/**
+ * 0 to keys.length - 1, in their keys' order, lowest first; those alike
+ * keep their order. A merge sort of its own, over typed arrays and with the
+ * keys compared in place: on Samsung TVs sort() is core-js's and slow
+ * (src/data/sortedCopy.ts), and about half its time went in calling the
+ * comparison.
+ */
+export const stableOrder = (keys: ArrayLike<number> | readonly string[]) => {
+  const count = keys.length;
+  let from = new Uint32Array(count);
+  let to = new Uint32Array(count);
+  for (let i = 0; i < count; i++) from[i] = i;
+  for (let start = 0; start < count; start += RUN) {
+    const end = Math.min(start + RUN, count);
+    for (let i = start + 1; i < end; i++) {
+      const one = from[i];
+      const key = keys[one];
+      let j = i - 1;
+      while (j >= start && key < keys[from[j]]) {
+        from[j + 1] = from[j];
+        j--;
+      }
+      from[j + 1] = one;
+    }
+  }
+  for (let width = RUN; width < count; width *= 2) {
+    for (let start = 0; start < count; start += 2 * width) {
+      const middle = Math.min(start + width, count);
+      const end = Math.min(start + 2 * width, count);
+      let left = start;
+      let right = middle;
+      let out = start;
+      // Already in order: copied as it is.
+      if (right >= end || !(keys[from[right]] < keys[from[right - 1]])) {
+        while (left < end) to[out++] = from[left++];
+        continue;
+      }
+      while (left < middle && right < end)
+        to[out++] = keys[from[right]] < keys[from[left]] ? from[right++] : from[left++];
+      while (left < middle) to[out++] = from[left++];
+      while (right < end) to[out++] = from[right++];
+    }
+    const swap = from;
+    from = to;
+    to = swap;
+  }
+  return from;
+};
+
 /**
  * The titles in `sort`'s order, in a new list; as listed, the same list.
- * Titles alike keep their order. Sorted by keys made once, as on Samsung
- * TVs sort() is core-js's and slow (src/data/sortedCopy.ts).
+ * Titles alike keep their order. Sorted by keys made once.
  */
 export const sortTitles = <T extends Ordered>(items: readonly T[], sort: TitleSort): readonly T[] => {
   if (sort === "listed" || items.length < 2) return items;
-  const order = items.map((_, i) => i);
-  if (sort === "name") {
-    const names = items.map(item => foldedNames(item)[0]);
-    // oxlint-disable-next-line unicorn/no-array-sort -- a fresh array; older TVs lack toSorted()
-    order.sort((a, b) => (names[a] < names[b] ? -1 : names[a] > names[b] ? 1 : a - b));
-  } else {
-    const keys = items.map(item => descending(item[sort]));
-    // oxlint-disable-next-line unicorn/no-array-sort -- a fresh array
-    order.sort((a, b) => keys[a] - keys[b] || a - b);
+  let order: Uint32Array;
+  if (sort === "name") order = stableOrder(items.map(item => foldedNames(item)[0]));
+  else {
+    const keys = new Float64Array(items.length);
+    for (let i = 0; i < items.length; i++) keys[i] = descending(items[i][sort]);
+    order = stableOrder(keys);
   }
-  return order.map(i => items[i]);
+  const out: T[] = [];
+  for (let i = 0; i < order.length; i++) out.push(items[order[i]]);
+  return out;
 };
 
 /**

@@ -8,6 +8,7 @@
 import type { AddonMeta } from "../stremio/addon";
 import { cleanTitle, isImdbId, nameKey } from "../stremio/cinemeta";
 import { addonFilm, addonSeries, filmKey, seriesKey } from "../stremio/vodEntries";
+import { sortedCopy } from "./sortedCopy";
 import { seasonsOf, type Episode, type EpisodeLink, type SeriesDetails } from "./vod";
 import type { FilmEntry, SeriesEntry } from "./vodLibrary";
 import type { MatchChanges, TitleMatch } from "./titleMatches";
@@ -292,7 +293,6 @@ const createMerger = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
       const old = one.byGroup.get(group);
       if (old) {
         removed.add(old);
-        one.orderOf.delete(old);
         if (byKey.get(old.key) === old) byKey.delete(old.key);
         for (const link of old.links) if (byKey.get(link.key) === old) byKey.delete(link.key);
         if (old.imdb && byImdb.get(old.imdb) === old) byImdb.delete(old.imdb);
@@ -303,23 +303,52 @@ const createMerger = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
         added.push(title);
       } else one.byGroup.delete(group);
     }
-    const titles =
-      removed.size > 0 ? one.result.titles.filter(title => !removed.has(title)) : [...one.result.titles];
-    const orderOf = (title: T) => one.orderOf.get(title) ?? 0;
     for (const title of added) {
       byKey.set(title.key, title);
       for (const link of title.links) byKey.set(link.key, title);
       if (title.imdb) byImdb.set(title.imdb, title);
-      // Where its first copy comes, as merge() has it.
+    }
+    // Each where its first copy comes, as merge() has it. The places to
+    // take titles out and put them in are found by halving, so the titles
+    // between are copied as they are, without looking each one's order up.
+    const before = one.result.titles;
+    const orderOf = (title: T) => one.orderOf.get(title) ?? 0;
+    /** Where the first title of this order or later is. */
+    const placeOf = (order: number) => {
       let low = 0;
-      let high = titles.length;
-      const order = orderOf(title);
+      let high = before.length;
       while (low < high) {
         const middle = (low + high) >> 1;
-        if (orderOf(titles[middle]) < order) low = middle + 1;
+        if (orderOf(before[middle]) < order) low = middle + 1;
         else high = middle;
       }
-      titles.splice(low, 0, title);
+      return low;
+    };
+    const cuts = new Uint8Array(before.length);
+    let cutCount = 0;
+    for (const title of removed) {
+      const at = placeOf(orderOf(title));
+      if (before[at] === title) {
+        cuts[at] = 1;
+        cutCount++;
+      }
+    }
+    const incoming = sortedCopy(added, (a, b) => orderOf(a) - orderOf(b));
+    const places = incoming.map(title => placeOf(orderOf(title)));
+    for (const title of removed) one.orderOf.delete(title);
+    let titles: T[];
+    if (cutCount < removed.size) {
+      // Not where it should be, which shouldn't happen: in order, from them all.
+      titles = before.filter(title => !removed.has(title));
+      for (const title of incoming) titles.push(title);
+      titles = sortedCopy(titles, (a, b) => orderOf(a) - orderOf(b));
+    } else {
+      titles = [];
+      let next = 0;
+      for (let at = 0; at <= before.length; at++) {
+        while (next < incoming.length && places[next] === at) titles.push(incoming[next++]);
+        if (at < before.length && cuts[at] === 0) titles.push(before[at]);
+      }
     }
     one.result = { titles, byImdb, byKey };
   };

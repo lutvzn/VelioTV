@@ -2,10 +2,14 @@
 // title", step 2), in the background while the modern layout is on: each
 // title's cleaned name is searched for once, a few at a time, and the
 // title with the same name and year gives its IMDb id and genres. The
-// matches are kept in a record per source, written every half a minute while
-// matching goes on, so each record is either large or seldom written (the
-// TV keeps the space of small deleted records, AGENTS.md). A title with no
-// match is tried again after a month.
+// matches are kept in blocks of MATCH_BLOCK per source, each as JSON text,
+// written every half a minute while matching goes on: only the blocks that
+// changed, one at a time. A block is over 64 KB (the TV keeps the space of
+// small deleted records, AGENTS.md), and as text IndexedDB copies it at
+// once, where a big source's matches as objects took the TV close to a
+// second (PLAN.md, "The long frames while matching"). New keys go in the
+// last block, so as matching works through a source it writes one or two.
+// A title with no match is tried again after a month.
 //
 // Two more ways, given by the library (src/data/moreMatches.ts): a title
 // with a TMDB id from its list is found by that id first (`byTmdb`), and a
@@ -16,6 +20,7 @@
 import { batch, createEffect, createMemo, createRoot, createSignal, untrack } from "solid-js";
 import type { AddonMeta } from "../stremio/addon";
 import { CLEANING, cleanTitle, nameKey, pickMatch } from "../stremio/cinemeta";
+import { sortedCopy } from "./sortedCopy";
 
 export type TitleType = "movie" | "series";
 
@@ -54,6 +59,12 @@ export interface TitleMatch {
   via?: MatchedBy;
   /** When a match by TMDB was found: it's looked for again after KEEP_TMDB_MS, as TMDB's terms ask. */
   at?: number;
+  /**
+   * Found by Cinemeta's search, which gives no genres or rating: its
+   * details are asked for once the searches are done, so titles are joined
+   * sooner.
+   */
+  partial?: true;
 }
 
 /** The keys whose matches were recorded, in turn, since the log with this id began. */
@@ -65,19 +76,46 @@ export interface MatchChanges {
 /** A match, or when the title was looked for and none was found. */
 export type KeptMatch = TitleMatch | number;
 
+/**
+ * A block of a source's matches, or all of them in one record, as kept
+ * before version 8 of the database.
+ */
 export interface MatchRecord {
   source: string;
+  /** The block's number among the source's, from 0; none in a record from before. */
+  block?: number;
   /** The Cinemeta address the matches came from; another's are looked for again. */
   cinemeta: string;
   /** The names' cleaning (CLEANING) when it was saved; titles not found with an older one are looked for again. */
   cleaning?: number;
-  matches: Record<string, KeptMatch>;
+  /** By key: as JSON text in a block, a record's own object from before. */
+  matches: string | Record<string, KeptMatch>;
 }
 
 export interface MatchStore {
   load: () => Promise<MatchRecord[]>;
+  /** Writes a block. */
   save: (record: MatchRecord) => Promise<void>;
+  /** Deletes a source's blocks from `from` on, and its record from before. */
+  trim: (source: string, from: number) => Promise<void>;
 }
+
+/** Matches in a block: about 0.4 MB, and still over 64 KB when none were found. */
+export const MATCH_BLOCK = 2000;
+
+/** Only what this file wrote, so the values aren't each checked. */
+const isMatches = (value: unknown): value is Record<string, KeptMatch> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A record's matches, by key. */
+export const matchesOf = (record: Pick<MatchRecord, "matches">): Record<string, KeptMatch> => {
+  if (typeof record.matches !== "string") return record.matches;
+  const parsed: unknown = JSON.parse(record.matches);
+  return isMatches(parsed) ? parsed : {};
+};
+
+/** Lets the page draw between blocks, as a big source's take a while to read. */
+const breathe = () => new Promise(resolve => setTimeout(resolve, 0));
 
 export interface TitleMatcherOptions {
   items: () => MatchItem[];
@@ -110,6 +148,8 @@ export interface TitleMatcherOptions {
   saveEveryMs?: number;
   /** How often the matches found are shown, so the pages aren't redrawn for each. */
   publishEveryMs?: number;
+  /** Matches in a block; MATCH_BLOCK. */
+  blockSize?: number;
 }
 
 export const RETRY_UNMATCHED_MS = 30 * 24 * 3_600_000;
@@ -156,9 +196,18 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
     // A big source's record is megabytes, so not too often.
     const saveEveryMs = options.saveEveryMs ?? 30_000;
     const publishEveryMs = options.publishEveryMs ?? 1500;
+    const blockSize = options.blockSize ?? MATCH_BLOCK;
 
     /** By source, then by key. */
     const kept = new Map<string, Map<string, KeptMatch>>();
+    /** Each source's blocks: the keys in each, in order, and the block of each key. */
+    const blocks = new Map<string, { keys: string[][]; of: Map<string, number> }>();
+    /**
+     * Sources whose blocks are all written at the next save, then any after
+     * them deleted, and the record from before: one read from that record,
+     * or with blocks of another Cinemeta's.
+     */
+    const rewrite = new Set<string>();
     let keptFrom = "";
     const [ready, setReady] = createSignal(false);
     const [version, setVersion] = createSignal(0);
@@ -177,6 +226,8 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
       waitingMore: 0,
       /** Titles looked for another way, since matching was turned on. */
       askedMore: 0,
+      /** Matches waiting for their details (`partial`), by Cinemeta id. */
+      waitingDetails: 0,
     });
 
     const sourceMap = (source: string) => {
@@ -184,37 +235,104 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
       if (!map) kept.set(source, (map = new Map()));
       return map;
     };
+    const blocksOf = (source: string) => {
+      let one = blocks.get(source);
+      if (!one) blocks.set(source, (one = { keys: [], of: new Map() }));
+      return one;
+    };
+    /** The block a key is kept in; a new key goes in the last, or a new one when that's full. */
+    const blockFor = (source: string, key: string) => {
+      const one = blocksOf(source);
+      let at = one.of.get(key);
+      if (at === undefined) {
+        at = one.keys.length - 1;
+        if (at < 0 || one.keys[at].length >= blockSize) one.keys[++at] = [];
+        one.keys[at].push(key);
+        one.of.set(key, at);
+      }
+      return at;
+    };
 
     // One search per cleaned name and year, however many sources have it.
     const asked = new Map<string, Promise<TitleMatch | undefined>>();
-    /** Sources saved with an older cleaning, whose matches are checked again. */
+    /** Keys saved with an older cleaning, whose matches are checked again. */
     const recheck = new Set<string>();
     /** Titles looked for since the app started. */
     const fresh = new Set<string>();
+    /** Cinemeta's details for partial matches, by type and id, as asked for. */
+    const detailed = new Map<string, AddonMeta>();
+    /** Partial matches waiting for their details, by type and id, with the titles that have them. */
+    const waitingDetails = new Map<string, { type: TitleType; id: string; items: MatchItem[] }>();
+    /** Those being asked for: a title found with one meanwhile joins it. */
+    const askingDetails = new Map<string, { type: TitleType; id: string; items: MatchItem[] }>();
+    const detailsKey = (type: TitleType, id: string) => `${type}/${id}`;
 
     // What's kept, once, and again if Cinemeta's address changes.
+    let loads = 0;
     const loadKept = async (url: string) => {
+      const mine = ++loads;
       // What's waiting is saved as the old address's, and its searches aren't used for the new one.
       clearTimeout(saveTimer);
       await flush();
+      if (mine !== loads) return;
       asked.clear();
+      detailed.clear();
       recheck.clear();
       fresh.clear();
       keptFrom = url;
       kept.clear();
+      blocks.clear();
+      rewrite.clear();
       changeLog = [];
       logId++;
       try {
-        for (const record of await options.store.load()) {
-          if (record.cinemeta !== url) continue;
-          const entries = Object.entries(record.matches);
+        const records = await options.store.load();
+        if (mine !== loads) return;
+        // A source's record from before has all it had: blocks beside it are from writing it again, cut short.
+        const before = new Set<string>();
+        for (const record of records)
+          if (record.block === undefined && record.cinemeta === url) before.add(record.source);
+        const ordered = sortedCopy(records, (a, b) => (a.block ?? -1) - (b.block ?? -1));
+        for (const record of ordered) {
+          const { source, block } = record;
+          if (record.cinemeta !== url) {
+            // Another Cinemeta's blocks are written over, the next time this one's are written.
+            if (block !== undefined) rewrite.add(source);
+            continue;
+          }
+          if (block !== undefined && before.has(source)) continue;
+          if (block === undefined) rewrite.add(source);
           const current = (record.cleaning ?? 1) >= CLEANING;
-          if (!current) recheck.add(record.source);
-          kept.set(
-            record.source,
-            new Map(current ? entries : entries.filter(([, value]) => typeof value === "object")),
-          );
+          const map = sourceMap(source);
+          const one = blocksOf(source);
+          const matches = matchesOf(record);
+          const keys = Object.keys(matches);
+          if (block !== undefined) one.keys[block] = keys;
+          for (const key of keys) {
+            const value = matches[key];
+            // Unmatched with an older cleaning: looked for again.
+            if (current || typeof value === "object") map.set(key, value);
+            if (!current) recheck.add(key);
+            if (block === undefined) blockFor(source, key);
+            else one.of.set(key, block);
+          }
+          await breathe();
+          if (mine !== loads) return;
         }
+        for (const [source, one] of blocks) {
+          // Blocks missing between others, which shouldn't be: all are written again, from the first.
+          let whole = true;
+          for (let i = 0; i < one.keys.length; i++) if (!one.keys[i]) whole = false;
+          if (!whole) {
+            const keys: string[] = [];
+            for (const list of one.keys) if (list) keys.push(...list);
+            blocks.delete(source);
+            for (const key of keys) blockFor(source, key);
+            rewrite.add(source);
+          }
+        }
+        // Those from before are written as blocks soon, so the next start reads them fast.
+        for (const source of rewrite) if (kept.get(source)?.size) markDirty(source, 0);
       } catch (error) {
         console.warn("Couldn't read the titles matched before:", error);
       }
@@ -228,20 +346,56 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
     };
 
     // Saving and showing, a while after the last change.
-    const dirty = new Set<string>();
+    /** The blocks changed, by source. */
+    const dirty = new Map<string, Set<number>>();
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     let publishTimer: ReturnType<typeof setTimeout> | undefined;
+    const markDirty = (source: string, block: number) => {
+      let numbers = dirty.get(source);
+      if (!numbers) dirty.set(source, (numbers = new Set()));
+      numbers.add(block);
+      saveTimer ??= setTimeout(() => void flush(), saveEveryMs);
+    };
+    /** Writes the blocks changed, each in its own task, so the page draws between them. */
     const flush = async () => {
       saveTimer = undefined;
-      const sources = [...dirty];
+      const waiting = [...dirty];
       dirty.clear();
-      for (const source of sources) {
-        const matches: Record<string, KeptMatch> = {};
-        for (const [key, value] of kept.get(source) ?? []) matches[key] = value;
+      for (const [source, numbers] of waiting) {
+        const map = kept.get(source);
+        const one = blocks.get(source);
+        if (!map || !one) continue;
+        const all = rewrite.delete(source);
+        let failed = false;
+        for (let block = 0; block < one.keys.length; block++) {
+          if (!all && !numbers.has(block)) continue;
+          const matches: Record<string, KeptMatch> = {};
+          for (const key of one.keys[block]) {
+            const value = map.get(key);
+            if (value !== undefined) matches[key] = value;
+          }
+          const record = {
+            source,
+            block,
+            cinemeta: keptFrom,
+            cleaning: CLEANING,
+            matches: JSON.stringify(matches),
+          };
+          try {
+            await options.store.save(record);
+          } catch (error) {
+            failed = true;
+            console.warn("Couldn't keep the titles matched:", error);
+          }
+        }
+        if (!all) continue;
         try {
-          await options.store.save({ source, cinemeta: keptFrom, cleaning: CLEANING, matches });
+          // What was there before goes only once all of it is written again.
+          if (failed) throw new Error("A block wasn't written");
+          await options.store.trim(source, one.keys.length);
         } catch (error) {
-          console.warn("Couldn't keep the titles matched:", error);
+          rewrite.add(source);
+          console.warn("Couldn't clear the titles matched before:", error);
         }
       }
     };
@@ -252,9 +406,8 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
      */
     const publishDelay = () =>
       Math.max(publishEveryMs, queue.length, next >= queue.length ? publishEveryMs * MORE_PUBLISH : 0);
-    const changed = (source: string, found: boolean) => {
-      dirty.add(source);
-      saveTimer ??= setTimeout(() => void flush(), saveEveryMs);
+    const changed = (source: string, key: string, found: boolean) => {
+      markDirty(source, blockFor(source, key));
       // A title with no match changes nothing shown.
       if (!found) return;
       publishTimer ??= setTimeout(() => {
@@ -280,14 +433,12 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
             if (strict) via = "guess";
           }
           if (!meta) return undefined;
-          let full = meta;
-          if (!meta.genres?.length && options.details)
-            full = (await options.details(item.type, meta.id)) ?? meta;
-          // The name is the search's, which was compared; the details only fill in what it lacked.
-          const match: TitleMatch = { id: meta.id, name: meta.name, genres: full.genres ?? [], via };
-          if (full.year ?? meta.year) match.year = full.year ?? meta.year;
-          if (full.poster ?? meta.poster) match.poster = full.poster ?? meta.poster;
-          if (full.rating ?? meta.rating) match.rating = full.rating ?? meta.rating;
+          const match: TitleMatch = { id: meta.id, name: meta.name, genres: meta.genres ?? [], via };
+          if (meta.year) match.year = meta.year;
+          if (meta.poster) match.poster = meta.poster;
+          if (meta.rating) match.rating = meta.rating;
+          // Cinemeta's search gives no genres: its details come after every search (askDetails).
+          if (!meta.genres?.length && options.details) match.partial = true;
           return match;
         })();
         asked.set(id, found);
@@ -315,14 +466,41 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
         return null;
       });
 
-    const record = (item: MatchItem, match: TitleMatch | undefined) => {
+    /** A partial match with its details. The name stays the search's, which was compared. */
+    const withDetails = (match: TitleMatch, full: AddonMeta): TitleMatch => {
+      const out: TitleMatch = { ...match, genres: full.genres ?? match.genres };
+      delete out.partial;
+      if (full.year) out.year = full.year;
+      if (full.poster) out.poster = full.poster;
+      if (full.rating) out.rating = full.rating;
+      return out;
+    };
+    const waitForDetails = (item: MatchItem, match: TitleMatch) => {
+      const key = detailsKey(item.type, match.id);
+      let one = askingDetails.get(key) ?? waitingDetails.get(key);
+      if (!one) waitingDetails.set(key, (one = { type: item.type, id: match.id, items: [] }));
+      if (!one.items.some(other => other.key === item.key)) one.items.push(item);
+    };
+    const detailsCount = () => setProgress(p => ({ ...p, waitingDetails: waitingDetails.size }));
+
+    const record = (item: MatchItem, given: TitleMatch | undefined) => {
+      let match = given;
+      if (match?.partial) {
+        const full = detailed.get(detailsKey(item.type, match.id));
+        if (full) match = withDetails(match, full);
+        else {
+          waitForDetails(item, match);
+          detailsCount();
+          start();
+        }
+      }
       sourceMap(item.source).set(
         item.key,
         match && byTmdbWay(match) ? { ...match, at: now() } : (match ?? now()),
       );
       fresh.add(item.key);
       changeLog.push(item.key);
-      changed(item.source, match !== undefined);
+      changed(item.source, item.key, match !== undefined);
     };
 
     /**
@@ -387,7 +565,10 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
       later = [];
       laterKeys.clear();
       laterLoops = 0;
-      setProgress(p => ({ ...p, waitingMore: 0, askedMore: 0 }));
+      // Asked for again from what's kept, at the next round.
+      waitingDetails.clear();
+      askingDetails.clear();
+      setProgress(p => ({ ...p, waitingMore: 0, askedMore: 0, waitingDetails: 0 }));
     };
 
     const isDue = (item: MatchItem) => {
@@ -401,7 +582,7 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
         if (value.via === "tmdb" && !fresh.has(item.key) && !agrees(item, value)) return true;
       }
       // Found by an older cleaning under another name: it may have been a wrong guess. A TMDB match is sure.
-      if (typeof value === "object" && recheck.has(item.source) && !fresh.has(item.key))
+      if (typeof value === "object" && recheck.has(item.key) && !fresh.has(item.key))
         return !byTmdbWay(value) && nameKey(value.name) !== nameKey(cleanTitle(item.name, item.year).title);
       return typeof value === "number" && now() - value > RETRY_UNMATCHED_MS;
     };
@@ -411,12 +592,54 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
     let workers = 0;
     let pausedUntil = 0;
     let round = 0;
+    /**
+     * The details of a partial match, for each title that has it still;
+     * without them (Cinemeta couldn't be reached, or had none), it stays
+     * partial, and they're asked for again next time.
+     */
+    const askDetails = async (one: { type: TitleType; id: string; items: MatchItem[] }) => {
+      const key = detailsKey(one.type, one.id);
+      askingDetails.set(key, one);
+      let full: AddonMeta | undefined;
+      try {
+        full = await options.details?.(one.type, one.id);
+      } finally {
+        if (askingDetails.get(key) === one) askingDetails.delete(key);
+      }
+      if (!full) return;
+      detailed.set(key, full);
+      for (const item of one.items) {
+        const value = kept.get(item.source)?.get(item.key);
+        if (typeof value === "object" && value.partial && value.id === one.id) record(item, value);
+      }
+    };
+    /** The next partial match to ask details for, in the order they were found. */
+    const nextDetails = () => {
+      const first = waitingDetails.keys().next();
+      if (first.done) return undefined;
+      const one = waitingDetails.get(first.value);
+      waitingDetails.delete(first.value);
+      detailsCount();
+      return one;
+    };
+
     const work = async (mine: number) => {
       workers++;
       try {
         // A new round (round++) or a pause ends this worker.
-        const going = () => mine === round && next < queue.length && now() >= pausedUntil;
+        const going = () => mine === round && now() >= pausedUntil;
         while (going()) {
+          if (next >= queue.length) {
+            // Every search is done or going: the details of what they found.
+            const one = nextDetails();
+            if (!one) break;
+            try {
+              await askDetails(one);
+            } catch (error) {
+              console.warn("Couldn't ask Cinemeta for a title's details:", error);
+            }
+            continue;
+          }
           const item = queue[next++];
           if (!isDue(item)) continue;
           try {
@@ -448,7 +671,7 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
     };
     /** Once nothing is left to do: the last matches at once. */
     const settle = () => {
-      if (workers > 0 || laterKeys.size > 0 || laterLoops > 0) return;
+      if (workers > 0 || laterKeys.size > 0 || laterLoops > 0 || waitingDetails.size > 0) return;
       setProgress(p => ({ ...p, running: false }));
       if (publishTimer !== undefined) {
         clearTimeout(publishTimer);
@@ -458,7 +681,7 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
     };
     const start = () => {
       if (now() < pausedUntil) return;
-      const wanted = Math.min(concurrency, Math.max(0, queue.length - next));
+      const wanted = Math.min(concurrency, Math.max(0, queue.length - next) + waitingDetails.size);
       if (wanted > 0) setProgress(p => ({ ...p, running: true }));
       for (let i = workers; i < wanted; i++) void work(round);
     };
@@ -495,6 +718,15 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
         next = 0;
         // Asked for all at once, so they can go in one query (as to Wikidata).
         for (const one of queue) if (one.tmdb !== undefined) void byTmdbOrNot(one.type, one.tmdb);
+        // Partial matches kept, as when the app closed before their details came: after the searches.
+        waitingDetails.clear();
+        for (const one of items) {
+          const value = kept.get(one.source)?.get(one.key);
+          if (typeof value !== "object" || !value.partial || isDue(one)) continue;
+          if (detailed.has(detailsKey(one.type, value.id))) record(one, value);
+          else waitForDetails(one, value);
+        }
+        detailsCount();
         setProgress(p => ({ ...p, done: 0, total: queue.length, running: laterKeys.size > 0 }));
         // The workers of the round before stop after the title they're on.
         workers = 0;
@@ -520,6 +752,27 @@ export const createTitleMatcher = (options: TitleMatcherOptions) =>
       progress,
       /** Saves what's waiting to be saved, as before the app closes. */
       flush,
+      /**
+       * For probes (scripts/tv-probe/probes/match-frames.js): records `count`
+       * of the matches kept again, as copies, spread over every source, and
+       * shows them at once, as matching does, without changing what's kept.
+       * Their blocks are written at the next save, or flush(). Returns how many.
+       */
+      reshow: (count: number) => {
+        const all: [string, string, TitleMatch][] = [];
+        for (const [source, map] of kept)
+          for (const [key, value] of map) if (typeof value === "object") all.push([source, key, value]);
+        const step = Math.max(1, Math.floor(all.length / Math.max(1, count)));
+        let done = 0;
+        for (let i = 0; i < all.length && done < count; i += step, done++) {
+          const [source, key, value] = all[i];
+          sourceMap(source).set(key, { ...value });
+          changeLog.push(key);
+          markDirty(source, blockFor(source, key));
+        }
+        setVersion(n => n + 1);
+        return done;
+      },
     };
   });
 

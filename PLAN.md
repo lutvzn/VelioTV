@@ -567,7 +567,7 @@ The user chose:
 2. **Matching:**
    - The name is cleaned of language tags, quality and the year (`EN - The Great Adventure (1999) [4K]` is "The Great Adventure", 1999). Cinemeta's search for it gives the title with the same folded name, and a year no more than one off when both have one.
    - A few titles are matched at a time, and the same name is asked for only once.
-   - Matches are kept in a database record per source (`titleMatches`), written every 30 seconds while it matches, so a record is large or seldom written. One with no match is tried again after 30 days.
+   - Matches are kept in a database record per source (`titleMatches`), written every 30 seconds while it matches, so a record is large or seldom written. One with no match is tried again after 30 days. (Since 2026-11-11, in blocks: see "The long frames, found and fixed" below.)
 3. **Titles:**
    - IPTV films and series with the same IMDb id are one title, with the add-ons' titles of that id. Unmatched ones with the same cleaned name and year are one title too.
    - A matched title uses Cinemeta's name, poster, genres and details.
@@ -666,6 +666,80 @@ The user chose:
     - Drop the "Multi- : " tag before names.
     - "Harry-Potter-7-PT1-…" still isn't read.
   - Probes: `match-measure` (input `source`, the source's name; 10–25 minutes, `PROBE_TIMEOUT=1800`) and `join-time`.
+- **The long frames, found and fixed (2026-11-11).** Profiled on the test TV with the user's own source (36,818 films, 19,162 titles), with the new `match-frames` probe (about 50 s): `titleMatcher.reshow(n)` records n kept matches again as copies and shows them, so everything after the join runs as when matches come in, and nothing kept changes. `PROBE_PROFILE` now also saves the page's own profile between a probe's `console.profile()` and `console.profileEnd()`.
+  - **The cause was saving, not the groups.** Every 30 s while matching, the source's whole record (37,874 matches as objects) was written again. IndexedDB copies a record on the page's thread, and `put()` took 820–860 ms, with a 867–933 ms frame. These were the 830–1,150 ms frames. Showing matches cost 100–160 ms each time.
+  - **Matches are kept in blocks** (`titleMatchBlocks`, database version 8): 2,000 a block (`MATCH_BLOCK`), each as JSON text, which is copied at once. Only the blocks that changed are written, one at a time, so the page draws between them. New keys go in the last block, so matching through a source writes one or two at a time. A block is over 64 KB even with no match found. Version 7's record is read once, then written as blocks and deleted, about 30 s after the start. Another Cinemeta's blocks are written over all at once.
+  - **Showing matches:** the join finds where titles come out and go in by halving, and copies the rest as they are (before, it looked up every title's order). A group's order uses a merge sort of its own over typed arrays, about twice as fast as core-js's `sort()`: 27 ms down to 11 ms for 19,162 titles. Movies no longer sorts every title into categories it doesn't show, and progress bars are set from the few watched films, not by checking every title. New matches wait until no key has been pressed for 1.5 s (`QUIET_MS`, `src/pages/vod/modernTitles.ts`), so moving through the page never stops for them.
+  - **On the TV, after (All films, Recently added, 300 matches shown again each time):**
+
+    |                                      | Before     | After                                                                                      |
+    | ------------------------------------ | ---------- | ------------------------------------------------------------------------------------------ |
+    | Worst frame while saving             | 867–933 ms | 17 ms (a full write of all 19 blocks takes 1.1–2.5 s, in the background)                   |
+    | Worst frame showing matches          | 100–150 ms | 33–83 ms (the TV's idle worst is 17–50 ms); the first time after the app starts, 83–283 ms |
+    | Matches shown while keys are pressed | at once    | 1.5 s after the last key                                                                   |
+
+  - The order checks of the `vod-order` probe still pass. The legacy build passes `check:old-tvs`, but hasn't been run in Chromium 47 or 38.
+  - Not run yet: a real matching run (`match-measure`) after the change, which needs a `CLEANING` bump or a new source. It should show no frames near a second.
+- **Cinemeta's and TMDB's search speed, and requests at once (2026-11-11).** The `search-speed` probe (about 2 minutes) searches the same film names from the user's source on both, at 1 to 32 requests at once, each with names of its own. `tmdbRequest()` on `window.velio` sends a request to TMDB with the build's key, past the client's limit. Names the matcher searched before are mostly in Cloudflare's cache at Cinemeta (about 90% `HIT`, 30–55 ms each), so with `uncached` the names go in lower case, which the cache hasn't seen and the search reads the same. TMDB's answers never came from a cache. Neither gave an error at any level.
+
+  | At once | Cinemeta, not cached | TMDB                                    |
+  | ------- | -------------------- | --------------------------------------- |
+  | 1       | 3/s, 386 ms each     | 5.5/s, 161 ms                           |
+  | 4       | 11.5/s, 406 ms       | 22.9/s, 164 ms                          |
+  | 8       | 16.5/s, 473 ms       | 20.2/s, 177 ms (90th percentile 776 ms) |
+  | 16      | 15.6/s, 1,002 ms     | 22.3/s, 215 ms (1,361 ms)               |
+  | 32      | 17.5/s, 1,813 ms     | 33.2/s, 239 ms (2,245 ms)               |
+  - Cinemeta tops out at about 16–17 searches a second from 8 at once; more only wait longer. The matcher asks 4 at once (11.5/s), so 8 would make a new source's names about 40% faster.
+  - TMDB answers each search in about a third of the time, and gives about 20–23 a second from 4 at once. Past that the slowest answers take 1–2.5 s. The client's 8 at once is fine. A TMDB match takes two requests (search and details), Cinemeta's one, so per match they're about even.
+  - **Cinemeta from 4 to 8 at once**, more closely (`services: ["cinemeta"]`, 48–96 names a level, twice on different films with `offset` 0.5 and 0.25, not cached):
+
+    | At once | Searches a second | Median      | 90th percentile |
+    | ------- | ----------------- | ----------- | --------------- |
+    | 4       | 10.3, 12.4        | 415, 290 ms | 578, 555 ms     |
+    | 5       | 14.5, 15.7        | 397, 393 ms | 443, 455 ms     |
+    | 6       | 16.6, 16.3        | 404, 411 ms | 432, 485 ms     |
+    | 7       | 15.9, 15.7        | 413, 432 ms | 583, 590 ms     |
+    | 8       | 12.1, 17.7        | 622, 470 ms | 1,094, 604 ms   |
+
+    6 is where it stops getting faster: about 60% more than 4, with answers as quick. 7 adds nothing, and 8 only makes answers slower and the rate less steady. No errors at any level.
+
+  - **Cached names** (as the matcher writes them, which it searched before: 81–97% Cloudflare `HIT`):
+
+    | At once                  | 4     | 6     | 8     | 12    | 16     | 24     | 32     |
+    | ------------------------ | ----- | ----- | ----- | ----- | ------ | ------ | ------ |
+    | Searches a second        | 21    | 63    | 90    | 104   | 90     | 103    | 128    |
+    | A cached answer's median | 57 ms | 38 ms | 41 ms | 83 ms | 122 ms | 187 ms | 236 ms |
+
+  - **Why 6:** Cinemeta answers over HTTP/1.1 (asked from the dev machine with HTTP/2 offered; TMDB answers over HTTP/2), and a browser opens at most 6 connections to a server over HTTP/1.1, queueing the rest. Past 6, a cached answer's time grows with the number at once, as queued ones wait. So 6 is the most the TV can have at Cinemeta, cached or not, and that includes the page's own requests there (details, Popular). The TV doesn't show the app the protocol (`nextHopProtocol` is empty for other sites).
+  - **The matcher now asks Cinemeta 5 at once** (`concurrency` in `src/library.ts`, 4 before): about 15 searches a second uncached and 50–60 cached, leaving a connection for the page.
+  - **TMDB from 6 to 10 at once** (2026-11-11, two runs on different films, 72–120 names a level, lower-case names, no errors, 1–6% from CloudFront's cache):
+
+    | At once | Requests a second | Median     | 90th percentile | Longest   |
+    | ------- | ----------------- | ---------- | --------------- | --------- |
+    | 6       | 18.7–19.5         | 182–185 ms | 560–574 ms      | 1.2–1.6 s |
+    | 7       | 21.1–29.1         | 168–175 ms | 215–676 ms      | 1.3–1.4 s |
+    | 8       | 26.8–29.2         | 166–171 ms | 664–696 ms      | 1.4–1.5 s |
+    | 9       | 25.8–26.5         | 164–168 ms | 741–759 ms      | 1.6–1.7 s |
+    | 10      | 25.0–27.8         | 171–172 ms | 839–845 ms      | 1.5–1.8 s |
+
+    The speed rises to 8 and goes no higher after it; at 9 and 10 the 90th percentile only grows. **TMDB stays at 8 at once** (`atOnce` in `src/stremio/tmdb.ts`), where it already was.
+
+  - **Where a new source's matching time goes** (2026-11-11, new `match-sample` probe: a matcher of its own over 600 spread films from the user's source, Cinemeta asked in lower case so its cache hasn't seen them, the provider not asked, nothing kept). 79 s for 600 films, 7.6 a second; 562 matched (486 by name, 75 by TMDB's search, 1 close spelling).
+
+    | Requests                      | Count | Median | Going at once, on average |
+    | ----------------------------- | ----- | ------ | ------------------------- |
+    | Cinemeta search, cleaned name | 600   | 374 ms | 2.2                       |
+    | Cinemeta details              | 499   | 380 ms | 2.5                       |
+    | Cinemeta search, other names  | 74    | 403 ms | 0.3                       |
+    | TMDB search                   | 193   | 164 ms | 0.4                       |
+    | TMDB details                  | 78    | 161 ms | 0.2                       |
+
+    Cinemeta's 5 were busy all the way (5.0 at once), TMDB's 8 nearly idle; the TMDB step ended 0.7 s after Cinemeta's. **Cinemeta's search gives no genres, rating or full year** (only id, name, poster, `releaseInfo`), so 83% of matches ask for its details too, and these take more of its connections than the searches. `cinemeta-live.strem.io` answers details on another host, but with TMDB's genres and no year, so it isn't the same data.
+
+  - **Searches first, details after** (chosen 2026-11-11, over taking the details from TMDB, which would change the genres and rating to TMDB's and fall under its six months): a match from Cinemeta's search is kept `partial` (no genres or rating yet) and shown at once; its details are asked for once every search is done, by the same 5 at once. Titles sharing a match ask once; one kept partial, as when the app closed before its details, has them asked for at the next start without a search; one without details (Cinemeta couldn't be reached, or had none) stays partial and is asked again next time. `progress().waitingDetails` counts them.
+    - On the TV (`match-sample`, 600 other films, `offset` 0.5): searches done at 45 s, with 552 of the 555 matches found, 481 partial; all done at 77 s (79 before). So titles join about 1.75 times sooner, and the genre rows fill in after. For the user's 19,162 titles, about 24 minutes of searches, then about 18 of details, against about 42 minutes before for both.
+  - **Kept: Cinemeta first, then TMDB.** Sending titles tagged with another language straight to TMDB was weighed and turned down, as many lists tag English titles too ("ES - The Great Adventure"), and Cinemeta would then miss the chance to match them.
+
 - **Still to check:** the user looks at the pages and at Settings → About on the TV. The `modern` probe's `wikidata` and `tmdb` inputs haven't been run against the test server, as the test TV's profile has the user's source.
 - **Ordering and sorting out titles (asked 2026-11-11), from a review of how Movies are sorted.** Until now, every group listed its titles in the sources' order, and a joined title took its rating and date from its first copy only.
   - **Years (`CLEANING = 8`):**

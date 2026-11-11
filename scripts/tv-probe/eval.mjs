@@ -8,7 +8,10 @@
 // still running when the probe ends, and one for each console.profile() a
 // worker ended, as a timed import's does (import.worker.ts), since it ends
 // with its import. The workers' code is minified, so names are short; the
-// profile's line and column point into the deployed file in dist/.
+// profile's line and column point into the deployed file in dist/. The
+// page's own main thread is profiled only between a probe's
+// console.profile("name") and console.profileEnd("name"), saved as
+// page-<name>.cpuprofile.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -72,7 +75,8 @@ ws.addEventListener("message", event => {
     else void call("Runtime.runIfWaitingForDebugger", {}, sessionId);
   }
   if (message.method === "Profiler.consoleProfileFinished") {
-    save(workers.get(message.sessionId)?.url ?? "worker", message.params.profile);
+    const from = message.sessionId ? (workers.get(message.sessionId)?.url ?? "worker") : "page";
+    save(message.params.title ? `${from}-${message.params.title}` : from, message.params.profile);
   }
   if (message.method === "Target.detachedFromTarget") {
     const worker = workers.get(message.params.sessionId);
@@ -100,8 +104,11 @@ ws.addEventListener("open", async () => {
     await new Promise(resolve => setTimeout(resolve, 200));
   }
   await new Promise(resolve => setTimeout(resolve, 1500));
-  // Workers wait to start until their profiler runs.
+  // Workers wait to start until their profiler runs. The page itself is
+  // profiled between a probe's console.profile() and console.profileEnd().
   if (profileDir) {
+    await call("Profiler.enable");
+    await call("Profiler.setSamplingInterval", { interval: 250 });
     await call("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   }
   const { result } = await call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });

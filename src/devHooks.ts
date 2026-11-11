@@ -20,8 +20,11 @@ import {
   tmdbUrl,
   setTmdbUrl,
   tmdbOn,
+  tmdbRequest,
+  tmdbClient,
   titleMatcher,
   vodLayout,
+  wikidata,
   currentBackup,
   edits,
   events,
@@ -42,6 +45,8 @@ import {
 } from "./library";
 import { settingsCopy } from "./data/settingsCopy";
 import { mergeFilms, mergeSeries } from "./data/titles";
+import { createTitleMatcher } from "./data/titleMatches";
+import { createMoreMatches, MORE_AT_ONCE } from "./data/moreMatches";
 import { cleanTitle, nameKey } from "./stremio/cinemeta";
 import { startPairing, tvName, waitForOwner } from "./data/pairing";
 import { lastOpen } from "./data/syncOpen";
@@ -92,7 +97,11 @@ const hooks: Record<string, unknown> = {
   tmdbUrl,
   setTmdbUrl,
   tmdbOn,
+  /** A request to TMDB with the build's key, for the `search-speed` probe. */
+  tmdbRequest,
   titleMatcher,
+  /** A matcher of its own, from the same parts, for the `match-sample` probe. */
+  matchParts: { createTitleMatcher, createMoreMatches, MORE_AT_ONCE, tmdb: tmdbClient, wikidata },
   vodLayout,
   /** The modern layout's joining of titles (src/data/titles.ts), to time it. */
   mergeFilms,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Ordered, searchTitles, sortTitles } from "./hubOrder";
+import { type Ordered, searchTitles, sortTitles, stableOrder } from "./hubOrder";
 
 const names = (list: readonly Ordered[]) => list.map(one => one.name);
 const title = (name: string, extra: Partial<Ordered> = {}): Ordered => ({ key: name, name, ...extra });
@@ -22,6 +22,31 @@ describe("sortTitles", () => {
 
   it("keeps the list as it is when listed", () => {
     expect(sortTitles(items, "listed")).toBe(items);
+  });
+});
+
+describe("stableOrder", () => {
+  it("orders as a stable sort does, keeping those alike in their order", () => {
+    let seed = 1;
+    const random = () => (seed = (seed * 16_807) % 2_147_483_647) / 2_147_483_647;
+    for (const count of [0, 1, 2, 15, 16, 17, 33, 100, 1000, 4099]) {
+      for (const spread of [3, 50, count + 1]) {
+        const keys = Array.from({ length: count }, () => Math.floor(random() * spread));
+        const wanted = keys.map((_, i) => i);
+        // oxlint-disable-next-line unicorn/no-array-sort -- a fresh array
+        wanted.sort((a, b) => keys[a] - keys[b] || a - b);
+        expect([...stableOrder(keys)]).toEqual(wanted);
+      }
+    }
+  });
+
+  it("orders names", () => {
+    expect([...stableOrder(["b", "a", "c", "a"])]).toEqual([1, 3, 0, 2]);
+  });
+
+  it("leaves a list in order as it is", () => {
+    const keys = Array.from({ length: 500 }, (_, i) => Math.floor(i / 7));
+    expect([...stableOrder(keys)]).toEqual(keys.map((_, i) => i));
   });
 });
 

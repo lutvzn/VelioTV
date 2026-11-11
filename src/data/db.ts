@@ -45,8 +45,17 @@ export { DAY, type StoredChannel, type StoredProgramme };
 ensureGetAll();
 
 export const DB_NAME = "velio";
-const VERSION = 7;
-const STORES = ["imports", "channelLists", "guide", "guideIndex", "guides", "vod", "titleMatches"];
+const VERSION = 8;
+const STORES = [
+  "imports",
+  "channelLists",
+  "guide",
+  "guideIndex",
+  "guides",
+  "vod",
+  "titleMatches",
+  "titleMatchBlocks",
+];
 
 /** How a source's last import went. */
 export interface ImportState {
@@ -225,6 +234,11 @@ export const openDb = (name = DB_NAME): Promise<IDBDatabase> => {
     // Version 7 adds each source's titles matched to Cinemeta (src/data/titleMatches.ts).
     if (!db.objectStoreNames.contains("titleMatches"))
       db.createObjectStore("titleMatches", { keyPath: "source" });
+    // Version 8 keeps them in blocks, as one record per source took the TV
+    // close to a second to copy. Version 7's records are read until the
+    // matcher writes them again as blocks.
+    if (!db.objectStoreNames.contains("titleMatchBlocks"))
+      db.createObjectStore("titleMatchBlocks", { keyPath: ["source", "block"] });
     if (event.oldVersion < 6) {
       // Version 5 stored the guide in blocks, and version 6 in blocks of two
       // parts, keyed by the guide rather than the source. The guide from
@@ -445,6 +459,9 @@ export const measureGuide = async (db: IDBDatabase, guide: string, generation?: 
   return { programmes, bytes, records, lastDay };
 };
 
+/** A source's blocks of matches from `from` on. */
+const sourceBlocks = (source: string, from: number) => IDBKeyRange.bound([source, from], [source, Infinity]);
+
 /** Deletes a source's data and import state, and its guide unless another source uses it. */
 export const deleteSource = async (db: IDBDatabase, source: string) => {
   const transaction = writeTransaction(db, STORES);
@@ -457,16 +474,35 @@ export const deleteSource = async (db: IDBDatabase, source: string) => {
   transaction.objectStore("channelLists").delete(source);
   transaction.objectStore("vod").delete(source);
   transaction.objectStore("titleMatches").delete(source);
+  transaction.objectStore("titleMatchBlocks").delete(sourceBlocks(source, 0));
   imports.delete(source);
   await finished(transaction);
 };
 
-/** Each source's titles matched to Cinemeta (src/data/titleMatches.ts). */
-export const readTitleMatches = (db: IDBDatabase) =>
-  request<MatchRecord[]>(db.transaction("titleMatches").objectStore("titleMatches").getAll());
+/**
+ * Each source's titles matched to Cinemeta (src/data/titleMatches.ts): its
+ * blocks, and its one record from before version 8, while it has one.
+ */
+export const readTitleMatches = async (db: IDBDatabase) => {
+  const transaction = db.transaction(["titleMatches", "titleMatchBlocks"]);
+  const [old, blocks] = await Promise.all([
+    request<MatchRecord[]>(transaction.objectStore("titleMatches").getAll()),
+    request<MatchRecord[]>(transaction.objectStore("titleMatchBlocks").getAll()),
+  ]);
+  return [...old, ...blocks];
+};
 
+/** Writes a block of a source's matches. */
 export const writeTitleMatches = async (db: IDBDatabase, record: MatchRecord) => {
-  const transaction = writeTransaction(db, "titleMatches");
-  transaction.objectStore("titleMatches").put(record);
+  const transaction = writeTransaction(db, "titleMatchBlocks");
+  transaction.objectStore("titleMatchBlocks").put(record);
+  await finished(transaction);
+};
+
+/** Deletes a source's blocks of matches from `from` on, and its record from before version 8. */
+export const trimTitleMatches = async (db: IDBDatabase, source: string, from: number) => {
+  const transaction = writeTransaction(db, ["titleMatches", "titleMatchBlocks"]);
+  transaction.objectStore("titleMatches").delete(source);
+  transaction.objectStore("titleMatchBlocks").delete(sourceBlocks(source, from));
   await finished(transaction);
 };

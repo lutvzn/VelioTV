@@ -6,9 +6,11 @@
 // Settings has it (src/data/vodLayout.ts). A title is in the category of
 // each of its copies. While titles are being matched, the genres keep the
 // order they had, so the column doesn't shift as matches come in; new ones
-// go last, and the order is made again once matching ends.
+// go last, and the order is made again once matching ends. New matches wait
+// while keys are being pressed, so a page being moved through doesn't
+// stop to show them.
 
-import { createEffect, createMemo } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import type { AddonItem, Merger, Titles } from "../../data/titles";
 import type { FilmEntry, SeriesEntry } from "../../data/vodLibrary";
 import { addons, cinemeta, library, titleMatcher, vodLayout } from "../../library";
@@ -22,6 +24,31 @@ import type { ExtraGroup } from "./VodHub";
 const POPULAR_PAGES = 8;
 /** Popular asks for more until it has this many. */
 const POPULAR_WANTED = 40;
+/** How long after the last key new matches are shown. */
+export const QUIET_MS = 1500;
+
+/** When a key was last pressed, from anywhere in the app. */
+let lastKeyAt = -Infinity;
+if (typeof document !== "undefined")
+  document.addEventListener("keydown", () => (lastKeyAt = performance.now()), true);
+
+/** The matcher's version, but held while keys are being pressed. */
+const useQuietVersion = () => {
+  const [shown, setShown] = createSignal(untrack(titleMatcher.version));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const show = () => {
+    timer = undefined;
+    const wait = lastKeyAt + QUIET_MS - performance.now();
+    if (wait > 0) timer = setTimeout(show, wait);
+    else setShown(titleMatcher.version());
+  };
+  createEffect(() => {
+    titleMatcher.version();
+    timer ??= setTimeout(show, 0);
+  });
+  onCleanup(() => clearTimeout(timer));
+  return shown;
+};
 
 type Merged<E> = E & { links: E[]; genres: string[]; imdb?: string; progress?: number };
 
@@ -39,8 +66,8 @@ export interface ModernOptions<E extends FilmEntry | SeriesEntry, T extends Merg
   createMerger: () => Merger<E, T>;
   /** filmKey or seriesKey (src/stremio/vodEntries.ts). */
   keyOf: (id: string) => string;
-  /** How far a title was watched, by its key. */
-  progressOf?: (key: string) => number | undefined;
+  /** How far titles were watched, by their keys. */
+  progress?: () => ReadonlyMap<string, number>;
 }
 
 const KINDS: Record<string, string> = { m3u8: "HLS", mpd: "DASH", ts: "TS" };
@@ -94,6 +121,7 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
   });
 
   const joined = options.createMerger();
+  const version = useQuietVersion();
   const titles = createMemo(() => {
     const items: AddonItem[] = [];
     for (const group of fromAddons.extraGroups()) items.push(...group.items);
@@ -101,14 +129,12 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
     for (const meta of popularPage()?.items ?? [])
       if (addons.answers("stream", options.type, meta.id)) items.push({ meta, addon: "" });
     // Once: matchOf() isn't tracked, as it's asked for every title.
-    titleMatcher.version();
+    version();
     const merged = joined(options.entries(), titleMatcher.matchOf, items, titleMatcher.changes());
-    const progressOf = options.progressOf;
-    if (progressOf) {
-      for (const title of merged.titles) {
-        const part = progressOf(title.key);
-        if (part !== undefined) title.progress = part;
-      }
+    // The few watched, not every title.
+    for (const [key, part] of options.progress?.() ?? []) {
+      const title = merged.byKey.get(key);
+      if (title?.key === key) title.progress = part;
     }
     return merged;
   });

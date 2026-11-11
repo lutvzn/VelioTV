@@ -31,7 +31,7 @@ import { createVodLibrary } from "./data/vodLibrary";
 import { createVodLayout } from "./data/vodLayout";
 import { createVodSorts } from "./data/vodSorts";
 import { createTitleMatcher, type MatchItem, type MatchStore } from "./data/titleMatches";
-import { openDb, readTitleMatches, writeTitleMatches } from "./data/db";
+import { openDb, readTitleMatches, trimTitleMatches, writeTitleMatches } from "./data/db";
 import { createWatched } from "./data/watched";
 import { matchLanguage, tvLanguages } from "./lang/languages";
 import { setTwelveHour } from "./live/format";
@@ -190,6 +190,7 @@ let matchDb: Promise<IDBDatabase> | undefined;
 const matchStore: MatchStore = {
   load: async () => readTitleMatches(await (matchDb ??= openDb())),
   save: async record => writeTitleMatches(await (matchDb ??= openDb()), record),
+  trim: async (source, from) => trimTitleMatches(await (matchDb ??= openDb()), source, from),
 };
 
 /** The sources' films and series matched to Cinemeta, while the modern layout is on (src/data/titleMatches.ts). */
@@ -217,12 +218,19 @@ export const setTmdbUrl = (url: string) => {
   setTmdbUrlSignal(url || TMDB_URL);
 };
 // The build's key goes only to TMDB itself, not to a test address.
-const tmdbClient = createTmdb({
+export const tmdbClient = createTmdb({
   key: () => (untrack(tmdbUrl) === TMDB_URL ? TMDB_KEY : "test"),
   url: () => untrack(tmdbUrl),
 });
 /** Whether TMDB is used: with the build's key, or at a test address. */
 export const tmdbOn = () => TMDB_KEY !== "" || tmdbUrl() !== TMDB_URL;
+/**
+ * For probes (scripts/tv-probe/probes/search-speed.js): a request to TMDB
+ * itself with the build's key, without the client's limit on requests at
+ * once. The answer, not the key, goes back.
+ */
+export const tmdbRequest = (path: string) =>
+  fetch(`${TMDB_URL}${path}${path.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(TMDB_KEY)}`);
 const moreMatches = createMoreMatches({
   tmdb: () => (untrack(tmdbOn) ? tmdbClient : undefined),
   imdbOfTmdb: (type, tmdb) => wikidata.imdbOf(type, tmdb),
@@ -266,6 +274,11 @@ export const titleMatcher = createTitleMatcher({
   byTmdb: moreMatches.byTmdb,
   findMore: moreMatches.findMore,
   findMoreAtOnce: MORE_AT_ONCE,
+  // Cinemeta answers over HTTP/1.1, so the TV opens at most 6 connections
+  // to it; 6 searches are the fastest, and one is left for the page's own
+  // requests there, as for a film's details (PLAN.md, "Cinemeta's and TMDB's
+  // search speed").
+  concurrency: 5,
   store: matchStore,
 });
 if (typeof window !== "undefined") window.addEventListener("pagehide", () => void titleMatcher.flush());

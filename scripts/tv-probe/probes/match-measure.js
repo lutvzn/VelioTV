@@ -11,6 +11,16 @@
 //   "maxMs": 1500000, the longest to wait
 //   "everyMs": 60000, how often to sample
 // Waits for matching to end (up to maxMs), sampling progress and frames each minute, then counts the matches.
+// A source's matches, from its blocks (and its one record from before them).
+function keptOf(records, source) {
+  const matches = {};
+  const mine = records.filter(one => one.source === source && one.cinemeta === window.velio.cinemetaUrl());
+  mine.sort((a, b) => (a.block === undefined ? -1 : a.block) - (b.block === undefined ? -1 : b.block));
+  for (const one of mine)
+    Object.assign(matches, typeof one.matches === "string" ? JSON.parse(one.matches) : one.matches);
+  return mine.length > 0 ? { matches } : undefined;
+}
+
 async function probe(input) {
   const app = window.velio;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -18,9 +28,7 @@ async function probe(input) {
   // What each film was found by before, to sample only what this run found.
   const startRecords = await app.db.readTitleMatches(await app.db.openDb());
   const startSource = app.library.sources().find(one => one.name === input.source);
-  const startRecord = startRecords.find(
-    one => one.source === startSource.id && one.cinemeta === app.cinemetaUrl(),
-  );
+  const startRecord = keptOf(startRecords, startSource.id);
   const viaBefore = new Map();
   for (const key of Object.keys(startRecord ? startRecord.matches : {})) {
     const v = startRecord.matches[key];
@@ -66,7 +74,7 @@ async function probe(input) {
   status.unmatchedSample = status.unmatchedSample && status.unmatchedSample.slice(0, 25);
   const records = await app.db.readTitleMatches(await app.db.openDb());
   const source = app.library.sources().find(one => one.name === input.source);
-  const record = records.find(one => one.source === source.id && one.cinemeta === app.cinemetaUrl());
+  const record = keptOf(records, source.id);
   const sample = (list, via) => {
     const found = list.filter(one => {
       const v = record.matches[one.key];
@@ -117,7 +125,7 @@ async function statusProbe(input) {
   const records = await db.readTitleMatches(await db.openDb());
   const out = { cinemeta: app.cinemetaUrl(), progress: titleMatcher.progress(), sources: [] };
   for (const source of library.sources()) {
-    const record = records.find(one => one.source === source.id && one.cinemeta === app.cinemetaUrl());
+    const record = keptOf(records, source.id);
     const matches = record ? record.matches : {};
     const count = list => {
       let looked = 0,
