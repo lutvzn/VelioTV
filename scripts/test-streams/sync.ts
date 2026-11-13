@@ -105,11 +105,11 @@ export const testList = (base: string, name: string, channels = 50): ListDraft =
   refreshHours: 24,
 });
 
-/** The test server's made-up Stremio add-on (stremio.mjs), as a list. */
-export const testAddon = (base: string, name: string): ListDraft => ({
+/** The test server's made-up Stremio add-on (stremio.mjs), or another at `path` (debrid.mjs), as a list. */
+export const testAddon = (base: string, name: string, path = "/stremio/manifest.json"): ListDraft => ({
   name,
   kind: "stremio",
-  url: `${base}/stremio/manifest.json`,
+  url: `${base}${path}`,
   refreshHours: 24,
 });
 

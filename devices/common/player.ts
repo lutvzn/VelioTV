@@ -27,6 +27,18 @@ export interface Stream {
   live?: boolean;
   /** Where to start, in milliseconds, for a film or recording carried on from before. */
   startMs?: number;
+  /**
+   * How long the app's player waits for the first picture, when not its
+   * usual time: a debrid add-on's link can take a while to resolve.
+   */
+  startTimeoutMs?: number;
+  /** Who is giving the stream, such as an add-on, named while it starts. */
+  from?: string;
+  /**
+   * A link that redirects to the file, as a debrid add-on's does: the app's
+   * player follows it first, and gives the engine where it ends.
+   */
+  redirects?: boolean;
 }
 
 /** An audio or subtitle track of the stream playing. */

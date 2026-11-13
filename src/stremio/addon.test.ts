@@ -9,6 +9,7 @@ import {
   readStreams,
   readSubtitlesAnswer,
   resourceUrl,
+  silentSound,
   supports,
 } from "./addon";
 
@@ -187,6 +188,35 @@ describe("an add-on's answers", () => {
       },
       { url: "https://cdn.example.invalid/film.m3u8", name: "", description: "Older add-on", subtitles: [] },
     ]);
+  });
+
+  it("mark streams whose sound is only DTS or TrueHD, which the TV plays silent", () => {
+    const silent = [
+      "Film.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.5.1-GRP",
+      "Film 1080p BluRay x265 DTS",
+      "Film.2019.UHD.TrueHD.7.1.Atmos",
+      "Film [DTS:X 7.1]",
+      "hevc10-dts",
+    ];
+    const heard = [
+      "Film.2160p.WEB-DL.DDP5.1.Atmos.HEVC",
+      "Film.1080p.BluRay.DTS-HD.MA.5.1.AC3.x264",
+      "Film 1080p AAC 2.0",
+      "Film.2160p.TrueHD.Atmos.7.1.E-AC-3",
+      "Film.mkv",
+      "Shorts.Stories.1080p",
+    ];
+    expect(silent.filter(name => !silentSound(name))).toEqual([]);
+    expect(heard.filter(silentSound)).toEqual([]);
+
+    const read = readStreams({
+      streams: [
+        { url: "http://cdn/a.mkv", name: "RD+ 4K", description: "Film.2160p.REMUX.TrueHD.7.1" },
+        { url: "http://cdn/b.mkv", name: "RD+ 4K", behaviorHints: { filename: "Film.2160p.DTS-HD.MA.mkv" } },
+        { url: "http://cdn/c.mkv", name: "RD+ 1080p", description: "Film.1080p.DDP5.1" },
+      ],
+    });
+    expect(read.streams.map(stream => stream.silent)).toEqual([true, true, undefined]);
   });
 
   it("read subtitles with a web address", () => {

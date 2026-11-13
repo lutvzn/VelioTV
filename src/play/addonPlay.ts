@@ -3,6 +3,7 @@
 // its subtitles and every add-on's subtitle files, and for an episode the
 // next one, played from the same add-on's stream of the same kind.
 
+import type { Stream } from "#devices/common/player";
 import type { Episode, SeriesDetails } from "../data/vod";
 import type { FilmEntry, SeriesEntry } from "../data/vodLibrary";
 import { addons } from "../library";
@@ -18,13 +19,30 @@ export interface ChosenStream {
   stream: AddonStream;
 }
 
-/** Every playable stream found, in order, with its add-on. */
-export const chosenStreams = (found: FoundStreams[]): ChosenStream[] =>
-  found.flatMap(one => one.streams.map(stream => ({ addon: one.addon, addonName: one.addonName, stream })));
+/**
+ * Every playable stream found, in order, with its add-on; those whose sound
+ * the TV may not play (DTS or TrueHD) after the rest.
+ */
+export const chosenStreams = (found: FoundStreams[]): ChosenStream[] => {
+  const all = found.flatMap(one =>
+    one.streams.map(stream => ({ addon: one.addon, addonName: one.addonName, stream })),
+  );
+  return [...all.filter(one => !one.stream.silent), ...all.filter(one => one.stream.silent)];
+};
 
-export const streamOf = (chosen: ChosenStream) => ({
+/**
+ * How long an add-on's stream may take to show its first picture: a debrid
+ * add-on's link may first have to be fetched by the debrid service (PLAN.md,
+ * "Debrid add-ons").
+ */
+export const ADDON_START_TIMEOUT_MS = 45_000;
+
+export const streamOf = (chosen: ChosenStream): Stream => ({
   url: chosen.stream.url,
   ...(chosen.stream.userAgent ? { userAgent: chosen.stream.userAgent } : {}),
+  startTimeoutMs: ADDON_START_TIMEOUT_MS,
+  from: chosen.addonName,
+  redirects: true,
 });
 
 /** The stream's own subtitles (if it's an add-on's), then every add-on's, each address once. */

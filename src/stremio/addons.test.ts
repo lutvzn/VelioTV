@@ -1,7 +1,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import { memoryStorage } from "../data/memoryStorage";
-import { createAddons, type AddonList } from "./addons";
+import { createAddons, type AddonList, type Addons } from "./addons";
 
 const BASE = "https://addon.example.invalid";
 const OTHER = "https://other.example.invalid";
@@ -32,7 +32,7 @@ const web = (answers: Record<string, unknown>) =>
     return Promise.resolve(new Response(JSON.stringify(answers[url])));
   });
 
-const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+const flush = (addons: Addons) => vi.waitUntil(() => addons.states().every(state => !state.loading));
 
 const setup = (answers: Record<string, unknown>, lists: AddonList[], storage = memoryStorage()) => {
   const fetch = web(answers);
@@ -57,7 +57,7 @@ describe("the add-ons", () => {
   it("read each manifest, keep it, and use the kept one at the next start", async () => {
     const answers = { [ADDON.url]: manifest("Alpha") };
     const first = setup(answers, [ADDON]);
-    await flush();
+    await flush(first.addons);
     expect(first.addons.states().map(state => state.manifest?.name)).toEqual(["Alpha"]);
     expect(first.addons.catalogs("movie").map(group => group.key)).toEqual(["list-a/movie/top"]);
 
@@ -65,7 +65,7 @@ describe("the add-ons", () => {
     expect(again.addons.catalogs("series").map(group => group.catalog.name)).toEqual(["Shows"]);
     // Read as the add-on sent it, so its search and paging are kept too.
     expect(again.addons.catalogs("movie")[0].catalog).toMatchObject({ search: true, paged: true });
-    await flush();
+    await flush(again.addons);
     // Not a day old, so not asked for again.
     expect(again.fetch).not.toHaveBeenCalled();
   });
@@ -73,7 +73,7 @@ describe("the add-ons", () => {
   it("keep a kept manifest when the add-on can't be reached", async () => {
     const storage = memoryStorage();
     const first = setup({ [ADDON.url]: manifest("Alpha") }, [ADDON], storage);
-    await flush();
+    await flush(first.addons);
     first.later(0);
     const offline = setup({}, [ADDON], storage);
     offline.later(25 * 3_600_000);
@@ -94,7 +94,7 @@ describe("the add-ons", () => {
       },
       [ADDON],
     );
-    await flush();
+    await flush(addons);
     const [group] = addons.catalogs("movie");
     await addons.loadPage(group);
     await addons.loadPage(group);
@@ -113,7 +113,7 @@ describe("the add-ons", () => {
       },
       [ADDON, SECOND],
     );
-    await flush();
+    await flush(addons);
     expect((await addons.meta("movie", "tt1", "list-b"))?.plot).toBe("From Beta");
     // Beta first, so Alpha wasn't asked.
     expect(fetch.mock.calls.map(call => urlOf(call[0]))).not.toContain(`${BASE}/meta/movie/tt1.json`);
@@ -132,7 +132,7 @@ describe("the add-ons", () => {
       },
       [ADDON, SECOND],
     );
-    await flush();
+    await flush(addons);
     const found = await addons.streams("movie", "tt1");
     expect(found.map(one => [one.addonName, one.streams.length, one.unplayable, one.problem])).toEqual([
       ["Alpha", 1, 1, undefined],
@@ -151,7 +151,7 @@ describe("the add-ons", () => {
       },
       [ADDON],
     );
-    await flush();
+    await flush(addons);
     expect((await addons.search("movie", "test")).map(meta => [meta.id, meta.addon])).toEqual([
       ["tt1", "list-a"],
       ["tt4", "list-a"],
@@ -164,7 +164,7 @@ describe("the add-ons", () => {
       ADDON,
       SECOND,
     ]);
-    await flush();
+    await flush(addons);
     setLists([SECOND]);
     expect(addons.states().map(state => state.manifest?.name)).toEqual(["Beta"]);
     expect(addons.catalogs("movie").map(group => group.addon)).toEqual(["list-b"]);

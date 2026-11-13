@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # Runs a probe inside Velio on a Samsung TV, to test what the TV can do
-# from the app's own context. Run it inside the tv-dev box, with the app
-# installed (scripts/deploy-tizen.sh):
+# from the app's own context, with the app installed (scripts/deploy-tizen.sh):
 #
 #   ./scripts/tv-probe/run.sh <tv-ip> <probe> [input-json]
 #
@@ -32,7 +31,9 @@ else
 fi
 input="${3:-"{}"}"
 target="$tv_ip:26101"
-sdb="$HOME/tizen-studio/tools/sdb"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tizen-env.sh"
+tizen_require_sdb
+sdb="$TIZEN_SDB"
 local_port=9333
 
 [[ -f "$probe" ]] || {
@@ -40,9 +41,9 @@ local_port=9333
   exit 1
 }
 
-export FNM_DIR="$HOME/.local/share/fnm"
-export PATH="$FNM_DIR:$PATH"
-eval "$(fnm env --shell bash)"
+for tool in node curl timeout; do
+  command -v "$tool" >/dev/null 2>&1 || fail "$tool is required to run TV probes."
+done
 
 "$sdb" connect "$tv_ip" >/dev/null
 # The debug command hangs if the app is already running.

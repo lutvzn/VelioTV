@@ -203,6 +203,15 @@ const streams = (type, id, base) => {
   return { streams: testStreams(base, `${show.name} ${code}`, false) };
 };
 
+/** A film's name, or an episode's as "<series> S01 E02", for the debrid add-on (debrid.mjs). */
+export const titleLabel = (type, id) => {
+  if (type === "movie") return filmOf(id)?.name;
+  const [showId, season, episode] = id.split(":");
+  const show = seriesOf(showId);
+  if (!show || !season || !episode) return undefined;
+  return `${show.name} S${season.padStart(2, "0")} E${episode.padStart(2, "0")}`;
+};
+
 const subtitles = (type, id, base) => {
   const known = type === "movie" ? filmOf(id) : seriesOf(id.split(":")[0]);
   // The VTT file under Portuguese, so it's a second language to choose.

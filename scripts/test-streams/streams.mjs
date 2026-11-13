@@ -25,8 +25,8 @@ const MPEG2 = [
   "50",
   "-flags",
   "+ildct+ilme",
-  "-top",
-  "1",
+  "-field_order",
+  "tt",
 ];
 
 const AAC = ["-c:a", "aac", "-b:a", "128k"];

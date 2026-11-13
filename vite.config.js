@@ -106,12 +106,14 @@ export default defineConfig(({ mode }) => {
       },
     },
     test: {
+      // Each file uses browser storage; run files serially in the shared browser.
+      fileParallelism: false,
       browser: {
         enabled: true,
         // Shows the browser locally; CI sets CI=true and runs headless.
         headless: Boolean(process.env.CI),
         provider: playwright(),
-        instances: [{ browser: "webkit" }],
+        instances: [{ browser: "chromium" }],
       },
       testTransformMode: { web: ["/.[jt]sx?$/"] },
       globals: true,

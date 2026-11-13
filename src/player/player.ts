@@ -92,6 +92,10 @@ export interface PlayerOptions {
   startTimeoutMs?: number;
   /** A started stream that makes no progress for this long has stalled. */
   stallMs?: number;
+  /** A film that hasn't moved this long after its first picture has frozen. */
+  frozenMs?: number;
+  /** Follows a link's redirects (`Stream.redirects`); fetch() by default. */
+  followRedirects?: (url: string) => Promise<string>;
   /** How long to wait before each try at reopening a live stream. */
   retryDelaysMs?: number[];
   /** How long a live stream must play again before the tries start over. */
@@ -162,6 +166,11 @@ export const START_TIMEOUT_MS = 20_000;
 // AVPlay asks again by itself when raw TS stops arriving, after about 11 s
 // on the TV, so this leaves it room.
 export const STALL_MS = 15_000;
+/**
+ * A film whose clock hasn't moved this long after its first picture has
+ * frozen at the start, as a FLAC file did on the TV (PLAN.md, "Debrid add-ons").
+ */
+export const FROZEN_MS = 10_000;
 export const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15_000, 30_000];
 export const RECOVERED_MS = 30_000;
 /** How often a started stream is checked for progress. */
@@ -172,16 +181,39 @@ export const NEEDS_REFERER = "needs-referer";
 /** Errors for a stream that showed nothing in time, stopped moving, or ended. */
 export const TIMEOUT = "timeout";
 export const STALLED = "stalled";
+/** A film that showed a picture but never moved: opening it again won't help. */
+export const FROZEN = "frozen";
 export const DROPPED = "dropped";
 /** A live stream waiting for the network to come back. */
 export const OFFLINE = "offline";
+
+/**
+ * Where a link ends up after its redirects. AVPlay gives up on a request
+ * after 10 s (3 tries, then PLAYER_ERROR_CONNECTION_FAILED at 30 s), and a
+ * debrid add-on's link can take longer to answer (PLAN.md, "Debrid
+ * add-ons"); fetch() waits. Only the headers are read. The link itself
+ * when it can't be followed, or on TVs without AbortController (Chromium
+ * before 66), where the whole file would be read.
+ */
+export const followRedirects = async (url: string): Promise<string> => {
+  if (typeof AbortController === "undefined") return url;
+  const controller = new AbortController();
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response.ok && response.url ? response.url : url;
+  } catch {
+    return url;
+  } finally {
+    controller.abort();
+  }
+};
 
 /** How many times a film or recording that drops is opened again where it was. */
 export const VOD_RETRIES = 3;
 
 /** Failures that opening the stream again won't fix. */
 const lasting = (error: string) =>
-  error === NEEDS_REFERER || /NOT_SUPPORTED|INVALID_URI|UNSUPPORTED/i.test(error);
+  error === NEEDS_REFERER || error === FROZEN || /NOT_SUPPORTED|INVALID_URI|UNSUPPORTED/i.test(error);
 
 /** One play() call, across the times its stream is opened. */
 interface Request {
@@ -222,6 +254,7 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
   const now = options.now ?? (() => performance.now());
   const delays = options.retryDelaysMs ?? RETRY_DELAYS_MS;
   const stallMs = options.stallMs ?? STALL_MS;
+  const frozenMs = options.frozenMs ?? FROZEN_MS;
   const preferences = options.preferences ?? memoryPreferences();
   const showVideo = options.showVideo ?? setVideoWindow;
   const [status, setStatus] = createSignal<PlayerStatus>({ state: "idle" });
@@ -327,6 +360,8 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
     // Where a film was, to open it there again if it drops.
     let lastPosition = stream.startMs ?? 0;
     let moved = false;
+    /** Whether it has moved at all since this open, seeks or not. */
+    let everMoved = false;
     let progressAt = opened;
     let bufferingSince: number | undefined;
     const check = () => {
@@ -340,20 +375,31 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
         return;
       }
       if (current !== position) {
-        if (position >= 0) moved = true;
+        if (position >= 0) moved = everMoved = true;
         position = current;
         progressAt = at;
       }
       if (bufferingSince !== undefined && at - bufferingSince >= stallMs) fail(STALLED);
       else if (bufferingSince === undefined && moved && at - progressAt >= stallMs) fail(STALLED);
+      // Live streams don't all report a position, so only films can be seen not to move.
+      else if (bufferingSince === undefined && !stream.live && !everMoved && at - progressAt >= frozenMs) {
+        fail(FROZEN);
+      }
     };
 
-    after(options.startTimeoutMs ?? START_TIMEOUT_MS, () => fail(TIMEOUT));
+    after(stream.startTimeoutMs ?? options.startTimeoutMs ?? START_TIMEOUT_MS, () => fail(TIMEOUT));
+    let url = stream.url;
+    if (stream.redirects && !stream.referer) {
+      // The stream before stops while this one's link is followed.
+      active.stop();
+      url = await (options.followRedirects ?? followRedirects)(stream.url);
+      if (mine !== session) return;
+    }
     try {
       // Stops the stream before, as opening another would.
       if (stream.referer) throw new Error(NEEDS_REFERER);
       active.setWindow(rect);
-      active.open(stream, event => {
+      active.open(url === stream.url ? stream : { ...stream, url }, event => {
         if (mine !== session) return;
         if (event.type === "error") return fail(event.error);
         if (event.type === "subtitle") {

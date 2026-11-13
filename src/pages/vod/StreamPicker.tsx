@@ -85,7 +85,9 @@ export const StreamPicker = <L,>(props: StreamPickerProps<L>) => {
     })),
     ...streams().map(chosen => ({
       text: rowText(chosen),
-      detail: firstLine(chosen.stream.description),
+      detail: chosen.stream.silent
+        ? `${$t("stremio.noSound")} · ${firstLine(chosen.stream.description)}`
+        : firstLine(chosen.stream.description),
       choice: { kind: "addon" as const, chosen },
     })),
   ]);

@@ -31,8 +31,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # The tests run in WebKit, the closest desktop engine to the TVs' browsers.
-      - run: pnpm exec playwright install --with-deps webkit
+      # Native Chromium, matching the TVs' browser family.
+      - run: pnpm exec playwright install --with-deps chromium
 
       - name: Format, lint, type check and test
         run: pnpm check

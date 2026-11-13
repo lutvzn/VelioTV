@@ -14,7 +14,15 @@
 import { onCleanup } from "solid-js";
 import type { Channel } from "../data/lineup";
 import { player } from "../player";
-import { DROPPED, NEEDS_REFERER, OFFLINE, STALLED, TIMEOUT } from "../player/player";
+import {
+  DROPPED,
+  FROZEN,
+  NEEDS_REFERER,
+  OFFLINE,
+  STALLED,
+  START_TIMEOUT_MS,
+  TIMEOUT,
+} from "../player/player";
 import { $t } from "../translate";
 
 export interface Handoff {
@@ -82,10 +90,11 @@ export const playChannel = (channel: Channel, options: { keep?: boolean } = {}) 
 };
 
 /** What went wrong, in words. */
-const errorText = (error: string | undefined) => {
+const errorText = (error: string | undefined, startTimeoutMs = START_TIMEOUT_MS) => {
   if (error === NEEDS_REFERER) return $t("live.error.referer");
-  if (error === TIMEOUT) return $t("live.error.timeout");
+  if (error === TIMEOUT) return $t("live.error.timeout", { seconds: Math.round(startTimeoutMs / 1000) });
   if (error === STALLED) return $t("live.error.stalled");
+  if (error === FROZEN) return $t("live.error.frozen");
   if (error === DROPPED) return $t("live.error.dropped");
   if (error && /CONNECTION|NETWORK/i.test(error)) return $t("live.error.connection");
   if (error && /NOT_SUPPORTED|UNSUPPORTED/i.test(error)) return $t("live.error.format");
@@ -94,14 +103,15 @@ const errorText = (error: string | undefined) => {
 
 /** The player's state in words, while it isn't simply playing. */
 export const statusText = () => {
-  const { state, error, attempt, attempts } = player.status();
+  const { state, error, attempt, attempts, stream } = player.status();
+  if (state === "starting" && stream?.from) return $t("play.waitingFor", { name: stream.from });
   if (state === "starting") return $t("live.starting");
   if (state === "buffering") return $t("live.buffering");
   if (state === "ended") return $t("live.ended");
   if (state === "reconnecting" && error === OFFLINE) return $t("live.offline");
   if (state === "reconnecting") {
-    return `${errorText(error)} ${$t("live.reconnecting", { attempt: attempt ?? 1, attempts: attempts ?? 1 })}`;
+    return `${errorText(error, stream?.startTimeoutMs)} ${$t("live.reconnecting", { attempt: attempt ?? 1, attempts: attempts ?? 1 })}`;
   }
   if (state !== "failed") return undefined;
-  return `${$t("live.failed")}. ${errorText(error)}`;
+  return `${$t("live.failed")}. ${errorText(error, stream?.startTimeoutMs)}`;
 };

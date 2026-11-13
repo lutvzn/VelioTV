@@ -14,7 +14,8 @@
 //   /sync/approve?code=K7QM-…&profiles=Kids,Guest   the phone's half of
 //                                          signing in (all profiles if none)
 //   /sync/add-list?name=…&channels=20&profiles=Kids
-//   /sync/add-list?kind=stremio&profiles=Living%20room  the test add-on (stremio.mjs)
+//   /sync/add-list?kind=stremio&profiles=Living%20room  the test add-on (stremio.mjs);
+//     with &path=/debrid/key=velio-test/manifest.json, the debrid one (debrid.mjs)
 //   /sync/change-list?list=…&name=…&profiles=…
 //   /sync/remove-list?list=…
 //   /sync/pin?profile=Kids&pin=1234        no pin= removes it
@@ -98,7 +99,7 @@ const OWNER = {
   "add-list": (sync, query, base) => ({
     id: sync.addList(
       query.get("kind") === "stremio"
-        ? testAddon(base, query.get("name") ?? "Test add-on")
+        ? testAddon(base, query.get("name") ?? "Test add-on", query.get("path") ?? undefined)
         : testList(base, query.get("name") ?? "Added list", Number(query.get("channels")) || 20),
       list(query.get("profiles")) ?? [],
     ),

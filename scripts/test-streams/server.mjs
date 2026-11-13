@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Serves live test streams, for checking which formats a TV plays, and made-up
-// IPTV sources that play them. Run it inside the tv-dev box, which has ffmpeg:
+// IPTV sources that play them. Requires ffmpeg with libx264 and libx265:
 //
 //   node scripts/test-streams/server.mjs [--port 8090] [--channels 10000] [--days 7]
 //
@@ -57,6 +57,9 @@
 //   /timeshift/...                                         Xtream (xtream.mjs)
 // A made-up Stremio add-on over the same films and series (stremio.mjs):
 //   /stremio/manifest.json
+// a made-up debrid add-on (debrid.mjs), its streams redirects to files in
+// the formats debrid files come in:
+//   /debrid/key=velio-test/manifest.json
 // and a made-up Cinemeta, Wikidata and TMDB, for the modern Movies and Series:
 //   /cinemeta/manifest.json
 //   /wikidata/sparql
@@ -104,7 +107,8 @@ import {
   subtitles,
 } from "./streams.mjs";
 import { handleSync, upgradeSync } from "./syncServer.mjs";
-import { handleCinemeta, handleStremio, handleTmdb, handleWikidata } from "./stremio.mjs";
+import { encodeDebridFiles, handleDebrid } from "./debrid.mjs";
+import { handleCinemeta, handleStremio, handleTmdb, handleWikidata, titleLabel } from "./stremio.mjs";
 import { handleXtream } from "./xtream.mjs";
 import { backdropSvg, FILM_SECONDS, filmSubtitles, posterSvg, vodLibrary, vodLines } from "./vod.mjs";
 
@@ -126,6 +130,7 @@ const cacheDir = path.join(
 );
 const guideDir = path.join(path.dirname(cacheDir), "test-guides");
 const filmDir = path.join(path.dirname(cacheDir), "test-film");
+const debridDir = path.join(path.dirname(cacheDir), "test-debrid");
 const hlsRoot = mkdtempSync(path.join(tmpdir(), "velio-hls-"));
 const children = new Set();
 let stopping = false;
@@ -560,6 +565,8 @@ const index = host => {
     film: ["mp4", "mkv", "ts", "m3u8"].map(ext => `${base}/vod/film.${ext}`),
     filmSubtitles: ["srt", "vtt"].map(ext => `${base}/vod/film.${ext}`),
     stremioAddon: `${base}/stremio/manifest.json`,
+    debridAddon: `${base}/debrid/key=velio-test/manifest.json`,
+    debridLog: `${base}/debrid/log`,
     cinemeta: `${base}/cinemeta/manifest.json`,
     wikidata: `${base}/wikidata/sparql`,
     tmdb: `${base}/tmdb/3`,
@@ -856,6 +863,7 @@ const handle = (req, res) => {
   const base = `http://${req.headers.host ?? "localhost"}`;
   if (handleSync(req, res, url, base)) return;
   if (handleStremio(res, url, base, send)) return;
+  if (handleDebrid(req, res, url, base, { send, sendFile, dir: debridDir, titleName: titleLabel })) return;
   if (handleCinemeta(res, url, base, send)) return;
   if (handleWikidata(res, url, send)) return;
   if (handleTmdb(res, url, send)) return;
@@ -931,6 +939,7 @@ for (const file of readdirSync(cacheDir)) {
 }
 for (const stream of STREAMS) await encodeClip(stream);
 await encodeFilm();
+await encodeDebridFiles({ ffmpeg, finished, source: filmPath("mp4"), dir: debridDir });
 for (const stream of STREAMS) startHls(stream);
 
 const server = http.createServer(handle);

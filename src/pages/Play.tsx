@@ -52,6 +52,9 @@ import { TrackPanel } from "./live/TrackPanel";
 // add-ons", step 6). One in the language last chosen is shown when the
 // stream has none in it.
 
+/** How long a file plays before its tracks are checked for sound, and how long "no sound" shows. */
+const SOUND_CHECK_MS = 2000;
+const NO_SOUND_SHOWN_MS = 8000;
 const BAR_MS = 5000;
 const SAVE_MS = 10_000;
 const TICK_MS = 500;
@@ -343,6 +346,31 @@ export default () => {
     goLive(current);
   };
 
+  // A file whose sound the TV can't decode, such as DTS, plays its picture
+  // in silence, and AVPlay lists no audio track (PLAN.md, "Debrid add-ons"):
+  // once it has played a moment, that's said for a while.
+  const [noSound, setNoSound] = createSignal(false);
+  let soundChecked: Stream | undefined;
+  let noSoundTimer: number | undefined;
+  createEffect(
+    on(player.status, now => {
+      const { stream } = now;
+      if (now.state !== "playing" || !stream || stream === soundChecked) return;
+      soundChecked = stream;
+      clearTimeout(noSoundTimer);
+      setNoSound(false);
+      noSoundTimer = window.setTimeout(() => {
+        if (player.status().stream !== stream) return;
+        const formats = player.formats();
+        if (!formats.some(one => one.startsWith("VIDEO")) || formats.some(one => one.startsWith("AUDIO")))
+          return;
+        setNoSound(true);
+        noSoundTimer = window.setTimeout(() => setNoSound(false), NO_SOUND_SHOWN_MS);
+      }, SOUND_CHECK_MS);
+    }),
+  );
+  onCleanup(() => clearTimeout(noSoundTimer));
+
   // Subtitle files from add-ons, and the one shown.
   const [files, setFiles] = createSignal<ExternalSubtitle[]>([]);
   const external = createExternalSubtitles({ position: () => player.position() });
@@ -467,7 +495,8 @@ export default () => {
     const { start: from, stop } = recording.programme;
     return Math.max(0, Math.min(1, (tick() - from) / (stop - from)));
   };
-  const status = () => (paused() ? undefined : statusText());
+  const status = () =>
+    paused() ? undefined : (statusText() ?? (noSound() ? $t("play.noSound") : undefined));
 
   return (
     <View

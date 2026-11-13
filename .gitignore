@@ -18,3 +18,6 @@ reference/
 # Local secrets, such as the TMDB key (never VITE_-prefixed, so they stay out of the build)
 .env
 .env.*
+
+# Imported SDK, signing credentials and other machine-local tools
+.local/

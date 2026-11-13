@@ -4,6 +4,7 @@ import { setVideoWindow, videoWindow } from "../videoWindow";
 import {
   createPlayer,
   DROPPED,
+  FROZEN,
   NEEDS_REFERER,
   nextPaint,
   OFFLINE,
@@ -78,6 +79,11 @@ const live = { url: "live", live: true };
 const wait = async (ms: number) => {
   time += ms;
   await vi.advanceTimersByTimeAsync(ms);
+};
+
+// A second at a time, as the progress checks run.
+const seconds = async (count: number) => {
+  for (let i = 0; i < count; i++) await wait(1000);
 };
 
 const liveSetup = () => {
@@ -198,6 +204,98 @@ describe("the player", () => {
     await player.play({ url: "c" });
     fake.opened[2]?.send({ type: "playing" });
     vi.advanceTimersByTime(60_000);
+    expect(player.status().state).toBe("playing");
+  });
+
+  it("waits longer for a stream that says so", async () => {
+    vi.useFakeTimers();
+    const fake = fakeEngine();
+    const player = createPlayer(() => Promise.resolve(fake.engine), {
+      now,
+      afterPaint,
+      startTimeoutMs: 5000,
+    });
+    await player.play({ url: "slow", startTimeoutMs: 20_000 });
+    await wait(19_999);
+    expect(player.status().state).toBe("starting");
+    await wait(1);
+    expect(player.status()).toMatchObject({ state: "failed", error: "timeout" });
+  });
+
+  it("follows a link's redirects before opening it, within its time", async () => {
+    vi.useFakeTimers();
+    const fake = fakeEngine();
+    const followed: string[] = [];
+    const player = createPlayer(() => Promise.resolve(fake.engine), {
+      now,
+      afterPaint,
+      followRedirects: url =>
+        new Promise(resolve => {
+          followed.push(url);
+          setTimeout(() => resolve(`${url}/file.mkv`), 15_000);
+        }),
+    });
+    await player.play({ url: "a" });
+    fake.last()?.send({ type: "playing" });
+    const stops = fake.stops();
+    void player.play({ url: "debrid", redirects: true, startTimeoutMs: 45_000 });
+    await wait(0);
+    // The film before stops at once; the link is followed past AVPlay's 10 s.
+    expect(fake.stops()).toBe(stops + 1);
+    await wait(14_999);
+    expect(fake.opened).toHaveLength(1);
+    await wait(1);
+    expect(followed).toEqual(["debrid"]);
+    expect(fake.last()?.stream).toMatchObject({ url: "debrid/file.mkv", redirects: true });
+    // The status keeps the link as asked for.
+    expect(player.status()).toMatchObject({ state: "starting", stream: { url: "debrid" } });
+
+    // A newer play() wins over a link still being followed.
+    void player.play({ url: "slow", redirects: true });
+    await wait(0);
+    await player.play({ url: "b" });
+    await wait(15_000);
+    expect(fake.opened.map(one => one.stream.url)).toEqual(["a", "debrid/file.mkv", "b"]);
+  });
+
+  it("fails a film whose picture never moves, without trying it again", async () => {
+    vi.useFakeTimers();
+    const fake = fakeEngine();
+    const player = createPlayer(() => Promise.resolve(fake.engine), {
+      now,
+      afterPaint,
+      stallMs: 3000,
+      frozenMs: 2000,
+    });
+    await player.play({ url: "flac" });
+    fake.last()?.send({ type: "playing" });
+    // Its place is first seen at 1 s, then still 2 s later.
+    await seconds(2);
+    expect(player.status().state).toBe("playing");
+    await seconds(1);
+    expect(player.status()).toMatchObject({ state: "failed", error: FROZEN });
+    await seconds(10);
+    expect(fake.opened).toHaveLength(1);
+
+    // Paused at its start, it isn't frozen; once it has moved, stopping is a stall.
+    await player.play({ url: "film" });
+    fake.last()?.send({ type: "playing" });
+    player.setPaused(true);
+    await seconds(5);
+    expect(player.status().state).toBe("paused");
+    player.setPaused(false);
+    await seconds(1);
+    fake.setPosition(1000);
+    await seconds(1);
+    expect(player.status().state).toBe("playing");
+    await seconds(3);
+    expect(player.status()).toMatchObject({ state: "reconnecting", error: STALLED });
+
+    // A live channel needn't say where it is.
+    fake.setPosition(0);
+    await player.play(live);
+    fake.last()?.send({ type: "playing" });
+    await seconds(10);
     expect(player.status().state).toBe("playing");
   });
 

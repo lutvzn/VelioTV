@@ -552,6 +552,38 @@ The user chose: add-ons' films and series inside Movies and Series, as groups; c
   - The Settings page.
 - **Not done yet:** add-ons that need setting up first (`configurationRequired`) are only flagged in Settings. Streams are kept for the run, so a link that expires needs the app restarted.
 
+## Debrid add-ons (asked 2026-11-12)
+
+The user asked whether debrid Stremio add-ons work in Velio. Torrentio, Comet, MediaFusion and the like, once set up with a debrid key, give streams as `https` links to their own "resolve" address, which redirects to the debrid service's copy of the file. Velio already keeps any stream with an `http(s)` `url`. The key is in the configured manifest's path, which `addonBase()` keeps. Without a debrid key, Torrentio gives only torrents (`infoHash`), which stay hidden.
+
+- **Test data:** `pnpm test-streams` serves a made-up debrid add-on (`scripts/test-streams/debrid.mjs`) at `/debrid/key=velio-test/manifest.json`. The mock account adds it with `/sync/add-list?kind=stremio&path=/debrid/key=velio-test/manifest.json&profiles=…`. Each stream goes through its resolve and two more redirects to a file. There are ten one-minute files cut from the test film, then four problem streams: a resolve that takes 5 s, one that takes 20 s, one that fails (503), and a direct link. `/debrid/log` lists the resolves and file requests, with their ranges.
+- **`debrid` probe** (Samsung 2024, modern build, about 2.5 minutes). It plays each stream with the app's player, then seeks to 0:40:
+  - **Redirects work.** Each stream's resolve was asked once. AVPlay followed the 3 redirects and took every range, including the seek's, from the final file. Most films showed their first picture in 150–310 ms; the first after start took 2.0 s, and DTS 1.2 s. Seeks took 150–280 ms.
+  - **H.264 and HEVC 10-bit, in MKV and MP4:** all played.
+  - **AAC, AC-3 5.1 and E-AC-3 5.1:** played, and AVPlay listed the audio track.
+  - **DTS 5.1 and TrueHD 5.1: the picture plays with no sound and no error.** AVPlay lists no audio track at all, so the app can't offer another. Samsung TVs from 2018 on don't decode DTS. Debrid files often carry DTS, TrueHD or Atmos, so this will happen.
+  - **DTS first, then AAC:** AVPlay chose the AAC track by itself, and the film had sound. An embedded SRT showed as a text track; the ASS one wasn't listed.
+  - **Opus 5.1:** listed with "0ch", but it has sound.
+  - **What the user heard** (run again, 8 s each): sound on AAC (H.264 and HEVC), AC-3 5.1, E-AC-3 5.1 (MKV and MP4), Opus 5.1, and the DTS-then-AAC file; none on DTS or TrueHD; FLAC froze.
+  - **FLAC: stuck.** The player said "playing", but the clock stayed at 0:00 for 6 s and AVPlay listed no tracks. The player's stall check only starts once the position has moved, so nothing fails and the screen stays frozen.
+  - **Slow resolves:** the 5 s one played after 5.2 s. The 20 s one hit the player's start timeout (`START_TIMEOUT_MS`, 20 s) and failed with "timeout". AVPlay had asked the resolve twice.
+  - **A failed resolve (503):** AVPlay asked it 6 times on its own, then failed with `PLAYER_ERROR_CONNECTION_FAILED` after 2.7 s.
+- **How long AVPlay waits for a link** (a resolve answering after 10, 14, 16 and 25 s): it gives each request 10 s, asks 3 times, and fails with `PLAYER_ERROR_CONNECTION_FAILED` at 30 s. The 10 s one played; the others never did, whatever the app's own limit.
+- **Fixes (asked by the user):**
+  - **Links are followed first** (`followRedirects()`, `src/player/player.ts`). An add-on's stream is marked `redirects`, and the player follows it with `fetch()` (headers only, then aborted), then gives AVPlay where it ends. fetch() waits past AVPlay's 10 s. If it can't follow it (an error, or a host that refuses the app's request), or the TV lacks `AbortController` (Chromium before 66, so Tizen 3 and webOS 3), AVPlay gets the link as before. The stream playing before stops while the link is followed.
+  - **Add-on streams get 45 s to start** (`ADDON_START_TIMEOUT_MS`, `src/play/addonPlay.ts`; 20 s for the rest), and the player says "Waiting for <add-on>…" meanwhile. The timeout message gives the stream's own seconds.
+  - **A frozen film fails** (`FROZEN`, `FROZEN_MS`): a film (not a live channel, which may report no position) whose clock hasn't moved 10 s after its first picture fails with "It froze at the start. The TV may not play this file's format.", and isn't opened again.
+  - **DTS and TrueHD streams are marked.** A stream whose name, description or file name says DTS or TrueHD, and no AAC, AC-3, E-AC-3, DD/DDP, Opus or MP3, is marked `silent` (`silentSound()`, `src/stremio/addon.ts`). The picker lists those after the rest, with "DTS or TrueHD sound: may be silent on this TV" before the file's name. Atmos alone isn't marked, as it often comes over E-AC-3, which plays.
+  - **No sound, said:** 2 s after a film starts, if AVPlay lists video and no audio, the player page says "This TV can't play this file's sound." for 8 s.
+- **On the TV after the fixes** (`debrid` probe, all 14 streams):
+  - The 20 s link played after 20.3 s, with the resolve asked once.
+  - First pictures were unchanged (150–410 ms; 1.3 s for the first after start). The followed link adds one request for the file's headers.
+  - DTS and TrueHD were marked; the DTS-then-AAC file wasn't.
+  - FLAC failed as "frozen" 12.4 s after Play.
+  - The 503 still failed in 2.7 s.
+  - **The user checked on the TV** (Movies, the test film's picker), and nothing looked off: the marked DTS and TrueHD rows last, the no-sound message, the frozen FLAC's message, and "Waiting for Velio debrid test…" on the 20 s link.
+- **Not tested:** a real debrid service (the user's own key), whether its file hosts answer the app's own request (the test server allows any), Torrentio's "downloading" placeholder video, links that expire, files over a few GB, 4K, HDR and Dolby Vision.
+
 ## Movies and Series by title (asked 2026-11-10)
 
 The user asked for a modern Movies and Series page like Stremio's, where each film or series is one title holding every link to it: the IPTV sources' and the add-ons' streams. IPTV titles take their genres from Cinemeta, not their provider's category. The classic layout stays, as a choice in Settings.
@@ -872,10 +904,20 @@ Built from `SYNC-PLAN.md`, steps 1–7; its "Results" section has the detail. In
 - **OK on the side menu (2026-11-10, reported by the user):** OK did nothing there; only Right moved into a section. OK now does what Right does (`src/components/SideMenu.tsx`), as in the group columns. On the TV, OK and Right from the menu reached the same node in Live TV and Movies, and OK straight after Down opened the next section and moved into it.
 - **A bug found in the old Chromium:** the build's hex-colour transform also turns `sync-core`'s `PROFILE_COLORS` into numbers, so `ProfileBadge` takes either.
 
+## Native development on Spruce (2026-11-13)
+
+- Browser development no longer needs `tv-dev`: `bash scripts/setup-dev.sh` (or `pnpm run setup`) installs the locked dependencies and Playwright Chromium using host Node 24+ and pnpm 12.14.0. `.node-version` selects Node 24. Setup changes no shell startup files and installs system packages only with explicit `--with-deps`.
+- `pnpm start`, `CI=1 pnpm check`, and `pnpm build` run natively. Browser tests and CI use Chromium; files run serially because the browser-storage suites share an origin. The add-on tests now wait for manifest loading to finish instead of assuming one zero-delay timer is enough.
+- The existing Samsung SDK, its bundled JDK, and the original author/distributor certificates were copied into git-ignored `.local/`; originals were left intact. `pnpm tizen` relocates SDK metadata and selects checkout-local profiles. `pnpm package:tizen` builds, checks ES5 compatibility, and signs without installing; deployment and probes share the same native SDK selection.
+- Signing passwords are held in the host's login keyring. The profile's `.pwd` paths identify keyring entries, not necessarily files; the earlier missing-file diagnosis above was incomplete. Re-register the original certificates with their original passwords after moving a checkout or changing machines (README).
+- Native smoke results: setup completed on the Fedora host; the development app rendered its Live TV menu and empty-source screen in Chromium with no browser errors. The native test server served a two-channel M3U, live HLS, and an MP4 byte range (`206`). Its MPEG-2 encoder now uses `-field_order tt` instead of the removed FFmpeg `-top` option; `ffprobe` confirmed top-field-first output.
+- Verification: native `CI=1 pnpm check` passed all 63 files / 382 tests. Native `pnpm package:tizen` built, passed the ES5 check for nine legacy scripts/workers, and signed `dist/tizen-package/Velio.wgt` with the imported original certificates. No TV install or launch was attempted.
+- Spruce is accessible as a mounted home, not a running host in this session. A new `Projects/VelioTV` copy is staged there; the older `Projects/TiviPlayer` checkout is left untouched. Host library compatibility on Spruce itself still needs its first run. Chromium 38/47 checks still need their legacy runtime; modern browser tests do not replace those checks.
+
 ## What you need before starting
 
 - **TVs:** at least one Samsung in developer mode now, and an LG in developer mode by Phase 9. The oldest models you own set the realistic support floor.
-- **Tools:** the Tizen CLI and Samsung certificates, both set up in the `tv-dev` distrobox (`scripts/setup-dev.sh`). The script also installs the webOS `ares` CLI, ready for Phase 9.
+- **Tools:** host Node 24+ and pnpm (`scripts/setup-dev.sh`) for development; the Samsung SDK and original signing certificates in ignored `.local/` for packaging and deployment (README). The legacy-browser distrobox remains available for Chromium 38/47 checks.
   - **Signing diagnostic (2026-11-06):** the Samsung build passes, but packaging fails with `CertificationException: Invaild password`. The active profile references `author.pwd` and `distributor.pwd` files that are both missing; the `.p12` certificates remain present and valid until 2027-11-02. Restore the password files from a secure backup or reconfigure the profile with the existing certificates and their original passwords. No TV install was attempted.
   - **Signing/deploy retry (2026-11-06):** the existing `TizenDev` profile now signs successfully. `scripts/deploy-tizen.sh` built, signed, installed and launched the current working tree on the Samsung TV; the CLI confirmed installation and launch. No certificate/profile changes or uninstall were needed. The user confirmed the app is showing on the TV. `CI=1 pnpm check` also passed (format, lint, types and 92 tests). The box's login shell did not find pnpm until the fnm environment was loaded explicitly.
 - **Test sources:** several real playlists from different providers, including one with catch-up and one with 10k+ channels.

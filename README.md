@@ -1,152 +1,77 @@
 # VelioTV
 
-An IPTV app built with SolidTV, for Samsung Tizen first and LG webOS later.
+An IPTV app built with SolidTV, targeting Samsung Tizen first and LG webOS later.
 
-Based on the SolidTV starter template: https://solidtv.dev/
+## Native Linux development
 
-Check out https://github.com/solid-tv/solid for additional support.
-
-## Quick Start
-
-```sh
-> npx degit solid-tv/solid-starter-template my-app
-> cd my-app
-> npm i # or yarn or pnpm
-> npm start # or yarn or pnpm
-```
-
-Read the Solid Docs: https://solidtv.dev/solid/
-
-## Code Samples
-
-For up to date code and examples check out the full solid demo app:
-
-https://github.com/solid-tv/solid-demo-app
-
----
-
-# Building for Different Devices (LG, Tizen, etc.)
-
-This project supports building for different target devices such as **LG** and **Tizen** by setting the `TARGET_DEVICE` environment variable. The Vite build process automatically configures the output and device-specific settings based on this value.
-
-## 📌 Setting the Target Device
-
-You can specify the target device in different ways:
-
-### 1️⃣ **Via Command Line (Recommended)**
-
-For **LG**:
+Use Node.js **24 or newer** and **pnpm 12.14.0**. No distrobox, TV SDK, or
+signing certificates are required for browser development.
 
 ```sh
-TARGET_DEVICE=lg vite build
+bash scripts/setup-dev.sh
+pnpm start
+CI=1 pnpm check
+pnpm build
 ```
 
-````
+Once pnpm is available, `pnpm run setup` also runs the setup script. Setup installs
+locked dependencies and Playwright Chromium. If pnpm is absent, it uses
+Corepack to enable **only pnpm** in `~/.local/bin`; if necessary, run
+`export PATH="$HOME/.local/bin:$PATH"` in your shell. It does not edit shell
+startup files, install Node, install webOS globals, or install SDKs.
 
-For **Tizen**:
+Chromium can require host shared libraries. Install packages reported by
+Playwright using your host package manager. On supported distributions,
+`bash scripts/setup-dev.sh --with-deps` explicitly allows Playwright's system
+dependency installer (which may use sudo); normal setup never does this.
+On Fedora, use native Fedora packages rather than assuming Playwright's
+Debian/Ubuntu dependency installer supports the host.
+
+`pnpm test-streams` needs `ffmpeg` on PATH: for example, install `ffmpeg-free`
+with Fedora's `dnf` or `rpm-ostree` (reboot after layering), or `ffmpeg` with
+Debian/Ubuntu's `apt`. Some codecs require additional multimedia repositories.
+Chromium 38/47 compatibility runs still need their legacy runtime; the native
+Playwright browser is not a replacement for testing those old engines.
+
+## Samsung TV build, signing, and deployment
 
 ```sh
-TARGET_DEVICE=tizen vite build
+TARGET_DEVICE=tizen pnpm build
+pnpm package:tizen
+pnpm deploy:tizen <tv-ip>
+pnpm tv-probe <tv-ip> <probe> '<input-json>'
 ```
 
-### 2️⃣ **Using `.env` Files**
+Packaging/deployment use the `TizenDev` signing profile (override with
+`TIZEN_PROFILE`). Enable Developer Mode on the TV and set this computer's IP
+as its development host before deployment.
 
-Create a `.env` file in the project root and set:
+Imported private tools live in `.local/tizen-studio`, SDK data in
+`.local/tizen-studio-data`, and signing files in `.local/certificates`.
+**Keep all of `.local/` out of Git**, including certificates, passwords and SDK
+metadata. These files are optional for browser work. `pnpm tizen` wraps the
+imported SDK and relocates its metadata for the current checkout.
+`TIZEN_SDK` overrides the SDK location; an existing `~/tizen-studio` can also
+be used when no project-local SDK is present.
 
-```
-VITE_TARGET_DEVICE=lg
-```
+To import existing author/distributor `.p12` files, run the following in Bash
+from the project root, entering the actual filenames and their original
+passwords when prompted (passwords are not saved in shell history):
 
-Then, run:
-
-```sh
-vite build
-```
-
-For **Tizen**, update `.env`:
-
-```
-VITE_TARGET_DEVICE=tizen
-```
-
-### 3️⃣ **Using `cross-env` (For Windows)**
-
-If you're using Windows (or need cross-platform compatibility), use `cross-env`:
-
-```sh
-npx cross-env TARGET_DEVICE=lg vite build
-```
-
----
-
-## ⚙️ How It Works
-
-- A **Vite plugin** automatically updates the project configuration based on `TARGET_DEVICE`.
-- Device-specific configurations are adjusted in `device/config.ts` (e.g., replacing `#devices/common` with `#devices/lg` or `#devices/tizen`).
-- The output build is stored in `dist/{device}` (e.g., `dist/lg/` or `dist/tizen/`).
-- The `base` path is also updated to `/lg/` or `/tizen/` to match the deployment environment.
-
----
-
-## 📂 Output Structure
-
-After building, the output directory will look like this:
-
-```
-dist/
-│── lg/
-│   ├── assets/
-│   ├── index.html
-│   ├── ...
-│── tizen/
-│   ├── assets/
-│   ├── index.html
-│   ├── ...
+```bash
+find .local/certificates -type f -name '*.p12'
+read -r -p 'Author .p12 path: ' author_file
+read -r -p 'Distributor .p12 path: ' distributor_file
+read -r -s -p 'Original author password: ' author_password; printf '\n'
+read -r -s -p 'Original distributor password: ' distributor_password; printf '\n'
+pnpm tizen security-profiles add -f -A -n TizenDev \
+  -a "$(realpath "$author_file")" -p "$author_password" \
+  -d "$(realpath "$distributor_file")" -dp "$distributor_password"
+unset author_password distributor_password
 ```
 
-Each folder contains the build files for the respective platform.
-
----
-
-## 🚀 Example: Running Different Builds Locally
-
-To preview different builds, use:
-
-```sh
-npx vite preview --outDir dist/lg
-```
-
-or
-
-```sh
-npx vite preview --outDir dist/tizen
-```
-
-This starts a local server serving the build for the selected device.
-
----
-
-## ❓ Troubleshooting
-
-### 1️⃣ **`process.env.TARGET_DEVICE` is undefined**
-
-- Ensure you are using `VITE_TARGET_DEVICE` if accessing it via `import.meta.env.VITE_TARGET_DEVICE`.
-- If using `process.env.TARGET_DEVICE`, ensure it's passed in `vite.config.ts` via `define`:
-  ```ts
-  define: {
-    'process.env.TARGET_DEVICE': JSON.stringify(process.env.TARGET_DEVICE || 'common'),
-  }
-  ```
-
-## 🛠️ Extending for More Devices
-
-To add support for another device (e.g., **Samsung**), ensure:
-
-- A corresponding directory exists under `#devices/` (e.g., `#devices/samsung`).
-- The Vite plugin properly maps `#devices/common` to `#devices/samsung`.
-- You build using:
-  ```sh
-  TARGET_DEVICE=samsung vite build
-  ```
-
-````
+The CLI stores passwords in the host's login keyring, keyed by certificate
+path; the profile's `.pwd` paths are keyring identifiers, not missing files.
+Re-register after moving the checkout or switching machines. Password
+arguments can briefly be visible to local process inspection. Samsung
+distributor certificates must authorize the target TV.

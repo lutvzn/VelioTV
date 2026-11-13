@@ -78,6 +78,8 @@ export interface AddonStream {
   bingeGroup?: string;
   /** Subtitles that come with this stream. */
   subtitles: AddonSubtitle[];
+  /** Its name says DTS or TrueHD sound, and no other the TV plays (`silentSound`). */
+  silent?: true;
 }
 
 export interface AddonSubtitle {
@@ -346,6 +348,20 @@ const header = (headers: unknown, name: string) => {
   return undefined;
 };
 
+// Words in a release's name, after something that isn't a letter or digit,
+// and before something that isn't a letter (so "DTS-HD", "DDP5.1").
+const word = (words: string) => new RegExp(`(?:^|[^a-z0-9])(?:${words})(?![a-z])`, "i");
+const SILENT = word("dts(?:[-. :]?(?:hd|ma|x|es))?|true-?hd");
+const HEARD = word("aac|e?-?ac-?3|dd\\+|ddp|dd|opus|mp3");
+
+/**
+ * Whether a stream's name and description say its sound is DTS or TrueHD
+ * only, which Samsung TVs play as silence, with no audio track to choose
+ * (PLAN.md, "Debrid add-ons"). Debrid add-ons name the file's formats there.
+ * A file that also has AAC, AC-3, E-AC-3 or Opus plays that track instead.
+ */
+export const silentSound = (words: string) => SILENT.test(words) && !HEARD.test(words);
+
 export const readStreams = (value: unknown): StreamsRead => {
   const list = isObject(value) && Array.isArray(value.streams) ? value.streams : [];
   const read: StreamsRead = { streams: [], unplayable: 0, needReferer: 0 };
@@ -374,6 +390,7 @@ export const readStreams = (value: unknown): StreamsRead => {
     if (userAgent) stream.userAgent = userAgent;
     const binge = optional(hints.bingeGroup, 200);
     if (binge) stream.bingeGroup = binge;
+    if (silentSound(`${stream.name}\n${description}\n${text(hints.filename, 500)}`)) stream.silent = true;
     read.streams.push(stream);
   }
   return read;

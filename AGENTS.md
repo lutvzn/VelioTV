@@ -4,10 +4,10 @@ VelioTV is an IPTV app built with SolidTV, for Samsung Tizen first and LG webOS 
 
 ## Tools
 
-- TV tooling lives in the `tv-dev` distrobox (`distrobox.ini`, set up by `scripts/setup-dev.sh`). Run TV commands with `distrobox enter tv-dev -- bash -lc '...'`. In a non-login shell, load Node first:
-  `export FNM_DIR="$HOME/.local/share/fnm"; export PATH="$FNM_DIR:$PATH"; eval "$(fnm env --shell bash)"`
-- pnpm is the only package manager. `pnpm check` runs format check (oxfmt), lint (oxlint, type-aware), type check (tsc) and tests (Vitest). Set `CI=1` to run the browser tests headless. Run it before calling work done, inside the box (the host has no Playwright WebKit).
-- Deploy to the TV with `./scripts/deploy-tizen.sh <tv-ip>` inside the box. It builds, signs, installs and starts the app. The TV address is in `PRIVATE.md`.
+- Run development commands on the Linux host with Node 24+ and pnpm 12.14.0. `bash scripts/setup-dev.sh` installs dependencies and Playwright Chromium; it does not edit shell startup files or install SDKs. `.node-version` selects Node 24.
+- pnpm is the only package manager. `CI=1 pnpm check` runs format check (oxfmt), lint (oxlint, type-aware), type check (tsc) and headless Chromium tests. Run it before calling work done.
+- Samsung tooling and original certificates live in git-ignored `.local/` (README). `pnpm tizen` relocates the imported SDK and uses checkout-local profiles; re-register the original certificates/passwords in the host keyring after moving the checkout or switching machines. Never commit `.local/`.
+- `pnpm package:tizen` builds, checks ES5 compatibility, and signs. `pnpm deploy:tizen <tv-ip>` also installs and starts the app. Both run on the host; the TV address is in `PRIVATE.md`. Only the very old Chromium compatibility runs still need the `old-chrome` distrobox.
 
 ## Testing on the TV
 
