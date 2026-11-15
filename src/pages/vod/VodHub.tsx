@@ -12,7 +12,7 @@ import { settings, vodPins, vodSorts } from "../../library";
 import { createRestingCursor } from "../../restingCursor";
 import { scrollTop } from "../../live/listWindow";
 import { editText } from "../../textEntry";
-import { BOLD, colors, motion, radius, RING } from "../../theme";
+import { BOLD, colors, radius, RING } from "../../theme";
 import { $t, $tn } from "../../translate";
 import { sayWhileFocused } from "../../voiceGuide";
 import { useWholeScreen } from "../../wholeScreen";
@@ -598,7 +598,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
     );
   // The rows drawn: the one with the cursor, the one below, two more below
   // out of sight and the one above, hidden, so the next ones' posters have
-  // loaded by the time they slide in. They're drawn in SLOT_ROWS slots that
+  // loaded by the time they come into view. They're drawn in SLOT_ROWS slots that
   // stay: a row moved out of sight takes the row coming next, so a move
   // changes one row's titles instead of making eight posters and dropping
   // eight, which on the TV took frames in garbage collection (PLAN.md,
@@ -770,7 +770,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
           {/* The cursor's ring, one for the grid, drawn under the posters.
               It jumps to the next poster with no slide and has no glow, as
               asked (PLAN.md, "Scrolling down the poster grid"). The cursor's
-              row stays at GRID_Y as the rows slide. */}
+              row stays at GRID_Y as the rows move. */}
           <View
             x={LEFT + (at() % COLUMNS) * STEP - RING}
             y={GRID_Y - RING}
@@ -781,18 +781,20 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
             scale={FOCUS_SCALE}
             alpha={inGrid() && !props.covered && items()[at()] ? 1 : 0}
           />
-          {/* Starts under the group's name, so what slides up past it is
-              cut off there instead of showing through. */}
+          {/* Starts under the group's name, so the row above the cursor's
+              is cut off there instead of showing through it. */}
           <View y={CLIP_Y} width={PAGE_WIDTH} height={1080 - CLIP_Y} clipping>
-            {/* The strip slides, so it's as big as what it holds: the renderer
-                skips the children of a node it finds off screen, and with no
-                size the strip was, three rows down. */}
+            {/* The strip moves by whole rows, so it's as big as what it holds:
+                the renderer skips the children of a node it finds off screen,
+                and with no size the strip was, three rows down. It and the
+                poster's growing jump with no animation, so the ring and the
+                poster change in the same frame (PLAN.md, "Scrolling down the
+                poster grid"). */}
             <View
               x={LEFT}
               y={GRID_Y - CLIP_Y - gridRow() * ROW_HEIGHT}
               width={COLUMNS * STEP}
               height={rowCount() * ROW_HEIGHT}
-              transition={{ y: motion.normal }}
             >
               <For each={SLOTS}>
                 {slot => {
@@ -812,7 +814,6 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
                                   width={POSTER_WIDTH}
                                   height={POSTER_HEIGHT}
                                   scale={selected() ? FOCUS_SCALE : 1}
-                                  transition={{ scale: motion.normal }}
                                 >
                                   <Artwork
                                     width={POSTER_WIDTH}
@@ -821,7 +822,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
                                     title={one().name}
                                     fontSize={24}
                                     wait={heldRacing()}
-                                    // Only once the rows can slide: on the groups,
+                                    // Only once the rows can move: on the groups,
                                     // it'd load posters for a group passed by.
                                     preload={inGrid()}
                                   />

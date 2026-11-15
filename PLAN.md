@@ -1062,5 +1062,5 @@ The user asked for the profile in use in the side menu, opening the profile page
     - Uploading the next row's posters (about 18 ms a frame while scrolling fast) is the biggest cost now. The renderer uploads one image per frame while something moves.
     - The placeholder cards under `…/img` posters still draw.
     - For the user to look at on the TV: whether a poster ever shows another title's image or title while scrolling, and how scrolling feels.
-  - The ring without slide or glow (asked 2026-11-15): the grid's focus ring jumps straight to the next poster, and its glow (`focusShadow`) is gone. The poster under the cursor still grows (`motion.normal`). The glow stays elsewhere (`Glow.tsx`).
+  - The ring without slide or glow (asked 2026-11-15): the grid's focus ring jumps straight to the next poster, and its glow (`focusShadow`) is gone. The glow stays elsewhere (`Glow.tsx`). Then, also asked, the poster under the cursor grows at once instead of over 150 ms, and the rows move up or down at once instead of sliding: with the ring already in place, the ring showed beyond the poster for a frame or two while the poster grew or slid in. Ring, rows and poster now change in the same frame.
     - For the user to look at on the TV: the cut under the group's name, the ring sliding between posters, and how the slide looks.
