@@ -1,6 +1,6 @@
 # VelioTV
 
-An IPTV app built with SolidTV, targeting Samsung Tizen first and LG webOS later.
+A media center for TVs, built with SolidTV, targeting Samsung Tizen first and LG webOS later. It plays your own media: live channels and guides from M3U or Xtream Codes sources you have the rights to, films and series from your own media server (Jellyfin or Emby, planned), and streams from Stremio add-ons. Velio comes with no channels or content of its own.
 
 ## Native Linux development
 

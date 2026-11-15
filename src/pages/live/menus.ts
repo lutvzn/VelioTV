@@ -172,9 +172,18 @@ const sortMenu = (key: string): Menu => ({
     })),
 });
 
-/** Moves a group `step` places among the groups shown. */
+/**
+ * The groups a group moves among, as shown: the pinned ones at the top, or
+ * the others.
+ */
+const neighbours = (key: string) => {
+  const pinned = edits.isGroupPinned(key);
+  return shownGroups().filter(other => edits.isGroupPinned(other) === pinned);
+};
+
+/** Moves a group `step` places among the groups shown, pinned or not as it is. */
 export const moveGroup = (key: string, step: number) => {
-  const keys = shownGroups();
+  const keys = neighbours(key);
   const from = keys.indexOf(key);
   const to = Math.max(0, Math.min(keys.length - 1, from + step));
   if (from < 0 || from === to) return;
@@ -182,7 +191,11 @@ export const moveGroup = (key: string, step: number) => {
   keys.splice(to, 0, key);
   // Groups hidden or empty now keep their place after the rest.
   const shown = new Set(keys);
-  edits.setGroupOrder([...keys, ...edits.groupOrder().filter(other => !shown.has(other))]);
+  if (edits.isGroupPinned(key)) {
+    edits.setPinnedOrder([...keys, ...edits.pinnedGroups().filter(other => !shown.has(other))]);
+  } else {
+    edits.setGroupOrder([...keys, ...edits.groupOrder().filter(other => !shown.has(other))]);
+  }
 };
 
 // Moves the group and keeps the panel open, to move it again.
@@ -196,9 +209,15 @@ export const groupMenu = (key: string): Menu => ({
   title: groupTitle(key),
   options: () => {
     const custom = key.startsWith(CUSTOM_GROUP);
-    const keys = shownGroups();
+    const keys = neighbours(key);
     const at = keys.indexOf(key);
+    const pinned = edits.isGroupPinned(key);
     return [
+      {
+        id: pinned ? "unpin" : "pin",
+        label: pinned ? $t("options.unpin") : $t("options.pin"),
+        run: () => edits.setGroupPinned(key, !pinned),
+      },
       {
         id: "rename",
         label: $t("options.rename"),

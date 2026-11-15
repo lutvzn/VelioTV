@@ -8,7 +8,7 @@ import { exposeToProbes } from "../../devHooks";
 import { markEmpty } from "../../emptySection";
 import { heldRacing, moveWhileHeld, stopHold } from "../../heldKey";
 import { TITLE_SORTS, type TitleSort } from "../../data/vodSorts";
-import { settings, vodSorts } from "../../library";
+import { settings, vodPins, vodSorts } from "../../library";
 import { createRestingCursor } from "../../restingCursor";
 import { scrollTop } from "../../live/listWindow";
 import { editText } from "../../textEntry";
@@ -40,6 +40,8 @@ import { searchTitles, sortTitles } from "./hubOrder";
 // ordered by when their titles were added, name, year or rating, or as
 // listed (src/pages/vod/hubOrder.ts): holding OK on the group, or the Tools
 // key, offers it, and each profile keeps each group's (src/data/vodSorts.ts).
+// The same menu pins a category or catalog at the top of the column, over
+// Continue watching (src/data/vodPins.ts).
 // The cursor stays on its title, not its place, as the titles change.
 
 const PAGE_WIDTH = 1920;
@@ -100,6 +102,8 @@ interface Group<T> {
   loading?: boolean;
   /** Whether its order can be chosen; a catalog's or Popular's is its own. */
   sortable?: boolean;
+  /** Pinned at the top of the column. */
+  pinned?: boolean;
 }
 
 /** A group the page gives, such as an add-on's catalog. */
@@ -150,7 +154,7 @@ export interface VodHubProps<T extends HubItem> {
   covered?: boolean;
   ref?: (element: ElementNode) => void;
   probeName: string;
-  /** The page whose groups' orders are kept, such as "movies"; none can be chosen without it. */
+  /** The page whose groups' orders and pins are kept, such as "movies"; none can be chosen without it. */
   sortPage?: string;
   /** The order of a group none was chosen for. */
   defaultSort?: TitleSort;
@@ -187,17 +191,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         list.push(item);
       }
     }
-    return [
-      ...(query()
-        ? [
-            {
-              id: SEARCH,
-              label: $t("guide.searchResults", { query: query() }),
-              items: results(),
-              loading: props.searching,
-            },
-          ]
-        : []),
+    const list: Group<T>[] = [
       ...(props.continueItems.length > 0
         ? [{ id: CONTINUE, label: $t("vod.continue"), items: props.continueItems }]
         : []),
@@ -214,15 +208,36 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         })),
       ...extras(),
     ];
+    // The groups pinned, in their order, go first, under the search results.
+    const pins = props.sortPage ? vodPins.of(props.sortPage) : [];
+    const pinned = pins.flatMap(id => {
+      const one = list.find(other => other.id === id);
+      return one ? [{ ...one, pinned: true }] : [];
+    });
+    const search: Group<T>[] = query()
+      ? [
+          {
+            id: SEARCH,
+            label: $t("guide.searchResults", { query: query() }),
+            items: results(),
+            loading: props.searching,
+          },
+        ]
+      : [];
+    return [...search, ...pinned, ...list.filter(one => !pins.includes(one.id))];
   });
 
   const [groupId, setGroupId] = createSignal(props.place?.groupId ?? CONTINUE);
-  const groupIndex = createMemo(() =>
-    Math.max(
-      0,
-      groups().findIndex(one => one.id === groupId()),
-    ),
-  );
+  // A group that's gone shows the first one not pinned, as before any were.
+  const groupIndex = createMemo(() => {
+    const index = groups().findIndex(one => one.id === groupId());
+    return index >= 0
+      ? index
+      : Math.max(
+          0,
+          groups().findIndex(one => !one.pinned),
+        );
+  });
   const group = () => groups()[groupIndex()];
   /** The group shown: the one asked for, or the first if it's gone. */
   const currentId = () => group()?.id;
@@ -426,24 +441,44 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
       },
     });
 
-  // A group's order, from holding OK on it in the column, or the Tools key.
+  /** Whether a group can be pinned: a category or a catalog, not search, Continue watching or everything. */
+  const canPin = (one: Group<T> | undefined) =>
+    !!one && !!props.sortPage && one.id !== SEARCH && one.id !== CONTINUE && one.id !== ALL;
+  // A group's options, from holding OK on it in the column, or the Tools
+  // key: pinning it, and its order.
   const [sorting, setSorting] = createSignal<Group<T>>();
   const sortMenu = (one: Group<T>): Menu => ({
-    title: $t("vod.sortBy", { group: one.label }),
-    options: () =>
-      TITLE_SORTS.map(sort => ({
-        id: `sort:${sort}`,
-        label: `${sortOf(one) === sort ? "•  " : "    "}${sortLabel(sort)}`,
-        run: () => {
-          if (props.sortPage) vodSorts.set(props.sortPage, one.id, sort);
-          // A new order starts from its first title.
-          restart(one.id);
-        },
-      })),
+    title: canPin(one) ? one.label : $t("vod.sortBy", { group: one.label }),
+    options: () => {
+      const page = props.sortPage;
+      const pinned = page !== undefined && vodPins.isPinned(page, one.id);
+      return [
+        ...(page !== undefined && canPin(one)
+          ? [
+              {
+                id: pinned ? "unpin" : "pin",
+                label: pinned ? $t("options.unpin") : $t("options.pin"),
+                run: () => vodPins.set(page, one.id, !pinned),
+              },
+            ]
+          : []),
+        ...(sortOf(one)
+          ? TITLE_SORTS.map(sort => ({
+              id: `sort:${sort}`,
+              label: `${sortOf(one) === sort ? "•  " : "    "}${sortLabel(sort)}`,
+              run: () => {
+                if (page) vodSorts.set(page, one.id, sort);
+                // A new order starts from its first title.
+                restart(one.id);
+              },
+            }))
+          : []),
+      ];
+    },
   });
-  /** Opens the group's order, if it can be chosen; returns whether it did. */
+  /** Opens the group's options, if it has any; returns whether it did. */
   const openSort = (one: Group<T> | undefined) => {
-    if (!one || !sortOf(one)) return false;
+    if (!one || (!sortOf(one) && !canPin(one))) return false;
     // The group the column's cursor is on shows, to see its new order.
     groupCursor.settle();
     setSorting(one);
@@ -610,8 +645,10 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         return true;
       }}
       onEnter={(event, target, handler) => {
-        // Holding OK on a group offers its order; OK on a poster opens it at once.
-        if (area() === "groups" && sortOf(keyGroup())) return holdEnter(event, target, handler);
+        // Holding OK on a group offers its options; OK on a poster opens it at once.
+        if (area() === "groups" && (sortOf(keyGroup()) || canPin(keyGroup()))) {
+          return holdEnter(event, target, handler);
+        }
         pressEnter();
         return true;
       }}
@@ -802,7 +839,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         <GroupColumn
           x={groupsX()}
           shown={wide() && !inGrid()}
-          items={groups().map(one => ({ label: one.label, count: one.items.length }))}
+          items={groups().map(one => ({ label: one.label, count: one.items.length, pinned: one.pinned }))}
           top={groupTop()}
           cursor={onSearch() ? -1 : cursorIndex()}
           current={groupIndex()}

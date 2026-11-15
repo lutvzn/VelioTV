@@ -78,7 +78,7 @@ export const fileKind = (url: string) => {
   return ext ? (KINDS[ext] ?? ext.toUpperCase()) : "";
 };
 
-/** A title's IPTV copy as the picker's row: the source, the provider's name, the kind of file. */
+/** A title's copy from a source, as the picker's row: the source, the provider's name, the kind of file. */
 export const linkRow = <L>(
   link: L,
   source: string,

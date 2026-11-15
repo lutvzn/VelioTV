@@ -5,6 +5,7 @@ import { sync } from "../library";
 import { OVERLAY_Z } from "../pages/live/ChannelOptions";
 import { BOLD, colors, dialogShadow, radius } from "../theme";
 import { $t } from "../translate";
+import { setSettingsCategory } from "../pages/settings/category";
 
 const WIDTH = 860;
 const HEIGHT = 250;
@@ -26,6 +27,7 @@ const Notice = () => {
       shadow={dialogShadow}
       onEnter={() => {
         sync.dismissNotice();
+        setSettingsCategory("account");
         navigate("/settings", { replace: true });
         return true;
       }}

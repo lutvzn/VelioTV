@@ -1,6 +1,6 @@
 // Cinemeta, Stremio's own add-on for films' and series' details, built in
 // for the modern Movies and Series pages (PLAN.md, "Movies and Series by
-// title"): an IPTV title's name, cleaned, is searched for there, and the
+// title"): a source's title name, cleaned, is searched for there, and the
 // result with the same name and year gives its IMDb id and genres.
 
 import { fold } from "../guide/search";

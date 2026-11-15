@@ -61,7 +61,7 @@ const catchupAttributes = (base, channel, style) => {
 // M3U attribute values can't hold double quotes.
 const attribute = value => String(value).replaceAll('"', "'");
 
-// An extended M3U playlist (#EXTM3U with #EXTINF attributes), as IPTV
+// An extended M3U playlist (#EXTM3U with #EXTINF attributes), as live TV
 // providers serve it. `url` gives each channel's stream URL, `catchup` each
 // catch-up channel's style, and `extra` lines to add at the end.
 export const m3u = ({ base, channels, guideUrl, url, catchup = catchupStyle, extra = [] }) => {

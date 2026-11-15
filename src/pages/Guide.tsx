@@ -142,6 +142,8 @@ const SEARCH = "search";
 interface Filter {
   id: string;
   label: string;
+  /** Pinned over every channel, at the top. */
+  pinned?: boolean;
   /** The lineup group, for Live TV to zap through. */
   group?: string;
   channels: Channel[];
@@ -184,21 +186,32 @@ export default () => {
   // Which channels show: every one, the search results, or a group.
   const [query, setQuery] = createSignal("");
   const results = createMemo(() => searchChannels(liveView().channels, query()));
-  // Every channel, then Favourites, the search results, and the playlists' groups.
+  // The groups pinned (from a group's options), then every channel,
+  // Favourites, the search results, and the playlists' other groups.
   const filters = createMemo((): Filter[] => {
     const [first, ...rest] = liveGroups();
     const favourites = first?.name === FAVOURITES ? [groupFilter(first)] : [];
+    const others = favourites.length > 0 ? rest : liveGroups();
+    const byName = new Map(others.map(group => [group.name, group]));
+    const pinned = edits.pinnedGroups().flatMap(key => {
+      const group = byName.get(key);
+      return group ? [{ ...groupFilter(group), pinned: true }] : [];
+    });
     return [
+      ...pinned,
       { id: ALL, label: $t("live.allChannels"), channels: liveView().channels },
       ...favourites,
       ...(query()
         ? [{ id: SEARCH, label: $t("guide.searchResults", { query: query() }), channels: results() }]
         : []),
-      ...(favourites.length > 0 ? rest : liveGroups()).map(groupFilter),
+      ...others.filter(group => !edits.isGroupPinned(group.name)).map(groupFilter),
     ];
   });
   const [filterId, setFilterId] = createSignal(handoff?.group === undefined ? ALL : `group:${handoff.group}`);
-  const filter = createMemo(() => filters().find(f => f.id === filterId()) ?? filters()[0]);
+  // A group that's gone shows every channel, not a pinned group.
+  const filter = createMemo(
+    () => filters().find(f => f.id === filterId()) ?? filters().find(f => f.id === ALL) ?? filters()[0],
+  );
   const list = createMemo(() => filter().channels);
   // The channel whose past is open, from its options; the others start at now.
   const [pastId, setPastId] = createSignal<string>();
@@ -920,7 +933,7 @@ export default () => {
           // Beside the menu, moving right as it opens.
           x={groupsX()}
           shown={!inGuide()}
-          items={filters().map(f => ({ label: f.label, count: f.channels.length }))}
+          items={filters().map(f => ({ label: f.label, count: f.channels.length, pinned: f.pinned }))}
           top={groupTop()}
           cursor={onSearch() ? -1 : cursorIndex()}
           current={filterIndex()}

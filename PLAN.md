@@ -1,4 +1,4 @@
-# IPTV player plan: Tizen and webOS with SolidTV
+# Velio plan: a media center for Tizen and webOS with SolidTV
 
 **The UI and most TiviMate features are achievable, but full parity isn't likely in a TV web app.** Recording, multi-view and pause-live depend on platform limits, so test those on real TVs before building the UI around them.
 
@@ -36,6 +36,7 @@ TiviMate's site returned only its title, so this list comes from third-party gui
 - **Data:** parse playlists and XMLTV in a Web Worker, and store them in IndexedDB rather than in memory.
 - **TV guide:** build a custom time-based grid, because programme cells vary in width. `VirtualGrid` is still useful as a reference.
 - **Recording:** leave it out of v1, then add an optional self-hosted recorder so both platforms behave the same.
+- **Positioning (asked 2026-11-15):** Velio is a media center, not an "IPTV app": it plays the user's own media from several kinds of source (M3U and Xtream playlists with their guides, Stremio add-ons, and Jellyfin and Emby servers, planned below), and ships with no channels or content. The word IPTV is left out of the app, the README, the store listing and new code; where a playlist source has to be named, call it a playlist or a source. The store text says what it plays and that the user brings their own sources. M3U and Xtream stay as they are, as source kinds among others.
 - **Distribution:** sideload first. The app ships with no channels or content, and uses its own name and design rather than TiviMate's. It was first called "TiviPlayer", too close to that name, so it was renamed **Velio** in Phase 8, step 6, then **VelioTV**.
 
 ## Fix these starter problems first
@@ -586,12 +587,12 @@ The user asked whether debrid Stremio add-ons work in Velio. Torrentio, Comet, M
 
 ## Movies and Series by title (asked 2026-11-10)
 
-The user asked for a modern Movies and Series page like Stremio's, where each film or series is one title holding every link to it: the IPTV sources' and the add-ons' streams. IPTV titles take their genres from Cinemeta, not their provider's category. The classic layout stays, as a choice in Settings.
+The user asked for a modern Movies and Series page like Stremio's, where each film or series is one title holding every link to it: the playlist sources' and the add-ons' streams. Playlist titles take their genres from Cinemeta, not their provider's category. The classic layout stays, as a choice in Settings.
 
 The user chose:
 
 - a column of groups beside a grid, as now;
-- every IPTV title matched to Cinemeta in the background, the match kept on the TV;
+- every playlist title matched to Cinemeta in the background, the match kept on the TV;
 - titles Cinemeta can't match kept in their provider's category;
 - modern by default, chosen per profile.
 
@@ -601,7 +602,7 @@ The user chose:
    - A few titles are matched at a time, and the same name is asked for only once.
    - Matches are kept in a database record per source (`titleMatches`), written every 30 seconds while it matches, so a record is large or seldom written. One with no match is tried again after 30 days. (Since 2026-11-11, in blocks: see "The long frames, found and fixed" below.)
 3. **Titles:**
-   - IPTV films and series with the same IMDb id are one title, with the add-ons' titles of that id. Unmatched ones with the same cleaned name and year are one title too.
+   - Playlist films and series with the same IMDb id are one title, with the add-ons' titles of that id. Unmatched ones with the same cleaned name and year are one title too.
    - A matched title uses Cinemeta's name, poster, genres and details.
    - Its key is the add-on's (`stremio:movie:<imdb id>`), and an unmatched one keeps its first link's. In the modern layout, where a title was left is kept under the title's key, so it isn't shared with the classic layout.
 4. **The page:**
@@ -609,12 +610,12 @@ The user chose:
    - Then each genre, the most titles first, and the add-ons' catalogs.
    - Then the unmatched titles' provider categories.
 5. **Playing:**
-   - Play lists the title's IPTV links (source and name) before the add-ons' streams.
-   - A title with only one IPTV link, and no add-on to ask, plays at once.
-   - A series' episodes are Cinemeta's, with each IPTV episode of the same season and number as a link. The next episode stays with the same source, or the same kind of add-on stream.
+   - Play lists the title's playlist links (source and name) before the add-ons' streams.
+   - A title with only one playlist link, and no add-on to ask, plays at once.
+   - A series' episodes are Cinemeta's, with each playlist episode of the same season and number as a link. The next episode stays with the same source, or the same kind of add-on stream.
 6. **Settings:** Language, start and clock (now "Language, layout, start and clock") gets "Movies and series": Modern or Classic, for each profile.
 7. **Test data:** the test server gets a made-up Cinemeta (`/cinemeta/manifest.json`) over its films and series, with IMDb-like ids, and the test add-on uses the same ids. A dev setting points the app at it.
-8. **On the TV:** a probe that times the matching of the test sources, checks a title with IPTV and add-on links, and plays each kind; and the same in Chromium 47 and 38.
+8. **On the TV:** a probe that times the matching of the test sources, checks a title with playlist and add-on links, and plays each kind; and the same in Chromium 47 and 38.
 
 **Built (2026-11-10).** Matching is `src/data/titleMatches.ts`, with name cleaning in `src/stremio/cinemeta.ts` and joining in `src/data/titles.ts`. The pages are `src/pages/vod/ModernMovies.tsx` and `ModernSeries.tsx`, sharing `modernTitles.ts`, and the setting is in `src/data/vodLayout.ts`. The test server's Cinemeta leaves out every film whose id divides by 11 and every fifth series, and moves every seventh film's year by one. Its films are `tt00<id>` and its series `tt09<id>`, in the test add-on too. The `modern` probe drives it; `setCinemetaUrl()` on `window.velio` points the app at the test server's Cinemeta, and `""` points it back.
 
@@ -629,7 +630,7 @@ The user chose:
   - All 22 of the test source's films that the test Cinemeta has matched, the 2 left out stayed in their category, and 4 of its 6 series matched.
   - Joining every title again takes 240–270 ms for 37,000 films, and Movies opened in 1.9 s.
   - Groups, in order: Continue watching, All films, Popular (50), 8 genres, the test add-on's catalog, then the provider categories.
-  - A joined film's picker listed "Test Xtream · <name> — MP4 · Comedy", then the add-on's MP4 and HLS streams. The IPTV copy played in 0.43 s and the add-on's stream in 0.47 s, and Back reopened the film.
+  - A joined film's picker listed "Test Xtream · <name> — MP4 · Comedy", then the add-on's MP4 and HLS streams. The playlist copy played in 0.43 s and the add-on's stream in 0.47 s, and Back reopened the film.
   - A joined series had Cinemeta's 8 episodes, each with the source's episode as a link, in 110 ms.
   - The `stremio` probe (now on the classic layout) gave the same results as before.
 - **Chromium 47 and 38**, legacy build, against the same server: the same matches (22 of 24 films, 4 of 6 series) in 0.2–0.3 s, the same groups and picker rows, and the same joined episodes. Neither plays the films (no H.264), as before.
@@ -914,6 +915,57 @@ Built from `SYNC-PLAN.md`, steps 1–7; its "Results" section has the detail. In
 - Native smoke results: setup completed on the Fedora host; the development app rendered its Live TV menu and empty-source screen in Chromium with no browser errors. The native test server served a two-channel M3U, live HLS, and an MP4 byte range (`206`). Its MPEG-2 encoder now uses `-field_order tt` instead of the removed FFmpeg `-top` option; `ffprobe` confirmed top-field-first output.
 - Verification: native `CI=1 pnpm check` passed all 63 files / 382 tests. Native `pnpm package:tizen` built, passed the ES5 check for nine legacy scripts/workers, and signed `dist/tizen-package/Velio.wgt` with the imported original certificates. No TV install or launch was attempted.
 - Spruce is accessible as a mounted home, not a running host in this session. A new `Projects/VelioTV` copy is staged there; the older `Projects/TiviPlayer` checkout is left untouched. Host library compatibility on Spruce itself still needs its first run. Chromium 38/47 checks still need their legacy runtime; modern browser tests do not replace those checks.
+
+## Build/signing recheck in lucoa (2026-11-13)
+
+- `pnpm package:tizen` built the current working tree successfully (about 50 s), and all nine legacy scripts/workers passed the ES5 check.
+- Signing with `TizenDev` failed with `CertificationException: Invaild password` in `.local/tizen-studio-data/cli/logs/cli.log`; no `.wgt` was produced. The original host keyring may not be accessible in this environment. No certificates or profile credentials were changed, and no TV install or launch was attempted.
+- `CI=1 pnpm check` passed formatting, lint and TypeScript, but browser tests could not start because the Playwright Chromium headless-shell executable is not installed here. The sync-core copy check was skipped because the sibling VelioPlatform checkout is absent.
+
+## Private portable signing (2026-11-13)
+
+- Copied the private keychain-free signing setup into this checkout's ignored `.local/certificates/`, with owner-only password-file permissions and local backups of the original SDK helper and signing profile. Instructions are in `.local/certificates/PORTABLE-SIGNING.md`; no passwords or keys are tracked.
+- This mounted checkout's SDK signed the existing development build into `.local/signing-test/Velio.wgt` with keychain access disabled. No TV install or launch was attempted.
+- After booting Spruce, run `python3 .local/certificates/enable-file-signing.py` from the checkout root to replace the mount-time certificate paths, then `pnpm package:tizen`. The normal wrapper relocates SDK runtime paths. Python 3 is required for this private setup.
+
+## Jellyfin and Emby (asked 2026-11-15)
+
+The user asked to turn Velio into a media center with IPTV as one kind of source among others, so it isn't taken for a piracy tool (see Key decisions, "Positioning"), and chose Jellyfin and Emby as the first new kind. Plex, USB drives and web folders (WebDAV) were offered and left for later. Not started.
+
+Both servers share most of one HTTP API (Emby came first; Jellyfin is its fork), so one source kind, `"jellyfin"`, covers both, with the differences kept small. Everything is plain `fetch` and JSON, so it works the same on Tizen and webOS. The server's films and series carry their IMDb and TMDB ids (`ProviderIds`), so they join the titles in Movies and Series by id, with no name matching.
+
+1. **Test server first.** A mock Jellyfin in `scripts/test-streams/` (as for Xtream and Stalker), serving the test films and the test series as a library, with resume points and subtitles. Then a real Jellyfin in a container on the dev machine, with the same made-up files, for the check on the TV. No real media in the repo.
+2. **Adding the server** (Settings → Sources, "Jellyfin or Emby server"): the address, then signing in.
+   - Jellyfin: **Quick Connect**, so nothing is typed with the remote: the TV shows a code (`POST /QuickConnect/Initiate`), the user approves it in Jellyfin on a phone, and the TV polls (`GET /QuickConnect/Connect`) and signs in (`POST /Users/AuthenticateWithQuickConnect`). A user name and password stay as the other way, and the only one on a server with Quick Connect off.
+   - Emby: user name and password (`POST /Users/AuthenticateByName`). Check whether Emby Connect's PIN sign-in can work from a TV app.
+   - Each request carries the client header (`Authorization: MediaBrowser Client="Velio", Device=…, DeviceId=…, Version=…, Token=…`; Emby reads `X-Emby-Authorization`). The access token is kept with the source, like an Xtream password, and left out of backups the same way.
+3. **Libraries:** the user's views (`/Users/{id}/Views`); films and series (`/Users/{id}/Items`, recursive, with `ProviderIds`, `UserData`, images and runtime). Each library is a group in Movies or Series. Pictures come from the server's image API at the poster's size.
+4. **Playing:** ask `PlaybackInfo` with a device profile saying what AVPlay plays (and later the LG engines), then play the direct stream when the server allows it, or its HLS transcode otherwise. Subtitles as WebVTT files from the server, through the separate-file path built for Stremio add-ons (`wgt-private` on Samsung).
+5. **Resume and watched both ways:** start from the server's `PlaybackPositionTicks`; report start, progress (every 10 s or so) and stop to `/Sessions/Playing…`, so the position and watched state show in Jellyfin's own apps. The TV's own resume list includes them.
+6. **Series:** seasons and episodes from the server, with the next episode coming from the same server, as for playlist sources.
+7. **Velio Sync:** whether a server can be added at velio.tv (its address, and a sign-in the TV does itself) is an open choice; first, servers are added on the TV only.
+8. **Later, if asked:** the server's own live TV and guide (`/LiveTv/Channels`, `/LiveTv/Programs`), music, and photos.
+9. **On the TV:** a probe that adds the container server, signs in, opens a library, plays a direct and a transcoded film, resumes one, and checks the position reached the server; and the same in Chromium 47 and 38.
+
+## Settings by category (asked 2026-11-15)
+
+The user asked for Settings to be laid out in categories, as Live and Movies and Series are. Settings now has a column of categories beside the menu (the same `GroupColumn`, headed "Settings", with no search field or counts), and the category the cursor rests on in a panel right of it (`src/pages/Settings.tsx`), opened by the resting cursor as the groups are.
+
+- **Categories:** Sources, Velio account, Stremio add-ons, General (language, what the app opens on, the clock), Live (hidden channels and groups, and reminders, each with its count, opening inside the panel), Movies and series (the layout and the sources' categories, split from the old "Language, layout, start and clock"), Scrolling speed, Parental PIN, Backup and restore, About. "More settings" is gone.
+- **Keys:** Up and Down in the column change the category; Right or OK goes into the panel; Left or Back comes back to the column (Back from a page opened in the panel, such as a source's form, closes it first); Left or Back in the column goes to the menu. The category is kept while the app runs, and the signed-out notice opens Settings on the account (`src/pages/settings/category.ts`).
+- **Pages in the panel:** a page shown from the column doesn't take the keys; one opened inside the panel does (`SettingsPane`, `useAutofocus` in `SubPage.tsx`). Fields stay `FIELD_WIDTH` (1100) wide, which fits beside the column with the menu open.
+- The `settingsPage` probe hook now reports `category`, `cursor` and `inPane`; the Sources page's own state is `settingsSources` (`editing`, `selected`).
+- **On the TV (2026-11-15):** the `settings-keys` probe opened Settings, went Right from the menu into the column, moved Down three times (General opened once the cursor rested), went into the panel with Right and with OK, back with Left and with Back, Up (Stremio add-ons opened), then to the menu with Left and, in a second run, with Back. Each step had the keys where expected. The first run's connection closed at its end (the app closed) and didn't again in two more runs, the same keys included.
+- **For the user to look at on the TV:** the column and panel, moving between them, and each category's page.
+
+## Pinned groups (asked 2026-11-15)
+
+The user asked to pin a group to the top in Live, Movies and Series, above the first item. Hold OK or press Tools on a group, then "Pin to top" (or "Unpin"); pinned groups show first, in the order pinned, with a line under the last one.
+
+- **Live:** pinned groups go above "All channels" (`pinnedGroups` in channel edits, so they're per profile, in backups, and forgotten when a group is deleted). Favourites, All and Search can't be pinned. Moving a pinned group up or down moves it among the pinned ones only, and an unpinned one among the unpinned.
+- **Movies and Series:** pinned categories go above Continue watching, below search results (`velio.vodPins`, per profile, kept for each page: modern and classic Movies and Series apart). Continue watching, All and Search can't be pinned. The group's hold-OK menu now has the pin option first and its sorts after.
+- **On the TV (2026-11-15):** the `pins` probe pinned Live's second group, which moved above "All channels" with its pinned flag, and pinned Movies' "Drama", which moved above "Continue watching"; both went back to their places when unpinned.
+- **For the user to look at on the TV:** the pin option in the menus, the pinned groups at the top and the line under them.
 
 ## What you need before starting
 

@@ -1,4 +1,4 @@
-// The order a title's IPTV copies are offered in to play (PLAN.md, "Movies
+// The order a title's copies from the TV's sources are offered in to play (PLAN.md, "Movies
 // and Series by title", step 5): those in the app's language first, by the
 // provider's tag ("PT - ", "|BR|") on the name or its category, then those
 // with no tag, then the rest; and within those the best quality first, as

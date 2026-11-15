@@ -1,4 +1,4 @@
-// IPTV films and series matched to Cinemeta (PLAN.md, "Movies and Series by
+// The sources' films and series matched to Cinemeta (PLAN.md, "Movies and Series by
 // title", step 2), in the background while the modern layout is on: each
 // title's cleaned name is searched for once, a few at a time, and the
 // title with the same name and year gives its IMDb id and genres. The

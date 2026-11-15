@@ -170,6 +170,8 @@ export interface ButtonProps {
   dim?: boolean;
   /** Opens a page: the label on the left, and an arrow on the right. */
   opens?: boolean;
+  /** Beside the arrow of a button that opens a page, such as how many it holds. */
+  detail?: string;
   children?: JSX.Element;
 }
 
@@ -218,6 +220,19 @@ export const FormButton = (props: ButtonProps) => {
       >
         {props.label}
       </Text>
+      <Show when={props.opens && props.detail}>
+        <Text
+          x={width() - 80}
+          mountX={1}
+          height={BUTTON_HEIGHT}
+          lineHeight={BUTTON_HEIGHT}
+          fontSize={24}
+          color={focused() ? colors.onFocus : colors.textFaint}
+          alpha={focused() ? 0.7 : 1}
+        >
+          {props.detail}
+        </Text>
+      </Show>
       <Show when={props.opens}>
         <Text
           x={width() - 36}

@@ -1,6 +1,6 @@
 # Notes for coding agents
 
-VelioTV is an IPTV app built with SolidTV, for Samsung Tizen first and LG webOS last. `PLAN.md` holds the plan, the phase in progress and every device test result. Read it before starting work, and record new results there. Device addresses and IDs are in `PRIVATE.md` (git-ignored, local only); don't copy them into tracked files.
+VelioTV is a media center for TVs built with SolidTV (live TV from M3U and Xtream sources, a guide, films and series, Stremio add-ons, and Jellyfin/Emby planned), for Samsung Tizen first and LG webOS last. `PLAN.md` holds the plan, the phase in progress and every device test result. Read it before starting work, and record new results there. Device addresses and IDs are in `PRIVATE.md` (git-ignored, local only); don't copy them into tracked files.
 
 ## Tools
 
@@ -23,8 +23,8 @@ VelioTV is an IPTV app built with SolidTV, for Samsung Tizen first and LG webOS 
 
 ## Test data
 
-- Use test data we make ourselves. `pnpm test-streams` serves labelled live test streams (`scripts/test-streams/`) on port 8090, plus made-up IPTV sources that play them: an M3U, an XMLTV guide and mock Xtream and Stalker logins (listed in its header comment and at `/`). The dev machine address the TV uses is in `PRIVATE.md`.
-- Don't use public or provider IPTV playlists with copyrighted channels, and keep the user's own playlists out of the repo. Public guide (XMLTV) files with no streams in them are fine for parsing tests.
+- Use test data we make ourselves. `pnpm test-streams` serves labelled live test streams (`scripts/test-streams/`) on port 8090, plus made-up sources that play them: an M3U, an XMLTV guide and mock Xtream and Stalker logins (listed in its header comment and at `/`). The dev machine address the TV uses is in `PRIVATE.md`.
+- Don't use public or provider playlists with copyrighted channels, and keep the user's own playlists out of the repo. Public guide (XMLTV) files with no streams in them are fine for parsing tests.
 
 ## Git and CI
 

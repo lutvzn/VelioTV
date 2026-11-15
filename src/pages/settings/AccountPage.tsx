@@ -1,10 +1,11 @@
 import { Text, View } from "@solidtv/solid";
 import { Row } from "@solidtv/solid/primitives";
 import { createMemo, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
-import { BUTTON_HEIGHT, FIELD_WIDTH, FormButton } from "../../components/Form";
+import { BUTTON_HEIGHT, FIELD_WIDTH, FormButton, TextField } from "../../components/Form";
 import { ProfileBadge } from "../../components/ProfileBadge";
 import { startPairing, tvName, waitForOwner, type Pairing, type PairingRun } from "../../data/pairing";
 import { exposeToProbes } from "../../devHooks";
+import { DEFAULT_SITE } from "../../data/sync";
 import { profiles, sync } from "../../library";
 import { qrImage } from "../../qrCode";
 import { BOLD, colors, radius } from "../../theme";
@@ -16,8 +17,11 @@ import { timeAgo } from "./status";
 const QR_SIZE = 480;
 const QR_FRAME = 520;
 
+/** "velio.tv", from the site's address. */
+const siteName = (site: string) => site.replace(/^https?:\/\//i, "");
+
 /** "velio.tv/pair", from the site's address. */
-const pairPage = (site: string) => `${site.replace(/^https?:\/\//i, "")}/pair`;
+const pairPage = (site: string) => `${siteName(site)}/pair`;
 
 /** A code read out a character at a time, a group at a time: "K 7 Q M, 2 X H F, …". */
 const spokenCode = (code: string) =>
@@ -29,7 +33,8 @@ const spokenCode = (code: string) =>
 /**
  * Settings → Velio account (SYNC-PLAN.md, step 3): signing this TV in by a
  * phone, which scans the QR code or types the code at velio.tv/pair; then
- * the TV's profiles, its last pull, and signing out.
+ * the TV's profiles, its last pull, and signing out. While signed out, the
+ * server can be changed, for a self-hosted one.
  */
 export const AccountPage = (props: { onClose: () => void }) => {
   const [pairing, setPairing] = createSignal<Pairing>();
@@ -114,6 +119,15 @@ export const AccountPage = (props: { onClose: () => void }) => {
     say($t("account.signedOut"));
   };
 
+  const changeServer = (typed: string) => {
+    const before = sync.site();
+    if (!sync.setSite(typed)) {
+      say($t("account.serverInvalid", { address: typed }), true);
+      return;
+    }
+    if (sync.site() !== before) say($t("account.serverSet", { page: siteName(sync.site()) }));
+  };
+
   const qr = createMemo(() => {
     const shown = pairing();
     return shown ? qrImage(shown.url, QR_SIZE) : undefined;
@@ -139,7 +153,7 @@ export const AccountPage = (props: { onClose: () => void }) => {
     },
   );
 
-  exposeToProbes("accountPage", { pairing, expired, message, problem, signIn, stop });
+  exposeToProbes("accountPage", { pairing, expired, message, problem, signIn, stop, changeServer });
 
   // Each stage is drawn anew, so its first button takes the focus.
   const stage = () => (sync.signedIn() ? "in" : pairing() ? "pairing" : "out");
@@ -196,7 +210,7 @@ export const AccountPage = (props: { onClose: () => void }) => {
                 />
               </Row>
               <Text width={FIELD_WIDTH} contain="width" fontSize={22} color={colors.textFaint} skipFocus>
-                {$t("account.signOutNote", { page: sync.site().replace(/^https?:\/\//i, "") })}
+                {$t("account.signOutNote", { page: siteName(sync.site()) })}
               </Text>
             </Match>
             <Match when={pairing()}>
@@ -248,13 +262,23 @@ export const AccountPage = (props: { onClose: () => void }) => {
             </Match>
             <Match when={true}>
               <Text width={FIELD_WIDTH} contain="width" fontSize={28} color={colors.textDim} skipFocus>
-                {$t("account.what")}
+                {$t("account.what", { page: siteName(sync.site()) })}
               </Text>
               <FormButton
                 label={expired() ? $t("account.newCode") : $t("account.signIn")}
                 width={460}
                 onEnter={() => void signIn()}
               />
+              <TextField
+                label={$t("account.server")}
+                value={sync.site()}
+                hint={$t("account.server.hint")}
+                inputMode="url"
+                onChange={changeServer}
+              />
+              <Text width={FIELD_WIDTH} contain="width" fontSize={22} color={colors.textFaint} skipFocus>
+                {$t("account.serverNote", { page: siteName(DEFAULT_SITE) })}
+              </Text>
             </Match>
           </Switch>
         </SubPage>

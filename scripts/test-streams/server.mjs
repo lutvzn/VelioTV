@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Serves live test streams, for checking which formats a TV plays, and made-up
-// IPTV sources that play them. Requires ffmpeg with libx264 and libx265:
+// sources (playlists, guides and logins) that play them. Requires ffmpeg with libx264 and libx265:
 //
 //   node scripts/test-streams/server.mjs [--port 8090] [--channels 10000] [--days 7]
 //

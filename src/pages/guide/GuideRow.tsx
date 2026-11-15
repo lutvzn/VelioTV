@@ -20,8 +20,10 @@ const CELL_GAP = 4;
 const MIN_TEXT_WIDTH = 56;
 
 const CELL_RADIUS = 10;
-const NUMBER_RIGHT = 50;
-const LOGO_X = 62;
+// Where the number ends: room for five digits inside the row's highlight,
+// which numbers of four or more stuck out of at 50.
+const NUMBER_RIGHT = 74;
+const LOGO_X = NUMBER_RIGHT + 12;
 const LOGO_WIDTH = 64;
 const LOGO_HEIGHT = 40;
 

@@ -1,6 +1,6 @@
 // Catch-up: the URL of a channel's recording from a given time (PLAN.md,
 // Phase 6, step 2). Providers mark catch-up channels in one of several
-// styles, as Kodi's IPTV Simple and TiviMate read them:
+// styles, as Kodi's PVR IPTV Simple Client and TiviMate read them:
 //
 //   xtream, xc   Xtream's archive: /timeshift/<user>/<pass>/<minutes>/
 //                <YYYY-MM-DD:HH-MM>/<id>.ts, from a channel URL such as

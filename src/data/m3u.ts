@@ -1,4 +1,4 @@
-// A streaming parser for M3U playlists, including the extended IPTV form:
+// A streaming parser for M3U playlists, including the extended form:
 //
 //   #EXTM3U url-tvg="http://.../guide.xml.gz"
 //   #EXTINF:-1 tvg-id="..." tvg-logo="..." group-title="...",Channel name

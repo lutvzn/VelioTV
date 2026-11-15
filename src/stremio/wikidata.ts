@@ -1,5 +1,5 @@
 // TMDB ids as IMDb ids, from Wikidata (PLAN.md, "Movies and Series by
-// title"): IPTV providers give a title's TMDB id, which Cinemeta doesn't
+// title"): Playlist providers give a title's TMDB id, which Cinemeta doesn't
 // search by, and Wikidata keeps both for most films and series. Ids asked
 // for within a moment go in one query, one query at a time.
 

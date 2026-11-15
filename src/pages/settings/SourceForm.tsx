@@ -15,6 +15,7 @@ import { edits, library, watched } from "../../library";
 import { BOLD, colors } from "../../theme";
 import { $t, $tn } from "../../translate";
 import { statusLines } from "./status";
+import { PAGE_X, useAutofocus, usePageWidth } from "./SubPage";
 
 // Functions, so they follow the language.
 const kinds = (): { value: SourceKind; label: string }[] => [
@@ -56,6 +57,8 @@ const toDraft = (form: FormState): SourceDraft => {
 
 /** Adds a source (with no `id`), or edits one. Back leaves without saving. */
 export const SourceForm = (props: { id?: string; onClose: () => void }) => {
+  const autofocus = useAutofocus();
+  const pageWidth = usePageWidth();
   const existing = props.id ? library.sources().find(source => source.id === props.id) : undefined;
   // A signal, not a store: stores need Proxy, which the oldest TVs lack.
   const [form, setForm] = createSignal<FormState>({
@@ -133,7 +136,7 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
       }}
       forwardFocus={0}
     >
-      <Column x={80} y={190} width={FIELD_WIDTH} gap={12} scroll="none" autofocus>
+      <Column x={PAGE_X} y={190} width={FIELD_WIDTH} gap={12} scroll="none" autofocus={autofocus}>
         <ChoiceField
           label={$t("source.field.kind")}
           choices={kinds()}
@@ -230,17 +233,25 @@ export const SourceForm = (props: { id?: string; onClose: () => void }) => {
         </Show>
       </Column>
 
-      <Text x={80} y={56} fontSize={52} fontFamily={BOLD}>
+      <Text x={PAGE_X} y={56} fontSize={52} fontFamily={BOLD}>
         {existing ? $t("source.edit") : $t("source.add")}
       </Text>
       <Show when={status()}>
         {lines => (
-          <Text x={80} y={128} width={1400} contain="width" maxLines={1} fontSize={26} color={colors.textDim}>
+          <Text
+            x={PAGE_X}
+            y={128}
+            width={pageWidth()}
+            contain="width"
+            maxLines={1}
+            fontSize={26}
+            color={colors.textDim}
+          >
             {lines().filter(Boolean).join(". ")}
           </Text>
         )}
       </Show>
-      <Text x={80} y={1010} width={FIELD_WIDTH} contain="width" fontSize={28} color={colors.danger}>
+      <Text x={PAGE_X} y={1010} width={pageWidth()} contain="width" fontSize={28} color={colors.danger}>
         {problem()}
       </Text>
     </View>

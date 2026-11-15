@@ -18,7 +18,7 @@ const ROWS_Y = 130;
 const SHOWN = 6;
 const ROW_WIDTH = WIDTH - 80;
 
-/** One of a title's IPTV copies, as a row. */
+/** One of a title's copies from the TV's sources, as a row. */
 export interface PickerLink<L> {
   link: L;
   /** Such as the source's name and the provider's name for it. */
@@ -33,7 +33,7 @@ export interface StreamPickerProps<L> {
   type: TitleType;
   /** The film's, or the episode's, id in Stremio; without one the add-ons aren't asked. */
   id?: string;
-  /** The title's IPTV copies, listed first (PLAN.md, "Movies and Series by title", step 5). */
+  /** The title's copies from the TV's sources, listed first (PLAN.md, "Movies and Series by title", step 5). */
   links?: PickerLink<L>[];
   onPick: (choice: TitleChoice<L>) => void;
   onClose: () => void;
@@ -66,7 +66,7 @@ const rowText = (chosen: ChosenStream) =>
   chosen.stream.name ? `${chosen.addonName} · ${chosen.stream.name.replace(/\n/g, " ")}` : chosen.addonName;
 
 /**
- * A film's or an episode's links, over its page: its IPTV copies, then the
+ * A film's or an episode's links, over its page: its sources' copies, then the
  * add-ons' streams (PLAN.md, "Stremio add-ons", step 5). Up and Down move,
  * OK plays, Back closes. Each row is the source or add-on and the stream's
  * name, with its description below.
@@ -81,7 +81,7 @@ export const StreamPicker = <L,>(props: StreamPickerProps<L>) => {
     ...(props.links ?? []).map(one => ({
       text: one.text,
       detail: one.detail,
-      choice: { kind: "iptv" as const, link: one.link },
+      choice: { kind: "source" as const, link: one.link },
     })),
     ...streams().map(chosen => ({
       text: rowText(chosen),

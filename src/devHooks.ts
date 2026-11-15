@@ -41,6 +41,7 @@ import {
   shownSources,
   sync,
   vod,
+  vodPins,
   watched,
 } from "./library";
 import { settingsCopy } from "./data/settingsCopy";
@@ -80,6 +81,8 @@ const hooks: Record<string, unknown> = {
   vod,
   watched,
   reminders,
+  /** The Movies and Series groups pinned, for the `pins` probe. */
+  vodPins,
   handPlay,
   /** Velio Sync (SYNC-PLAN.md): the sign-in, profiles and live updates, for the sync-signin probe. */
   sync,

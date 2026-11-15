@@ -2,7 +2,7 @@
 // or the older "ger"), and AVPlay passes on whichever the stream has. These
 // helpers treat them as one language, and name it for the UI.
 
-// Three-letter codes for the two-letter ones IPTV streams use most.
+// Three-letter codes for the two-letter ones live streams use most.
 const TWO_LETTERS: Record<string, string> = {
   ara: "ar",
   bul: "bg",

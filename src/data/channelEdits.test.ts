@@ -132,4 +132,22 @@ describe("channel edits", () => {
     edits.replace({ ...emptyEdits(), hiddenGroups: ["News"] });
     expect(createChannelEdits({ storage }).isGroupHidden("News")).toBe(true);
   });
+
+  it("pin groups in the order pinned, and forget a deleted group's pin", () => {
+    const storage = memoryStorage();
+    const edits = createChannelEdits({ storage, newKey: () => "\u0001mine" });
+    const mine = edits.createGroup("Mine");
+    edits.setGroupPinned("Sport", true);
+    edits.setGroupPinned(mine, true);
+    edits.setGroupPinned("Sport", true);
+    expect(edits.pinnedGroups()).toEqual(["Sport", mine]);
+    expect(createChannelEdits({ storage }).isGroupPinned("Sport")).toBe(true);
+    edits.setPinnedOrder([mine, "Sport"]);
+    expect(edits.pinnedGroups()).toEqual([mine, "Sport"]);
+    edits.deleteGroup(mine);
+    expect(edits.pinnedGroups()).toEqual(["Sport"]);
+    edits.setGroupPinned("Sport", false);
+    expect(edits.isGroupPinned("Sport")).toBe(false);
+    expect(readEdits({ pinnedGroups: ["News", 3, "News"] }).pinnedGroups).toEqual(["News"]);
+  });
 });

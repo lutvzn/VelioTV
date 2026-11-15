@@ -88,7 +88,7 @@ If the user puts VelioPlatform on Forgejo first, use a git dependency instead an
 The data side, with no UI:
 
 - **What's kept:** `velio.sync` in `localStorage`, through `appStorage` (so `settingsCopy.ts` copies it, which is fine: it's the same TV):
-  - `site` (`https://velio.tv`; a dev build can point it at `wrangler dev`);
+  - `site` (`https://velio.tv` by default). While signed out, Settings → Velio account has a **Server** field for a self-hosted server (or `wrangler dev`): `cleanSite()` adds `https://` when there's no scheme, keeps a path (for a server behind a proxy), and goes back to velio.tv when the field is left empty. Signed in, the server can't change, as the keys belong to it;
   - `trust: DeviceTrust` (account, device id, the TV's box secret key, the owner's signing and box public keys);
   - `token` (the device token);
   - `view: DeviceView` (the last opened pull: its `rev`, profiles and lists) and when it was pulled.

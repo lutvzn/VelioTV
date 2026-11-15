@@ -1,4 +1,4 @@
-// TMDB (The Movie Database), for matching IPTV titles Cinemeta's search
+// TMDB (The Movie Database), for matching the sources' titles Cinemeta's search
 // doesn't find (PLAN.md, "Movies and Series by title"): its search knows
 // titles in many languages and other names, and a title's details give its
 // IMDb id, which Stremio's add-ons share. Used only with an API key, under

@@ -87,7 +87,7 @@ export const ModernMovies = () => {
     const streams = id !== undefined && addons.answers("stream", "movie", id);
     const [only] = title.links;
     if (title.links.length === 1 && only && !streams) {
-      watch(title, { kind: "iptv", link: only }, startMs);
+      watch(title, { kind: "source", link: only }, startMs);
       return;
     }
     setPicking({ title, id: streams ? id : undefined, startMs: startMs || undefined });

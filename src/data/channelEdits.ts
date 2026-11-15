@@ -34,6 +34,8 @@ export interface ChannelEdits {
   customGroups: string[];
   /** Group keys in the user's order; groups not listed follow, in playlist order. */
   groupOrder: string[];
+  /** Group keys pinned over every channel at the top of Live's groups, in their order. */
+  pinnedGroups: string[];
   /** Channel id to the key of the group it was moved to. */
   movedChannels: Record<string, string>;
   /** Group key to its order, where it isn't the playlist's. */
@@ -49,6 +51,7 @@ export const emptyEdits = (): ChannelEdits => ({
   groupNames: {},
   customGroups: [],
   groupOrder: [],
+  pinnedGroups: [],
   movedChannels: {},
   groupSort: {},
 });
@@ -61,6 +64,7 @@ const LISTS = [
   "lockedGroups",
   "customGroups",
   "groupOrder",
+  "pinnedGroups",
 ] as const;
 type ListName = (typeof LISTS)[number];
 
@@ -130,7 +134,7 @@ export const createChannelEdits = (options: { storage: Storage; newKey?: () => s
     const has = (list: ListName) => (id: string) => inList(list, id);
 
     /** Moves `id` to `index` in a list. */
-    const moveIn = (list: "favourites" | "groupOrder", id: string, index: number) => {
+    const moveIn = (list: "favourites" | "groupOrder" | "pinnedGroups", id: string, index: number) => {
       const items = edits()[list];
       const from = items.indexOf(id);
       const to = Math.max(0, Math.min(items.length - 1, index));
@@ -195,6 +199,7 @@ export const createChannelEdits = (options: { storage: Storage; newKey?: () => s
           customGroups: current.customGroups.filter(other => other !== key),
           groupNames: without(current.groupNames, other => other === key),
           groupOrder: current.groupOrder.filter(other => other !== key),
+          pinnedGroups: current.pinnedGroups.filter(other => other !== key),
           hiddenGroups: current.hiddenGroups.filter(other => other !== key),
           lockedGroups: current.lockedGroups.filter(other => other !== key),
           groupSort: without(current.groupSort, other => other === key),
@@ -212,6 +217,13 @@ export const createChannelEdits = (options: { storage: Storage; newKey?: () => s
       groupOrder: () => edits().groupOrder,
       /** Sets the order of groups; the view passes every group shown. */
       setGroupOrder: (keys: string[]) => update(() => ({ groupOrder: [...new Set(keys)] })),
+      // Pinned groups.
+      pinnedGroups: () => edits().pinnedGroups,
+      isGroupPinned: has("pinnedGroups"),
+      /** Pins a group after the ones pinned already, or unpins it. */
+      setGroupPinned: (key: string, on: boolean) => setIn("pinnedGroups", key, on),
+      /** Sets the order of the pinned groups; the menu passes every one shown. */
+      setPinnedOrder: (keys: string[]) => update(() => ({ pinnedGroups: [...new Set(keys)] })),
       sortOf: (key: string): GroupSort => edits().groupSort[key] ?? "playlist",
       setGroupSort: (key: string, sort: GroupSort) =>
         update(current => ({

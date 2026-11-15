@@ -24,12 +24,28 @@ ensureAbortController();
 ensureFetch();
 
 export const DEFAULT_SITE = "https://velio.tv";
+
+/**
+ * A server address as typed, made into the form kept: https:// when it has
+ * no scheme, no slash at the end, and nothing after a ? or #. A path stays,
+ * for a server behind a proxy (https://example.com/velio). Empty means
+ * velio.tv; undefined means it isn't an address.
+ */
+export const cleanSite = (typed: string): string | undefined => {
+  let site = typed.trim();
+  if (site === "") return DEFAULT_SITE;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(site)) site = `https://${site}`;
+  site = site.replace(/\/+$/, "");
+  const match = /^(https?):\/\/([^\s/?#@]+)(\/[^\s?#]*)?$/i.exec(site);
+  if (!match) return undefined;
+  return `${match[1].toLowerCase()}://${match[2].toLowerCase()}${match[3] ?? ""}`;
+};
 const STORAGE_KEY = "velio.sync";
 const TIMEOUT_MS = 20_000;
 const SIGN_OUT_TIMEOUT_MS = 8_000;
 
 export interface SyncSaved {
-  /** The server, such as https://velio.tv; a test server for development. */
+  /** The server: https://velio.tv, or a self-hosted one or a test server. */
   site: string;
   trust?: DeviceTrust;
   token?: string;
@@ -103,7 +119,8 @@ const readView = (value: unknown): DeviceView | undefined =>
 export const readSync = (value: unknown): SyncSaved => {
   const saved: SyncSaved = { site: DEFAULT_SITE };
   if (!isRecord(value)) return saved;
-  if (isText(value.site) && /^https?:\/\/[^\s/]+$/i.test(value.site)) saved.site = value.site;
+  const site = isText(value.site) ? cleanSite(value.site) : undefined;
+  if (site) saved.site = site;
   const trust = readTrust(value.trust);
   if (trust && isText(value.token)) {
     saved.trust = trust;
@@ -295,11 +312,16 @@ export const createSync = (options: SyncOptions) =>
         save(rest);
       },
 
-      /** Points a signed-out TV at another server, such as a test one; for development. */
-      setSite: (site: string) => {
-        const clean = site.trim().replace(/\/+$/, "");
-        if (saved().token || !/^https?:\/\/[^\s/]+$/i.test(clean)) return false;
-        save({ ...saved(), site: clean });
+      /**
+       * Points a signed-out TV at another server: a self-hosted one, or a
+       * test one. Takes the address as typed (cleanSite); empty is velio.tv.
+       * False when signed in, as the keys belong to the server, or when it
+       * isn't an address.
+       */
+      setSite: (typed: string) => {
+        const site = cleanSite(typed);
+        if (saved().token || !site) return false;
+        if (site !== saved().site) save({ ...saved(), site });
         return true;
       },
     };

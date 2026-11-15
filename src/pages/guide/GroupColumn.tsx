@@ -25,7 +25,10 @@ export const SEARCH_RECT = { x: ITEM_X, y: SEARCH_Y, width: ITEM_WIDTH, height: 
 
 export interface GroupItem {
   label: string;
-  count: number;
+  /** How many it holds, on the right; none for Settings' categories. */
+  count?: number;
+  /** Pinned at the top; a line under the last one parts them from the rest. */
+  pinned?: boolean;
 }
 
 /** The text colour in a row, given whether it has the focus or is the group shown. */
@@ -62,8 +65,9 @@ const Item = (props: { y: number; focused: boolean; current: boolean; children: 
  * A page's groups, in a column beside the menu, with the page right of it: a
  * search field, then the groups. On Live TV: every channel, Favourites and the
  * playlists' groups; on Movies and Series: Continue watching, everything and
- * each category. The page moves the cursor; this only draws. `cursor` is -1
- * on the search field.
+ * each category; in Settings, its categories, with no search field. Groups
+ * pinned come first, over a line. The
+ * page moves the cursor; this only draws. `cursor` is -1 on the search field.
  */
 export const GroupColumn = (props: {
   x: number;
@@ -76,11 +80,15 @@ export const GroupColumn = (props: {
   /** The group shown in the guide. */
   current: number;
   focused: boolean;
-  query: string;
-  /** What the search field says while it's empty. */
-  searchLabel: string;
+  /** Over the column; "Groups" unless given. */
+  heading?: string;
+  query?: string;
+  /** What the search field says while it's empty; without it, there's no search field. */
+  searchLabel?: string;
 }) => {
-  const slotY = (slot: number) => LIST_Y + slot * ITEM_STEP;
+  const searching = () => props.searchLabel !== undefined;
+  // Without a search field, the groups start where it would be.
+  const slotY = (slot: number) => (searching() ? LIST_Y : SEARCH_Y) + slot * ITEM_STEP;
   const searchFocused = () => props.focused && props.cursor < 0;
   const glowY = () => (props.cursor < 0 ? SEARCH_Y : slotY(props.cursor - props.top));
 
@@ -96,7 +104,7 @@ export const GroupColumn = (props: {
     >
       <View x={GROUPS_WIDTH - 1} width={1} height={1080} color={colors.line} />
       <Text x={ITEM_X + 12} y={56} fontSize={22} fontFamily={BOLD} letterSpacing={3} color={colors.textFaint}>
-        {$t("guide.groups").toUpperCase()}
+        {(props.heading ?? $t("guide.groups")).toUpperCase()}
       </Text>
       <Glow
         x={ITEM_X}
@@ -107,29 +115,31 @@ export const GroupColumn = (props: {
         shown={props.focused}
       />
 
-      <Item y={SEARCH_Y} focused={searchFocused()} current={false}>
-        <View
-          x={20}
-          y={(ITEM_HEIGHT - ICON_SIZE) / 2}
-          width={ICON_SIZE}
-          height={ICON_SIZE}
-          src="assets/icons/search.png"
-          color={inkFor(searchFocused(), false)}
-        />
-        <Text
-          x={20 + ICON_SIZE + 14}
-          width={ITEM_WIDTH - (20 + ICON_SIZE + 14) - 16}
-          height={ITEM_HEIGHT}
-          lineHeight={ITEM_HEIGHT}
-          maxLines={1}
-          contain="width"
-          fontSize={24}
-          color={props.query && !searchFocused() ? colors.text : inkFor(searchFocused(), false)}
-        >
-          {props.query || props.searchLabel}
-        </Text>
-      </Item>
-      <View x={ITEM_X + 12} y={LIST_Y - 22} width={ITEM_WIDTH - 24} height={1} color={colors.line} />
+      <Show when={searching()}>
+        <Item y={SEARCH_Y} focused={searchFocused()} current={false}>
+          <View
+            x={20}
+            y={(ITEM_HEIGHT - ICON_SIZE) / 2}
+            width={ICON_SIZE}
+            height={ICON_SIZE}
+            src="assets/icons/search.png"
+            color={inkFor(searchFocused(), false)}
+          />
+          <Text
+            x={20 + ICON_SIZE + 14}
+            width={ITEM_WIDTH - (20 + ICON_SIZE + 14) - 16}
+            height={ITEM_HEIGHT}
+            lineHeight={ITEM_HEIGHT}
+            maxLines={1}
+            contain="width"
+            fontSize={24}
+            color={props.query && !searchFocused() ? colors.text : inkFor(searchFocused(), false)}
+          >
+            {props.query || props.searchLabel}
+          </Text>
+        </Item>
+        <View x={ITEM_X + 12} y={LIST_Y - 22} width={ITEM_WIDTH - 24} height={1} color={colors.line} />
+      </Show>
 
       <For each={SLOTS}>
         {slot => (
@@ -141,7 +151,7 @@ export const GroupColumn = (props: {
                 <Item y={slotY(slot)} focused={focused()} current={current()}>
                   <Text
                     x={20}
-                    width={ITEM_WIDTH - 20 - COUNT_WIDTH}
+                    width={ITEM_WIDTH - 20 - (item().count === undefined ? 20 : COUNT_WIDTH)}
                     height={ITEM_HEIGHT}
                     lineHeight={ITEM_HEIGHT}
                     maxLines={1}
@@ -152,6 +162,15 @@ export const GroupColumn = (props: {
                   >
                     {item().label}
                   </Text>
+                  <Show when={item().pinned && !props.items[props.top + slot + 1]?.pinned}>
+                    <View
+                      x={12}
+                      y={ITEM_HEIGHT + (ITEM_STEP - ITEM_HEIGHT) / 2}
+                      width={ITEM_WIDTH - 24}
+                      height={1}
+                      color={colors.line}
+                    />
+                  </Show>
                   <Text
                     x={ITEM_WIDTH - 18}
                     mountX={1}
@@ -160,7 +179,7 @@ export const GroupColumn = (props: {
                     fontSize={20}
                     color={focused() ? colors.accentText : colors.textFaint}
                   >
-                    {String(item().count)}
+                    {item().count === undefined ? "" : String(item().count)}
                   </Text>
                 </Item>
               );

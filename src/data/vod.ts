@@ -55,7 +55,7 @@ export interface Episode {
   links?: EpisodeLink[];
 }
 
-/** An IPTV source's copy of an episode, for a title that joins several. */
+/** A source's copy of an episode, for a title that joins several. */
 export interface EpisodeLink {
   show: Series & { source: string; key: string };
   episode: Episode;

@@ -1,6 +1,6 @@
 // The modern layout's titles (PLAN.md, "Movies and Series by title", step
 // 3): every source's copy of a film or series, and the add-ons' title of
-// the same IMDb id, as one title. An IPTV title takes Cinemeta's name,
+// the same IMDb id, as one title. A source's title takes Cinemeta's name,
 // poster and genres once it's matched (src/data/titleMatches.ts); unmatched
 // ones with the same cleaned name and year are one title too, in their
 // provider's category.
@@ -14,7 +14,7 @@ import type { FilmEntry, SeriesEntry } from "./vodLibrary";
 import type { MatchChanges, TitleMatch } from "./titleMatches";
 
 export interface TitleFilm extends FilmEntry {
-  /** Every IPTV source's copy, in source order. */
+  /** Every source's copy, in source order. */
   links: FilmEntry[];
   genres: string[];
   imdb?: string;

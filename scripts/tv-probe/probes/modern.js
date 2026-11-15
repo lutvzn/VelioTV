@@ -172,7 +172,7 @@ async function probe(input) {
   };
   if (both) {
     result.both = { name: both.name, imdb: both.imdb };
-    result.iptv = await playRow(both, "iptv");
+    result.source = await playRow(both, "source");
     result.reopened = page()?.open()?.name;
     result.addon = await playRow(both, "addon");
   }

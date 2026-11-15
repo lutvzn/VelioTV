@@ -120,7 +120,7 @@ export const ModernSeries = () => {
     };
     const [only] = links;
     if (links.length === 1 && only && !streams) {
-      watch(asked, { kind: "iptv", link: only });
+      watch(asked, { kind: "source", link: only });
       return;
     }
     setPicking(asked);

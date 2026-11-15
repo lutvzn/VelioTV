@@ -29,6 +29,7 @@ import { openInWorker } from "./data/syncOpen";
 import type { DeviceView } from "./sync-core/device";
 import { createVodLibrary } from "./data/vodLibrary";
 import { createVodLayout } from "./data/vodLayout";
+import { createVodPins } from "./data/vodPins";
 import { createVodSorts } from "./data/vodSorts";
 import { createTitleMatcher, type MatchItem, type MatchStore } from "./data/titleMatches";
 import { openDb, readTitleMatches, trimTitleMatches, writeTitleMatches } from "./data/db";
@@ -126,6 +127,8 @@ export const addons = createAddons({ lists: addonLists, storage: appStorage });
 export const vodLayout = createVodLayout({ storage: profileData, profile: () => profiles.currentId() });
 /** How the current profile orders each Movies and Series group (src/data/vodSorts.ts). */
 export const vodSorts = createVodSorts({ storage: profileData, profile: () => profiles.currentId() });
+/** The Movies and Series groups the current profile pinned (src/data/vodPins.ts). */
+export const vodPins = createVodPins({ storage: profileData, profile: () => profiles.currentId() });
 
 const CINEMETA_KEY = "velio.cinemeta";
 const keptCinemeta = () => {

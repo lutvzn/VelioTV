@@ -5,7 +5,7 @@ import { makeTestAccount, openForDevice, testDeviceKeys } from "../sync-core";
 import { openPull, type DeviceView } from "../sync-core/device";
 import { memoryStorage } from "./memoryStorage";
 import { startPairing, waitForOwner } from "./pairing";
-import { createSync, readSync, type PullOpener } from "./sync";
+import { cleanSite, createSync, DEFAULT_SITE, readSync, type PullOpener } from "./sync";
 import { openInWorker } from "./syncOpen";
 
 const BASE = "http://test.local:8090";
@@ -64,6 +64,46 @@ describe("sync-core in VelioTV", () => {
     const opened = openForDevice(account.pull, testDeviceKeys(account));
     expect(opened.profiles.map(profile => profile.name)).toEqual(account.expect.profiles);
     expect(opened.profiles[0].lists[0].name).toBe(account.expect.firstList);
+  });
+});
+
+describe("the server address", () => {
+  it("cleans an address as typed", () => {
+    expect(cleanSite("")).toBe(DEFAULT_SITE);
+    expect(cleanSite("  ")).toBe(DEFAULT_SITE);
+    expect(cleanSite("Sync.Example.com")).toBe("https://sync.example.com");
+    expect(cleanSite("http://192.168.1.20:8787/")).toBe("http://192.168.1.20:8787");
+    expect(cleanSite("example.com:8443")).toBe("https://example.com:8443");
+    expect(cleanSite("HTTPS://example.com/Velio//")).toBe("https://example.com/Velio");
+  });
+
+  it("refuses what isn't an address", () => {
+    for (const typed of [
+      "ftp://example.com",
+      "https://",
+      "exa mple.com",
+      "https://a.com?x=1",
+      "https://u:p@a.com",
+    ])
+      expect(cleanSite(typed)).toBeUndefined();
+  });
+
+  it("changes only while signed out, and is kept", async () => {
+    const mock = createSyncMock({ base: BASE });
+    const tv = newTv(mock);
+    expect(tv.sync.setSite("not an address!")).toBe(false);
+    expect(tv.sync.site()).toBe(SITE);
+    expect(tv.sync.setSite("example.com/velio/")).toBe(true);
+    expect(tv.sync.site()).toBe("https://example.com/velio");
+    expect(readSync(JSON.parse(tv.storage.getItem("velio.sync") ?? "null")).site).toBe(
+      "https://example.com/velio",
+    );
+    expect(tv.sync.setSite("")).toBe(true);
+    expect(tv.sync.site()).toBe(DEFAULT_SITE);
+    tv.sync.setSite(SITE);
+    await signIn(mock, tv);
+    expect(tv.sync.setSite("https://example.com")).toBe(false);
+    expect(tv.sync.site()).toBe(SITE);
   });
 });
 

@@ -37,45 +37,49 @@ const categoryChoices = (): { value: VodCategories; label: string }[] => [
   { value: "all", label: $t("app.vodCategories.all") },
 ];
 
-/** The language, what the app opens on, and how times show (PLAN.md, Phase 5, step 6; Phase 8, step 5), and the Movies and Series layout ("Movies and Series by title", step 6) with which titles its categories hold. */
-export const AppPage = (props: { onClose: () => void }) => {
-  return (
-    <SubPage title={$t("app.title")} onClose={props.onClose}>
-      <ChoiceField
-        label={$t("app.language")}
-        choices={languages()}
-        value={settings.language()}
-        onChange={settings.setLanguage}
-        hint={$t("source.change")}
-      />
-      <ChoiceField
-        label={$t("app.startOn")}
-        choices={starts()}
-        value={settings.startOn()}
-        onChange={settings.setStartOn}
-        hint={$t("source.change")}
-      />
-      <ChoiceField
-        label={$t("app.clock")}
-        choices={clocks()}
-        value={settings.clock()}
-        onChange={settings.setClock}
-        hint={$t("source.change")}
-      />
-      <ChoiceField
-        label={$t("app.vodLayout")}
-        choices={layouts()}
-        value={vodLayout.layout()}
-        onChange={vodLayout.set}
-        hint={$t("app.vodLayout.hint")}
-      />
-      <ChoiceField
-        label={$t("app.vodCategories")}
-        choices={categoryChoices()}
-        value={vodLayout.categories()}
-        onChange={vodLayout.setCategories}
-        hint={$t("app.vodLayout.hint")}
-      />
-    </SubPage>
-  );
-};
+/** The language, what the app opens on, and how times show (PLAN.md, Phase 5, step 6; Phase 8, step 5). */
+export const GeneralPage = (props: { onClose: () => void }) => (
+  <SubPage title={$t("settings.general")} intro={$t("general.intro")} onClose={props.onClose}>
+    <ChoiceField
+      label={$t("app.language")}
+      choices={languages()}
+      value={settings.language()}
+      onChange={settings.setLanguage}
+      hint={$t("source.change")}
+    />
+    <ChoiceField
+      label={$t("app.startOn")}
+      choices={starts()}
+      value={settings.startOn()}
+      onChange={settings.setStartOn}
+      hint={$t("source.change")}
+    />
+    <ChoiceField
+      label={$t("app.clock")}
+      choices={clocks()}
+      value={settings.clock()}
+      onChange={settings.setClock}
+      hint={$t("source.change")}
+    />
+  </SubPage>
+);
+
+/** The Movies and Series layout ("Movies and Series by title", step 6), and which titles its categories hold. */
+export const VodPage = (props: { onClose: () => void }) => (
+  <SubPage title={$t("settings.vod")} intro={$t("vod.settingsIntro")} onClose={props.onClose}>
+    <ChoiceField
+      label={$t("app.vodLayout")}
+      choices={layouts()}
+      value={vodLayout.layout()}
+      onChange={vodLayout.set}
+      hint={$t("app.vodLayout.hint")}
+    />
+    <ChoiceField
+      label={$t("app.vodCategories")}
+      choices={categoryChoices()}
+      value={vodLayout.categories()}
+      onChange={vodLayout.setCategories}
+      hint={$t("app.vodLayout.hint")}
+    />
+  </SubPage>
+);

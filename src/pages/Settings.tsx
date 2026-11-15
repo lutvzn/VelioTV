@@ -1,54 +1,72 @@
-import { Text, View } from "@solidtv/solid";
-import { Column } from "@solidtv/solid/primitives";
-import { createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
-import { FormButton } from "../components/Form";
+import { type ElementNode, Text, View } from "@solidtv/solid";
+import {
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  Match,
+  on,
+  onCleanup,
+  Show,
+  Switch,
+} from "solid-js";
+import { FIELD_WIDTH, FormButton } from "../components/Form";
+import { Glow } from "../components/Glow";
+import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen } from "../components/SideMenu";
 import { sourcesFor, type Source } from "../data/sources";
 import { exposeToProbes } from "../devHooks";
 import { library, profiles } from "../library";
+import { createRestingCursor } from "../restingCursor";
+import { BOLD, colors, radius, RING } from "../theme";
 import { $t, type TextKey } from "../translate";
+import { sayWhileFocused } from "../voiceGuide";
+import { useWholeScreen } from "../wholeScreen";
+import { GroupColumn, GROUPS_WIDTH } from "./guide/GroupColumn";
+import { AboutPage } from "./settings/AboutPage";
 import { AccountPage } from "./settings/AccountPage";
 import { AddonsPage } from "./settings/AddonsPage";
-import { AppPage } from "./settings/AppPage";
 import { BackupPage } from "./settings/BackupPage";
-import { HiddenPage } from "./settings/HiddenPage";
+import { type SettingsCategory, setSettingsCategory, settingsCategory } from "./settings/category";
+import { GeneralPage, VodPage } from "./settings/GeneralPage";
+import { LivePage } from "./settings/LivePage";
 import { PinPage } from "./settings/PinPage";
-import { RemindersPage } from "./settings/RemindersPage";
 import { ScrollingPage } from "./settings/ScrollingPage";
-import { AboutPage } from "./settings/AboutPage";
 import { SourceForm } from "./settings/SourceForm";
+import { SettingsPane, SubPage } from "./settings/SubPage";
 import { SyncedSourcePage } from "./settings/SyncedSourcePage";
 import { progressFraction, statusLines } from "./settings/status";
-import { Glow } from "../components/Glow";
-import { BOLD, colors, radius, RING } from "../theme";
 
-// Settings: the sources, in the order the lineup takes them, then pages for
-// hidden channels and groups, the parental PIN, the app's own settings,
-// backup and restore (PLAN.md, Phase 5), the reminders (Phase 6) and the
-// Velio account (SYNC-PLAN.md) and its Stremio add-ons. Each opens in the list's place, and Back
-// comes back to the row it was opened from. The sources are the ones the
-// current profile sees: the TV's own, then its account lists, read-only.
+// Settings, laid out as Live and Movies and Series are: the menu, a column
+// of categories, and the category the cursor rests on in a panel right of
+// them. Up and Down in the column change the category shown; Right or OK
+// goes into the panel, and Left or Back comes back to the column (Back from
+// a page opened inside the panel closes that page first). Left or Back in
+// the column goes on to the menu.
+//
+// The categories: the sources, in the order the lineup takes them (the
+// current profile's: the TV's own, then its account's lists, read-only),
+// the Velio account (SYNC-PLAN.md) and its Stremio add-ons, the app's own
+// settings, Live's hidden channels and reminders (PLAN.md, Phases 5 and 6),
+// Movies and Series, scrolling, the parental PIN, backup and restore, and
+// About.
 
-type Page = "account" | "addons" | "hidden" | "pin" | "app" | "scrolling" | "reminders" | "backup" | "about";
-const PAGES: { page: Page; label: TextKey }[] = [
-  { page: "account", label: "settings.account" },
-  { page: "addons", label: "settings.addons" },
-  { page: "hidden", label: "settings.hidden" },
-  { page: "pin", label: "settings.pin" },
-  { page: "app", label: "settings.app" },
-  { page: "scrolling", label: "settings.scrolling" },
-  { page: "reminders", label: "settings.reminders" },
-  { page: "backup", label: "settings.backup" },
-  { page: "about", label: "settings.about" },
+const CATEGORIES: { id: SettingsCategory; label: TextKey }[] = [
+  { id: "sources", label: "settings.sources" },
+  { id: "account", label: "settings.account" },
+  { id: "addons", label: "settings.addons" },
+  { id: "general", label: "settings.general" },
+  { id: "live", label: "menu.live" },
+  { id: "vod", label: "settings.vod" },
+  { id: "scrolling", label: "settings.scrolling" },
+  { id: "pin", label: "settings.pin" },
+  { id: "backup", label: "settings.backup" },
+  { id: "about", label: "settings.about" },
 ];
 
-const LEFT = 64;
-/** Room round the list for the focused row's glow, which clipping would cut. */
-const GLOW_ROOM = 24;
-const LIST_WIDTH = 1200;
 const ROW_HEIGHT = 140;
 const TILE = 76;
 const TEXT_X = 28 + TILE + 24;
-
 /**
  * A source as a card: an icon, its name and whether it's on, then what it
  * holds and when it was updated. The focus rings it in cyan and lights it,
@@ -64,7 +82,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
   const inset = () => (focused() ? RING : 1);
   return (
     <View
-      width={LIST_WIDTH}
+      width={FIELD_WIDTH}
       height={ROW_HEIGHT}
       borderRadius={radius.large}
       // Shows as the card's edge: a hairline, or the focus ring.
@@ -76,11 +94,11 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
         return true;
       }}
     >
-      <Glow width={LIST_WIDTH} height={ROW_HEIGHT} borderRadius={radius.large} shown={focused()} />
+      <Glow width={FIELD_WIDTH} height={ROW_HEIGHT} borderRadius={radius.large} shown={focused()} />
       <View
         x={inset()}
         y={inset()}
-        width={LIST_WIDTH - 2 * inset()}
+        width={FIELD_WIDTH - 2 * inset()}
         height={ROW_HEIGHT - 2 * inset()}
         borderRadius={radius.large - inset()}
         color={focused() ? colors.highlight : colors.card}
@@ -105,7 +123,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
       <Text
         x={TEXT_X}
         y={22}
-        width={LIST_WIDTH - TEXT_X - 200}
+        width={FIELD_WIDTH - TEXT_X - 200}
         maxLines={1}
         contain="width"
         fontSize={32}
@@ -116,7 +134,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
       </Text>
       {/* Whether the source is on, as a badge on the right. */}
       <View
-        x={LIST_WIDTH - 28}
+        x={FIELD_WIDTH - 28}
         y={24}
         mountX={1}
         height={36}
@@ -145,7 +163,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
       <Text
         x={TEXT_X}
         y={68}
-        width={LIST_WIDTH - TEXT_X - 28}
+        width={FIELD_WIDTH - TEXT_X - 28}
         maxLines={1}
         contain="width"
         fontSize={24}
@@ -156,7 +174,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
       <Text
         x={TEXT_X}
         y={100}
-        width={LIST_WIDTH - TEXT_X - 28}
+        width={FIELD_WIDTH - TEXT_X - 28}
         maxLines={1}
         contain="width"
         fontSize={22}
@@ -168,7 +186,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
         <View
           x={TEXT_X}
           y={ROW_HEIGHT - 12}
-          width={LIST_WIDTH - TEXT_X - 28}
+          width={FIELD_WIDTH - TEXT_X - 28}
           height={4}
           borderRadius={2}
           color={colors.track}
@@ -176,7 +194,7 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
         <View
           x={TEXT_X}
           y={ROW_HEIGHT - 12}
-          width={(LIST_WIDTH - TEXT_X - 28) * (fraction() ?? 0)}
+          width={(FIELD_WIDTH - TEXT_X - 28) * (fraction() ?? 0)}
           height={4}
           borderRadius={2}
           color={colors.accent}
@@ -189,160 +207,193 @@ const SourceRow = (props: { source: Source; now: number; onEnter: () => void }) 
 /** The sources the current profile sees, in order. */
 const shownList = () => sourcesFor(library.sources(), profiles.currentId());
 
-const SourceList = (props: {
-  /** The row to select, for coming back from the form. */
-  selected: number;
-  autofocus: boolean;
-  onOpen: (index: number, id?: string) => void;
-  onPage: (index: number, page: Page) => void;
-}) => {
+/**
+ * Settings → Sources: a card for each source, then Add a source. A source
+ * opens its form (or, for one from the account, what it holds) in the
+ * list's place, and Back comes back to its card.
+ */
+const SourcesPage = (props: { onClose: () => void }) => {
+  // undefined for the list, null to add a source, or the id of the one open.
+  const [editing, setEditing] = createSignal<string | null | undefined>();
+  const [selected, setSelected] = createSignal(0);
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), 30_000);
   onCleanup(() => clearInterval(clock));
+  const open = (index: number, id?: string) => {
+    batch(() => {
+      setSelected(index);
+      setEditing(id ?? null);
+    });
+  };
+  const back = () => setEditing(undefined);
+  const synced = () => library.sources().find(source => source.id === editing())?.synced;
+  exposeToProbes("settingsSources", { editing, selected });
   return (
-    <>
-      {/* First, so that the page's forwardFocus reaches the list. */}
-      <View x={LEFT} y={210} width={LIST_WIDTH + 2 * GLOW_ROOM} height={840} clipping forwardFocus={0}>
-        <Column
-          x={GLOW_ROOM}
-          y={GLOW_ROOM}
-          width={LIST_WIDTH}
-          gap={16}
-          scroll="edge"
-          selected={props.selected}
-          autofocus={props.autofocus}
+    <Switch
+      fallback={
+        <SubPage
+          title={$t("settings.sources")}
+          intro={$t("settings.sourcesIntro")}
+          selected={selected()}
+          onClose={props.onClose}
         >
           <For each={shownList()}>
             {(source, index) => (
-              <SourceRow source={source} now={now()} onEnter={() => props.onOpen(index(), source.id)} />
+              <SourceRow source={source} now={now()} onEnter={() => open(index(), source.id)} />
             )}
           </For>
           <FormButton
             label={$t("settings.addSource")}
-            width={LIST_WIDTH}
-            onEnter={() => props.onOpen(shownList().length)}
+            width={FIELD_WIDTH}
+            onEnter={() => open(shownList().length)}
           />
           <Show when={shownList().length === 0}>
-            <Text width={LIST_WIDTH} contain="width" fontSize={28} color={colors.textDim} skipFocus>
+            <Text width={FIELD_WIDTH} contain="width" fontSize={28} color={colors.textDim} skipFocus>
               {$t("settings.noSources")}
             </Text>
           </Show>
-          <Text
-            width={LIST_WIDTH}
-            height={60}
-            marginTop={24}
-            lineHeight={60}
-            fontSize={22}
-            fontFamily={BOLD}
-            letterSpacing={3}
-            color={colors.accentText}
-            skipFocus
-          >
-            {$t("settings.more").toUpperCase()}
-          </Text>
-          <For each={PAGES}>
-            {(entry, at) => (
-              <FormButton
-                label={$t(entry.label)}
-                width={LIST_WIDTH}
-                opens
-                onEnter={() => props.onPage(shownList().length + 1 + at(), entry.page)}
-              />
-            )}
-          </For>
-        </Column>
-      </View>
-      <Text x={LEFT + GLOW_ROOM} y={52} fontSize={56} fontFamily={BOLD}>
-        {$t("menu.settings")}
-      </Text>
-      <View x={LEFT + GLOW_ROOM} y={136} width={LIST_WIDTH} height={1} color={colors.line} />
-      <Text
-        x={LEFT + GLOW_ROOM}
-        y={162}
-        fontSize={22}
-        fontFamily={BOLD}
-        letterSpacing={3}
-        color={colors.accentText}
-      >
-        {$t("settings.sources").toUpperCase()}
-      </Text>
-    </>
+        </SubPage>
+      }
+    >
+      <Match when={editing() !== undefined && synced()}>
+        <SyncedSourcePage id={editing() ?? ""} onClose={back} />
+      </Match>
+      <Match when={editing() !== undefined}>
+        <SourceForm id={editing() ?? undefined} onClose={back} />
+      </Match>
+    </Switch>
   );
 };
 
+const groupsX = () => (menuOpen() ? MENU_OPEN_WIDTH : MENU_WIDTH);
+
 export default () => {
-  // The form shows over the list's place: undefined for the list, null to
-  // add a source, or the id of the source to edit.
-  const [editing, setEditing] = createSignal<string | null | undefined>();
-  const [page, setPage] = createSignal<Page>();
-  const [selected, setSelected] = createSignal(0);
-  const [returning, setReturning] = createSignal(false);
-  const close = () => {
-    setReturning(true);
-    setEditing(undefined);
-    setPage(undefined);
+  let root: ElementNode | undefined;
+  let pane: ElementNode | undefined;
+  const [focused, setFocused] = createSignal(false);
+  // Whether the panel has the keys, rather than the column.
+  const [inPane, setInPane] = createSignal(false);
+  // The column's cursor: the panel shows the category it's on once it rests
+  // there, or at once on Right or OK.
+  const cursor = createRestingCursor(settingsCategory, id => {
+    const category = CATEGORIES.find(one => one.id === id);
+    if (category) setSettingsCategory(category.id);
+  });
+  const cursorIndex = createMemo(() =>
+    Math.max(
+      0,
+      CATEGORIES.findIndex(one => one.id === cursor.at()),
+    ),
+  );
+  const shownIndex = () =>
+    Math.max(
+      0,
+      CATEGORIES.findIndex(one => one.id === settingsCategory()),
+    );
+  const move = (step: number) => {
+    const index = Math.max(0, Math.min(CATEGORIES.length - 1, cursorIndex() + step));
+    cursor.move(CATEGORIES[index].id);
+    return true;
   };
-  exposeToProbes("settingsPage", { editing, page, selected });
+  const toPane = () => {
+    cursor.settle();
+    setInPane(true);
+    pane?.setFocus();
+    return true;
+  };
+  const toColumn = () => {
+    setInPane(false);
+    root?.setFocus();
+    return true;
+  };
+  // Leaving the column, such as for the menu, shows the category the cursor is on.
+  createEffect(
+    on(
+      () => focused() && !inPane(),
+      inColumn => {
+        if (!inColumn) cursor.settle();
+      },
+      { defer: true },
+    ),
+  );
+  useWholeScreen(() => false);
+  const paneX = () => groupsX() + GROUPS_WIDTH;
+  exposeToProbes("settingsPage", { category: settingsCategory, cursor: cursor.at, inPane });
+
+  // What the voice guide reads in the column: the category under the cursor.
+  sayWhileFocused(
+    () => focused() && !inPane(),
+    () => $t(CATEGORIES[cursorIndex()].label),
+  );
 
   return (
-    // Right from the side menu focuses the page; this passes it on to the
-    // list or the page open, whichever is showing.
-    <View forwardFocus={0}>
-      <Show
-        when={editing() !== undefined || page() !== undefined}
-        fallback={
-          <SourceList
-            selected={selected()}
-            // Only coming back from a page; opening Settings from the menu
-            // leaves focus in the menu.
-            autofocus={returning()}
-            onOpen={(index, id) => {
-              setSelected(index);
-              setEditing(id ?? null);
-            }}
-            onPage={(index, next) => {
-              setSelected(index);
-              setPage(next);
-            }}
-          />
-        }
+    <View
+      ref={element => (root = element)}
+      width={1920}
+      height={1080}
+      // Read by sayWhileFocused above, not as the page's whole text.
+      announce=""
+      onFocusChanged={setFocused}
+      onUp={() => (inPane() ? true : move(-1))}
+      onDown={() => (inPane() ? true : move(1))}
+      onRight={() => (inPane() ? true : toPane())}
+      onEnter={() => (inPane() ? true : toPane())}
+      // From the column, on to the menu; from the panel, back to the column.
+      onLeft={() => (inPane() ? toColumn() : false)}
+      onBack={() => (inPane() ? toColumn() : false)}
+    >
+      <View
+        ref={element => (pane = element)}
+        x={paneX()}
+        width={1920 - paneX()}
+        height={1080}
+        forwardFocus={0}
       >
-        <Switch>
-          <Match when={page() === "account"}>
-            <AccountPage onClose={close} />
-          </Match>
-          <Match when={page() === "addons"}>
-            <AddonsPage onClose={close} />
-          </Match>
-          <Match when={page() === "hidden"}>
-            <HiddenPage onClose={close} />
-          </Match>
-          <Match when={page() === "pin"}>
-            <PinPage onClose={close} />
-          </Match>
-          <Match when={page() === "app"}>
-            <AppPage onClose={close} />
-          </Match>
-          <Match when={page() === "scrolling"}>
-            <ScrollingPage onClose={close} />
-          </Match>
-          <Match when={page() === "reminders"}>
-            <RemindersPage onClose={close} />
-          </Match>
-          <Match when={page() === "backup"}>
-            <BackupPage onClose={close} />
-          </Match>
-          <Match when={page() === "about"}>
-            <AboutPage onClose={close} />
-          </Match>
-          <Match when={editing() && library.sources().find(source => source.id === editing())?.synced}>
-            <SyncedSourcePage id={editing() ?? ""} onClose={close} />
-          </Match>
-          <Match when={editing() !== undefined}>
-            <SourceForm id={editing() ?? undefined} onClose={close} />
-          </Match>
-        </Switch>
-      </Show>
+        <SettingsPane.Provider value={{ width: () => 1920 - paneX(), hasKeys: inPane }}>
+          <Switch>
+            <Match when={settingsCategory() === "sources"}>
+              <SourcesPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "account"}>
+              <AccountPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "addons"}>
+              <AddonsPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "general"}>
+              <GeneralPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "live"}>
+              <LivePage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "vod"}>
+              <VodPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "scrolling"}>
+              <ScrollingPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "pin"}>
+              <PinPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "backup"}>
+              <BackupPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "about"}>
+              <AboutPage onClose={toColumn} />
+            </Match>
+          </Switch>
+        </SettingsPane.Provider>
+      </View>
+      <GroupColumn
+        x={groupsX()}
+        shown
+        heading={$t("menu.settings")}
+        items={CATEGORIES.map(one => ({ label: $t(one.label) }))}
+        top={0}
+        cursor={cursorIndex()}
+        current={shownIndex()}
+        focused={focused() && !inPane()}
+      />
     </View>
   );
 };

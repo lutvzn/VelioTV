@@ -1,4 +1,4 @@
-// The test streams: one per video and audio combination common in IPTV.
+// The test streams: one per video and audio combination common in live streams.
 // Each shows its name and a clock on screen, and beeps once a second.
 
 // Headers that the /need-referer/ and /need-user-agent/ streams require.

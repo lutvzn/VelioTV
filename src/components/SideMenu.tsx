@@ -26,8 +26,6 @@ const ICON_SIZE = 32;
 const LOGO_SIZE = 52;
 const LOGO_X = (MENU_WIDTH - LOGO_SIZE) / 2;
 const ITEMS_Y = 200;
-/** The shade the open rail casts over the page. */
-const SHADE_WIDTH = 260;
 const MenuItem = (props: { label: TextKey; icon: string; current: boolean; open: boolean }) => {
   const [focused, setFocused] = createSignal(false);
   const width = () => (props.open ? OPEN_ITEM_WIDTH : ITEM_SIZE);
@@ -126,14 +124,6 @@ export const SideMenu = (props: SideMenuProps) => {
     // it, which the renderer would otherwise draw over the open rail
     // (PLAN.md, Phase 5, step 1, "Text showing through the panel").
     <View width={width()} height={1080} color={colors.menu} zIndex={OVERLAY_Z} alpha={props.hidden ? 0 : 1}>
-      <View
-        x={width()}
-        width={SHADE_WIDTH}
-        height={1080}
-        colorLeft={colors.caption}
-        colorRight={colors.transparent}
-        alpha={open() ? 1 : 0}
-      />
       <View x={width() - 1} width={1} height={1080} color={colors.line} />
       <View
         x={LOGO_X}
