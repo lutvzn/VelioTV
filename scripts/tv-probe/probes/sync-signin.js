@@ -10,7 +10,8 @@
 //              the TV takes to have it as a source (the socket's "rev N").
 //   "pin"      sets `pin` on the profile `profile` ("" removes it).
 //   "remove"   removes the TV from the account; the TV should sign out.
-//   "signout"  signs out from the TV.
+//   "signout"  signs out from the TV, then points it at `site` if given
+//              (such as "https://velio.tv", to undo "signin"'s `base`).
 //   "status"   what the TV has.
 //
 // Input:
@@ -61,6 +62,7 @@ async function probe(input) {
   if (input.step === "status") return status();
   if (input.step === "signout") {
     await sync.signOut();
+    if (input.site && !sync.setSite(input.site)) return { error: `Couldn't point the app at ${input.site}` };
     return status();
   }
 

@@ -258,9 +258,14 @@ const createMerger = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
     return one;
   };
 
-  /** Moves the changed copies to their new groups, and makes those groups' titles again. */
-  const update = (one: State, keys: readonly string[], from: number, matchOf: MatchOf) => {
-    const affected = new Set<string>();
+  /** Moves the changed copies to their new groups, which are added to `affected`. */
+  const regroup = (
+    one: State,
+    keys: readonly string[],
+    from: number,
+    matchOf: MatchOf,
+    affected: Set<string>,
+  ) => {
     for (let k = from; k < keys.length; k++) {
       const key = keys[k];
       const i = one.index.get(key);
@@ -284,6 +289,33 @@ const createMerger = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
       while (at > 0 && (one.index.get(joining[at - 1].key) ?? 0) > i) at--;
       joining.splice(at, 0, entry);
     }
+  };
+
+  /**
+   * Takes the add-ons' new items, adding the groups they were and are in to
+   * `affected`. They're few next to the sources' copies, so every group
+   * with one is made again: an add-on's own title is placed by its item's
+   * place in the list, which changes for all of them when one is added.
+   */
+  const reitem = (one: State, addonItems: readonly AddonItem[], affected: Set<string>) => {
+    for (const group of one.addonsOf.keys()) affected.add(group);
+    one.addonsOf.clear();
+    one.addonAt.clear();
+    addonItems.forEach((item, i) => {
+      const group = itemGroup(item);
+      affected.add(group);
+      const list = one.addonsOf.get(group);
+      if (list) list.push(item);
+      else {
+        one.addonsOf.set(group, [item]);
+        one.addonAt.set(group, i);
+      }
+    });
+    one.addonItems = addonItems;
+  };
+
+  /** Makes the titles of the `affected` groups again, each in its place. */
+  const rebuild = (one: State, affected: ReadonlySet<string>, matchOf: MatchOf) => {
     if (affected.size === 0) return;
 
     const { byImdb, byKey } = one.result;
@@ -364,14 +396,17 @@ const createMerger = <E extends FilmEntry | SeriesEntry, T extends Joined<E>>(
       changes.keys.length >= one.logAt &&
       // Many changes at once are joined faster from the start.
       changes.keys.length - one.logAt < entries.length / 4 &&
-      sameItems(one.addonItems, addonItems);
+      addonItems.length + one.addonItems.length < entries.length / 4;
     if (!again) {
       state = full(entries, matchOf, addonItems, changes);
       return state.result;
     }
+    const affected = new Set<string>();
+    regroup(one, changes.keys, one.logAt, matchOf, affected);
     // The add-ons' items may be new objects with the same titles.
-    one.addonItems = addonItems;
-    update(one, changes.keys, one.logAt, matchOf);
+    if (sameItems(one.addonItems, addonItems)) one.addonItems = addonItems;
+    else reitem(one, addonItems, affected);
+    rebuild(one, affected, matchOf);
     one.logAt = changes.keys.length;
     // A new object each time, as merge() gives, so what reads it is told.
     return { ...one.result };

@@ -3,7 +3,7 @@
 import { DAY } from "../../data/db";
 import type { ImportProgress } from "../../data/importer";
 import type { SourceStatus } from "../../data/sourceManager";
-import { $t, $tn, formatCount, locale } from "../../translate";
+import { $t, $tn, formatCount, shortDate } from "../../translate";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -15,9 +15,6 @@ export const timeAgo = (time: number, now: number) => {
   if (since < DAY) return $t("time.hours", { count: Math.floor(since / HOUR) });
   return $tn("time.days", Math.floor(since / DAY));
 };
-
-const shortDate = (time: number) =>
-  new Date(time).toLocaleDateString(locale(), { weekday: "short", day: "numeric", month: "short" });
 
 /**
  * A failed import's error in the app's language, where it is one the app

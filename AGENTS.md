@@ -14,6 +14,7 @@ VelioTV is a media center for TVs built with SolidTV (live TV from M3U and Xtrea
 - On-TV tests are probes in `scripts/tv-probe/probes/`, run inside the installed app:
   `./scripts/tv-probe/run.sh <tv-ip> <probe> '<input-json>'`
   Each probe's header lists its input. Results come out as JSON, usually wrapped as `{"done": {...}}`.
+- When the app misbehaves on the TV (a black screen, keys doing nothing), add `PROBE_CONSOLE=1` before `run.sh`. It prints the app's errors, warnings and uncaught exceptions from its start. The build turns theme colours into numbers and the tests don't, so some errors show only on the TV.
 - Keep a TV run to a minute or two. Before a longer one, say how long it will take, or shrink the input.
 - The user checks anything visual on the TV themselves (alignment, smoothness, layout) and reports back. Ask them to look when a test is visual.
 - `#/dev/video?url=<stream>` opens a developer page for video behind the UI.

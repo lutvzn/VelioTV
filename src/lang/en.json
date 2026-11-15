@@ -269,7 +269,7 @@
   "notFound": "Page not found",
   "a11y.selected": "Selected",
   "settings.account": "Velio account",
-  "menu.profiles": "Profiles",
+  "menu.profileOf": "Profile: {{ name }}",
   "profiles.title": "Who's watching?",
   "profiles.locked": "PIN",
   "profiles.pin": "Enter {{ name }}'s PIN",

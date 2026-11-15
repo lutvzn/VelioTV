@@ -1,13 +1,12 @@
 import { Text, View } from "@solidtv/solid";
 import { For, type JSX, Show } from "solid-js";
-import { Glow } from "../../components/Glow";
 import { OVERLAY_Z } from "../live/ChannelOptions";
 import { Fill } from "../../components/Fill";
 import { BOLD, colors, radius, RING } from "../../theme";
 import { $t } from "../../translate";
 
 /** The column's width, which the guide starts right of. */
-export const GROUPS_WIDTH = 320;
+export const GROUPS_WIDTH = 384;
 const ITEM_X = 16;
 const ITEM_WIDTH = GROUPS_WIDTH - 2 * ITEM_X;
 const ITEM_HEIGHT = 60;
@@ -19,6 +18,9 @@ export const GROUP_ROWS = 12;
 const SLOTS = Array.from({ length: GROUP_ROWS }, (_, slot) => slot);
 const ICON_SIZE = 28;
 const COUNT_WIDTH = 56;
+/** A pinned group's icon, and the room it takes before the label. */
+const PIN_SIZE = 24;
+const PIN_ROOM = PIN_SIZE + 12;
 
 /** Where the search field is, in the column's pixels, for the keyboard's input. */
 export const SEARCH_RECT = { x: ITEM_X, y: SEARCH_Y, width: ITEM_WIDTH, height: ITEM_HEIGHT };
@@ -90,7 +92,6 @@ export const GroupColumn = (props: {
   // Without a search field, the groups start where it would be.
   const slotY = (slot: number) => (searching() ? LIST_Y : SEARCH_Y) + slot * ITEM_STEP;
   const searchFocused = () => props.focused && props.cursor < 0;
-  const glowY = () => (props.cursor < 0 ? SEARCH_Y : slotY(props.cursor - props.top));
 
   return (
     // Its zIndex draws the guide's text before it (PLAN.md, Phase 5, step 1).
@@ -106,14 +107,6 @@ export const GroupColumn = (props: {
       <Text x={ITEM_X + 12} y={56} fontSize={22} fontFamily={BOLD} letterSpacing={3} color={colors.textFaint}>
         {(props.heading ?? $t("guide.groups")).toUpperCase()}
       </Text>
-      <Glow
-        x={ITEM_X}
-        y={glowY()}
-        width={ITEM_WIDTH}
-        height={ITEM_HEIGHT}
-        borderRadius={radius.medium}
-        shown={props.focused}
-      />
 
       <Show when={searching()}>
         <Item y={SEARCH_Y} focused={searchFocused()} current={false}>
@@ -149,9 +142,23 @@ export const GroupColumn = (props: {
               const current = () => props.current === props.top + slot;
               return (
                 <Item y={slotY(slot)} focused={focused()} current={current()}>
+                  <Show when={item().pinned}>
+                    <View
+                      x={20}
+                      y={(ITEM_HEIGHT - PIN_SIZE) / 2}
+                      width={PIN_SIZE}
+                      height={PIN_SIZE}
+                      src="assets/icons/pin.png"
+                      color={inkFor(focused(), current())}
+                    />
+                  </Show>
                   <Text
-                    x={20}
-                    width={ITEM_WIDTH - 20 - (item().count === undefined ? 20 : COUNT_WIDTH)}
+                    x={item().pinned ? 20 + PIN_ROOM : 20}
+                    width={
+                      ITEM_WIDTH -
+                      (item().pinned ? 20 + PIN_ROOM : 20) -
+                      (item().count === undefined ? 20 : COUNT_WIDTH)
+                    }
                     height={ITEM_HEIGHT}
                     lineHeight={ITEM_HEIGHT}
                     maxLines={1}

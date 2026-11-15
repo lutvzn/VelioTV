@@ -273,6 +273,11 @@ export const createSync = (options: SyncOptions) =>
       saved,
       site: () => saved().site,
       signedIn: () => saved().token !== undefined,
+      /** Whether the server answered the last time it was asked: signed in, and the last pull got through. */
+      connected: () => {
+        const last = status().last?.result;
+        return saved().token !== undefined && (last === "same" || last === "changed");
+      },
       view: () => saved().view,
       status,
       pull,

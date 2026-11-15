@@ -40,6 +40,8 @@ export const tvLanguages = (): readonly string[] =>
       ? navigator.languages
       : [navigator.language];
 
+const pluralRules = new Map<Language, Intl.PluralRules>();
+
 /**
  * "one" or "other" (or another of the language's plural forms) for `count`.
  * Intl.PluralRules came in Chromium 63; before it, the rules of the
@@ -47,7 +49,10 @@ export const tvLanguages = (): readonly string[] =>
  */
 export const pluralForm = (language: Language, count: number): string => {
   if (typeof Intl !== "undefined" && typeof Intl.PluralRules === "function") {
-    return new Intl.PluralRules(language).select(count);
+    // Made once per language: making one costs far more than asking it.
+    let rules = pluralRules.get(language);
+    if (!rules) pluralRules.set(language, (rules = new Intl.PluralRules(language)));
+    return rules.select(count);
   }
   if (base(language) === "pt") return Math.floor(Math.abs(count)) <= 1 ? "one" : "other";
   return count === 1 ? "one" : "other";

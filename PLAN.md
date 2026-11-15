@@ -966,6 +966,16 @@ The user asked to pin a group to the top in Live, Movies and Series, above the f
 - **Movies and Series:** pinned categories go above Continue watching, below search results (`velio.vodPins`, per profile, kept for each page: modern and classic Movies and Series apart). Continue watching, All and Search can't be pinned. The group's hold-OK menu now has the pin option first and its sorts after.
 - **On the TV (2026-11-15):** the `pins` probe pinned Live's second group, which moved above "All channels" with its pinned flag, and pinned Movies' "Drama", which moved above "Continue watching"; both went back to their places when unpinned.
 - **For the user to look at on the TV:** the pin option in the menus, the pinned groups at the top and the line under them.
+- **Wider columns (2026-11-15):** the user asked for the group columns 20% wider; `GROUPS_WIDTH` is 384 (was 320), in Live, Movies and Series, and Settings. Settings' fields still fit beside it with the menu open (8 px to spare).
+
+## Profile in the menu (asked 2026-11-15)
+
+The user asked for the profile in use in the side menu, opening the profile page: first at the bottom, then swapped with the logo, to the top. It replaces the "Profiles" section, which showed only with more than one profile.
+
+- **What shows:** at the top of the rail, where the logo was, the profile's badge (its initial on its colour), and its name while the menu is open, whenever a profile is in use (a signed-in TV). The logo and "Velio" moved to the bottom, with the import status line above them. The sections are centred on the screen between them.
+- **Keys:** Up from the first section (Live) goes to it; Down goes back to the sections. OK or Right (or a click) opens the profile page and moves into it; Left or Back there comes back to the profile. Choosing a profile goes to Live, as before. The voice guide reads "Profile: <name>".
+- **On the TV (2026-11-15):** the first try couldn't sign the TV in to the test account: it couldn't reach the dev machine (fetch and XHR to `:8090` failed) while its address was outside the network the dev machine's firewall trusts (the addresses are in `PRIVATE.md`). `sync-signin`'s "signout" now takes `site`, to point the app back. With the profile at the top and the TV signed in on "Living room", the `profile-menu` probe went Left to the menu, Up twice from Live onto the profile (`menuProfile` had the keys, Live stayed open), OK opened `#/profiles`, Back came back to the profile, and Down went back to the sections.
+- **For the user to look at on the TV:** the profile at the top, the logo at the bottom, and the sections centred between them, with the menu closed and open.
 
 ## What you need before starting
 
@@ -983,3 +993,74 @@ The user asked to pin a group to the top in Live, Movies and Series, above the f
 - **LG:** [streaming protocols and DRM](https://webostv.developer.lge.com/develop/specifications/streaming-protocol-drm), [video and audio formats](https://webostv.developer.lge.com/develop/specifications/video-audio-250), [JS services](https://webostv.developer.lge.com/develop/guides/js-service-basics)
 - **SolidTV:** [demo app](https://github.com/solid-tv/solid-demo-app)
 - **TiviMate (third-party, and they disagree on details such as multi-view limits):** [setup guide](https://iptvbros.pages.dev/blog/tivimate-setup-guide), [comparison](https://iptv.us.com/blog/tivimate-vs-iptv-smarters-comparison), [user guide on Scribd](https://www.scribd.com/document/725020649/TiViMate-Users-Guide)
+
+### Profile page hides the menu (asked 2026-11-15)
+
+- On the profile page the menu is hidden and the picker fills the screen; the menu comes back once a profile is chosen. Back or Left leaves it for Live, keeping the current profile.
+- TV test (`profile-menu`): OK on the profile opens `#/profiles` with the keys in the picker; Back returns to Live with the keys on the menu. For the user to look at: the screen with no menu.
+
+### Server light in the menu (asked 2026-11-15)
+
+- A light right of "Velio" at the bottom of the open menu: green when signed in and the last pull got through (`sync.connected()`), red when signed out or the server didn't answer. It shows only while the menu is open.
+- TV: signed in, last pull `same`, so green. For the user to look at: the light's place and glow, and red (sign out, or stop the test server).
+
+### Menu opens on OK (asked 2026-11-15)
+
+- The side menu's sections open only on OK or Right, not as the cursor rests on them (`createRestingCursor` with `manual`). Leaving the menu another way puts the cursor back on the open section. The groups beside the guide and the posters, and Settings, still open on rest.
+- TV test (`menu-ok`): Down to Movies and waiting 1 s stays on Live; OK opens Movies.
+
+### Warming the section under the menu cursor (asked 2026-11-15)
+
+- With the menu opening only on OK, a section's page is not built while the cursor is on it (building it stalled frames; see UI performance). Once the cursor rests 250 ms on Movies or Series, its first 24 posters are fetched into the browser's cache (`src/preload.ts`), so the page draws them at once on OK. The lists are already in memory, so there's nothing else to load; Live and Settings have nothing to warm.
+- Not done: building the page hidden behind the menu, which would cost memory and frames on this TV.
+
+### Navigation speed (asked 2026-11-15)
+
+- **The gate:** `pnpm perf:nav <tv-ip>` (`scripts/tv-probe/nav-perf.mjs`) runs the `nav-perf` probe (about 95 s) in the installed app and compares it with `scripts/tv-probe/baselines/nav-perf.json`. The probe goes through the guide, the menu, Movies, Series and Settings with the video stopped. It times each press (the key's own work, the key until its frame is drawn, and until everything is still), the opens (a section, a group, a title), and 100 ms key repeats (fps, long frames), and it counts nodes per screen and the heap. It exits 1 when a steady number gets worse than allowed: medians by 25% (at least 8 ms, or 20 ms for frames, since a press can land up to one refresh before a frame), single opens by 35% (at least 40 ms), fps by 10%, nodes by 10%, and heap by 20%. Highest values, longest frames and settle times change from run to run as posters and the guide load, so they're printed as notes and don't fail the run. When a run fails, the probe runs once more and each number takes the better of the two. `--save` keeps a run as the new baseline (deploy first, with the test sources loaded), and `--from <file>` compares a saved result.
+- **Checked against old runs:** a second run of the same build passes. The build without image workers fails (series poster repeat 56.6 → 38 fps). The build before this work fails (Movies open 153 → 1110 ms, Settings open 72 → 143 ms).
+- **What was slow (CPU profiles of the TV, `PROBE_PROFILE`):** opening Movies blocked for 1.35 s. Joining 36,000 films took 700–900 ms, the genre groups 89 ms, and the count label 173 ms (`toLocaleString`/`PluralRules` made a new formatter on each call, and the first `Intl.NumberFormat` loads the language data). Series spent 110 ms on its genres, and Settings 43 ms on `status.ts` dates. Series poster repeats dropped to 38 fps with a 270 ms frame, because posters were decoded on the main thread (`numImageWorkers: 0` on Tizen). Every other step stays under 20 ms of JS.
+- **Done:**
+  - Number, date and plural formatters are made once per language (`src/translate.ts`, `src/lang/languages.ts`).
+  - The title mergers are kept between visits (`src/pages/vod/modernTitles.ts`). They now join again only the groups that changed when add-on items change, as well as matches (`createMerger`, with a test against `mergeFilms`).
+  - Once nothing has been pressed for 2 s, the formatters, then the films, then the series are joined in the background, one long task at a time (`warmTitlesLater`, started from `App.tsx` when the lists or matches change). A page that's open is left alone.
+  - Genre and category groups are kept while their titles stay the same.
+  - Tizen decodes images in 2 workers. The renderer falls back to the main thread where `createImageBitmap` can't be used, so the oldest TVs are unaffected, but Tizen 3 hasn't been tried with it.
+- **Results (TV, 2026-11-15, before → after):** Movies open 1110 → 133–153 ms. Series open 129 → 97–125 ms. Settings open 143 → 69–77 ms. Live open 87 → 66–76 ms. Series poster repeat 54 fps → 57 fps, with the longest frame 271 → 29–34 ms. Movies poster repeat 58 → 50–58 fps. Guide rows hold 60 fps. The heap is 57 → 77 MB, because the joined titles are now kept.
+- **Left as they are:** the renderer drains `gl.getError()` once it goes idle (about 50–70 ms while the GPU finishes). That's in the renderer, and a key pressed then waits for it. A title's page takes 35–60 ms to open.
+- **Shorter grid motion (2026-11-15):** the 300 ms default in `devices/common/index.ts` is used by nothing in `src`. `motion.normal` (`src/theme.ts`), used for the poster grid sliding a row and a poster growing, went from 220 to 150 ms. On the TV, the time until all is still went: Movies title open 225–248 → 157–174 ms, back from a title 223–235 → 160–199 ms, Series group open 218–236 → 169 ms (315 once), and a poster move's highest 219–243 → 171 ms. Frame rates held (57–59 fps on poster repeats), and the gate passed. One run had a 255 ms series page open that the next run didn't repeat (62 ms). For the user to look at on the TV: whether the grid's slide and the poster growing still look smooth at 150 ms.
+- **Scrolling down the poster grid (2026-11-15):** asked because moving down the Movies grid wasn't smooth, and because the posters showed through the see-through group name over the grid while sliding up.
+  - What a frame cost: a probe drew the grid screen every frame while hiding one layer at a time. A frame took 27.6 ms. The app's background, a quad over the whole screen drawn with the `holePunch` shader for the video window, took 7 ms of that, even with no video. The placeholder cards under posters took about 1.6 ms (the JPEG test misses `…/img` poster addresses), the backdrop about 1.8 ms, and the posters about 1.2 ms. With every layer hidden, a frame still took about 19 ms at 60 Hz.
+  - Opaque canvas test: is that floor the see-through canvas that video behind the UI needs? The renderer always asks for `alpha: true` (`GlContext.js`; the app's `enableAlphaChannel` isn't read). A test build forced `alpha: false` by wrapping `getContext`, and was reverted. Each was measured twice:
+
+    | Measure           | Opaque        | See-through   |
+    | ----------------- | ------------- | ------------- |
+    | Grid frame        | 17.8, 19.0 ms | 17.5, 19.0 ms |
+    | Empty frame       | 16.7, 18.5 ms | 16.7, 19.1 ms |
+    | Down every 450 ms | 52–53 fps     | 49–52 fps     |
+    | Down every 120 ms | 40–44 fps     | 41 fps        |
+
+    No real difference. The floor moves between a clean 16.7 ms and 18.5–19 ms from one run to the next whichever canvas is used, so the see-through canvas costs nothing to speak of, and it stays.
+
+  - Done:
+    - `src/pages/App.tsx`: with no video hole, the background node is hidden and the renderer clears the screen to the background colour (`clearColor`), which costs almost nothing. With a hole, the clear is see-through and the node draws as before. A grid frame went 27.6 → 18.4 ms. (The colour is read in a function: at module level, an import cycle left `colors` undefined, and the app didn't start.) The build turns the theme's `"#rrggbbaa"` strings into numbers (`hexColorTransform`), so reading the colour as a string threw on the TV, where the tests can't see it. It went unseen until the app started on a channel that wasn't playing yet: the throw then stopped the full-screen page from starting, which left a black screen that took no keys (2026-11-15). Before that, it had only kept the clear see-through, which looks the same over the black video plane. `colorNumber` now takes either form.
+    - `src/pages/vod/VodHub.tsx`:
+      - One more row is drawn below, and posters load off screen (`textureOptions.preload`, `preload` on `Artwork`) while the cursor is in the grid. A row's posters used to start loading only once they entered the bounds margin, mid-slide. Preload stays off on the group list, so passing a group doesn't load it.
+      - The clipping now starts under the group's name (`CLIP_Y`, 602), so a row sliding up is cut off there instead of passing under the name.
+      - The focus ring and glow are one node outside the clipping, drawn under the posters at the cursor's fixed row, so the glow isn't cut off. It slides along a row (`motion.normal`). There used to be a ring in every poster.
+  - Tried and dropped: an idle upload budget of 6 ms instead of 25 (`textureProcessingTimeLimit`) made no difference.
+  - Results on the TV, in the "all" group (19,203 films):
+    - Down every 450 ms: 42–46 → 49–52 fps.
+    - Down every 120 ms: 35.5 → 41 fps.
+    - The long frames left (12–18 over 34 ms in each run) fall all through the slides.
+  - The gate: nav-perf has new steps `moviesRowsRapid`/`moviesRowsUpRapid` (and series), 10 rows down and up in the "all" group, at 100 ms a key, with `moved` showing how far the cursor went. The gate passed against the old baseline, and the new baseline was saved with these steps. Movies down is 24–27 fps, Movies up 45 fps, Series 44–48 fps.
+  - The group moves' `settleMs` (0 → ~850 ms) is the timing, not a slowdown. The group now swaps in just under the probe's 300 ms quiet window, so the posters arriving after count.
+  - Reusing the poster rows: Movies down at 100 ms a key spent its time in GC (~320 ms of a 2.4 s run) and uploads (~250 ms), since each key created eight posters and destroyed eight. The grid now draws five fixed row slots (`SLOTS`, `rowOfSlot` in `VodHub.tsx`), each given a new row as the grid moves, so a key changes the posters' titles and images instead of making new nodes.
+    - `Artwork`'s image is keyed on its address, because the renderer keeps showing a node's old image until the new one is uploaded, so a reused poster would show the last title's image for a moment. Its ready state is per address, so a reused poster waits again while a held key races.
+    - Profile of 10 rows down at 100 ms: GC dropped out of the top entries (was ~320 ms); uploads are 181 ms (`texImage2D`), now the biggest cost.
+    - Results on the TV (two runs each, before → after): down at 100 ms 23.7 → 28.9–33.2 fps; down every 450 ms 49–52 → 48–53 fps; down every 120 ms 41 → 38.5–41 fps. The gate passed; its `moviesRowsRapid` was 27.6 fps against 26.6, within its noise, so the baseline wasn't saved again.
+  - Left:
+    - Uploading the next row's posters (about 18 ms a frame while scrolling fast) is the biggest cost now. The renderer uploads one image per frame while something moves.
+    - The placeholder cards under `…/img` posters still draw.
+    - For the user to look at on the TV: whether a poster ever shows another title's image or title while scrolling, and how scrolling feels.
+  - The ring without slide or glow (asked 2026-11-15): the grid's focus ring jumps straight to the next poster, and its glow (`focusShadow`) is gone. The poster under the cursor still grows (`motion.normal`). The glow stays elsewhere (`Glow.tsx`).
+    - For the user to look at on the TV: the cut under the group's name, the ring sliding between posters, and how the slide looks.

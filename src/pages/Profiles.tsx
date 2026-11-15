@@ -121,8 +121,8 @@ export const ProfilePicker = (props: {
   );
 };
 
-/** The menu's Profiles section: switching profile, then back to Live TV. */
+/** The profile page, opened from the profile at the top of the menu, with the menu hidden: switching profile, then back to Live. */
 export default () => {
   const navigate = useNavigate();
-  return <ProfilePicker width={1920 - 96} onChosen={() => navigate("/", { replace: true })} />;
+  return <ProfilePicker width={1920} onChosen={() => navigate("/", { replace: true })} />;
 };

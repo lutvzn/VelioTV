@@ -16,6 +16,11 @@ export interface ArtworkProps {
   borderRadius?: number;
   /** Shows the bare card until this is false, as while a held key races past (src/heldKey.ts). */
   wait?: boolean;
+  /**
+   * Loads the image even while it's off screen, as for a row about to slide
+   * in: loaded only once in view, it went to the GPU in the slide's frames.
+   */
+  preload?: boolean;
 }
 
 /**
@@ -28,15 +33,18 @@ export interface ArtworkProps {
  */
 /** Pictures with no see-through parts, by their address. */
 const OPAQUE = /\.jpe?g(\?|#|$)/i;
+const PRELOAD = { preload: true };
 
 export const Artwork = (props: ArtworkProps) => {
   // The image that loaded, so a slot reused for another title shows its card again.
   const [loaded, setLoaded] = createSignal<string | undefined>();
-  // Once it's shown in full it stays so.
-  const [ready, setReady] = createSignal(!props.wait);
+  // Once an image is shown in full it stays so, but only that image: a
+  // poster reused for another title waits again while a held key races past.
+  const [shown, setShown] = createSignal(props.wait ? undefined : props.src);
   createEffect(() => {
-    if (!props.wait) setReady(true);
+    if (!props.wait) setShown(props.src);
   });
+  const ready = () => !props.wait || shown() === props.src;
   const src = () => (ready() ? sizedImage(props.src, props.width) : undefined);
   const hasImage = () => !!src() && loaded() === src();
   const covered = () => hasImage() && OPAQUE.test(src() ?? "");
@@ -66,13 +74,16 @@ export const Artwork = (props: ArtworkProps) => {
       >
         {ready() ? props.title : ""}
       </Text>
-      <Show when={src()}>
+      {/* A new node for each image: the renderer keeps showing a node's old
+          image until its new one is in, which would be another title's. */}
+      <Show when={src()} keyed>
         {image => (
           <View
             width={props.width}
             height={props.height}
             borderRadius={corner()}
-            src={image()}
+            src={image}
+            textureOptions={props.preload ? PRELOAD : undefined}
             onEvent={{
               loaded: target => setLoaded(target.src ?? undefined),
               failed: () => setLoaded(undefined),

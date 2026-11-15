@@ -58,6 +58,8 @@ export const colors = {
   live: "#ff5468ff",
   /** Text on the live colour. */
   onLive: "#3d000aff",
+  /** The menu's light when connected to a Velio server. */
+  online: "#34d27bff",
   danger: "#ff6b6bff",
   dangerFill: "#e5484dff",
 
@@ -91,7 +93,7 @@ export const BOLD = "NotoSans700";
 /** Focus motion, such as a poster growing as the cursor reaches it. */
 export const motion = {
   quick: { duration: 140, easing: "ease-out" },
-  normal: { duration: 220, easing: "ease-out" },
+  normal: { duration: 150, easing: "ease-out" },
 } as const;
 
 /** The cyan glow around a focused card or button. */

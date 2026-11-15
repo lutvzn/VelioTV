@@ -13,12 +13,13 @@
 # in debug mode, because the TV only opens its debug port when the app starts.
 # A probe is stopped after 15 minutes; set PROBE_TIMEOUT (in seconds) for a
 # longer one. Set PROBE_PROFILE to a folder to save CPU profiles of the
-# app's workers during the probe there (eval.mjs).
+# app's workers during the probe there (eval.mjs). Set PROBE_CONSOLE=1 to
+# print the app's errors, warnings and uncaught exceptions from its start.
 
 set -euo pipefail
 
 [[ $# -ge 2 ]] || {
-  sed -n '3,17p' "$0" >&2
+  sed -n '3,18p' "$0" >&2
   exit 1
 }
 

@@ -1,0 +1,273 @@
+{
+  "steps": {
+    "groupsMove": {
+      "presses": 6,
+      "inputMsMedian": 4.1,
+      "inputMsMax": 7,
+      "frameMsMedian": 8.9,
+      "frameMsMax": 18.7,
+      "settleMsMedian": 292,
+      "settleMsMax": 1561,
+      "longestFrameMs": 260,
+      "capped": 0
+    },
+    "groupOpen": {
+      "inputMs": 3.5,
+      "frameMs": 16.8,
+      "readyMs": 0,
+      "settleMs": 367,
+      "capped": false,
+      "longestFrameMs": 32
+    },
+    "guideRows": {
+      "presses": 16,
+      "inputMsMedian": 3,
+      "inputMsMax": 8.7,
+      "frameMsMedian": 15.8,
+      "frameMsMax": 20.4,
+      "settleMsMedian": 14,
+      "settleMsMax": 17,
+      "longestFrameMs": 20,
+      "capped": 0
+    },
+    "guideTime": {
+      "presses": 6,
+      "inputMsMedian": 0.9,
+      "inputMsMax": 1.7,
+      "frameMsMedian": 4.7,
+      "frameMsMax": 18.2,
+      "settleMsMedian": 0,
+      "settleMsMax": 0,
+      "longestFrameMs": 29,
+      "capped": 0
+    },
+    "guidePages": {
+      "presses": 3,
+      "inputMsMedian": 4.9,
+      "inputMsMax": 5.9,
+      "frameMsMedian": 10.3,
+      "frameMsMax": 10.3,
+      "settleMsMedian": 7,
+      "settleMsMax": 22,
+      "longestFrameMs": 20,
+      "capped": 0
+    },
+    "guideRowsRapid": {
+      "fps": 60.4,
+      "longestFrameMs": 33,
+      "framesOver20ms": 2,
+      "framesOver50ms": 0
+    },
+    "menuFromGroups": {
+      "presses": 1,
+      "inputMsMedian": 0.9,
+      "inputMsMax": 0.9,
+      "frameMsMedian": 9.3,
+      "frameMsMax": 9.3,
+      "settleMsMedian": 8,
+      "settleMsMax": 8,
+      "longestFrameMs": 17,
+      "capped": 0
+    },
+    "menuMove": {
+      "presses": 6,
+      "inputMsMedian": 1,
+      "inputMsMax": 2.6,
+      "frameMsMedian": 15.2,
+      "frameMsMax": 17,
+      "settleMsMedian": 14,
+      "settleMsMax": 16,
+      "longestFrameMs": 137,
+      "capped": 0
+    },
+    "open-movies": {
+      "inputMs": 3,
+      "frameMs": 142.2,
+      "readyMs": 0,
+      "settleMs": 259,
+      "capped": false,
+      "longestFrameMs": 157
+    },
+    "moviesGroups": {
+      "presses": 4,
+      "inputMsMedian": 4.6,
+      "inputMsMax": 5,
+      "frameMsMedian": 12.9,
+      "frameMsMax": 14.8,
+      "settleMsMedian": 842,
+      "settleMsMax": 1195,
+      "longestFrameMs": 131,
+      "capped": 0
+    },
+    "moviesGroupOpen": {
+      "inputMs": 6.6,
+      "frameMs": 19.1,
+      "readyMs": 0,
+      "settleMs": 176,
+      "capped": false,
+      "longestFrameMs": 21
+    },
+    "moviesPosters": {
+      "presses": 10,
+      "inputMsMedian": 0.5,
+      "inputMsMax": 7.7,
+      "frameMsMedian": 9.4,
+      "frameMsMax": 14.9,
+      "settleMsMedian": 0,
+      "settleMsMax": 164,
+      "longestFrameMs": 23,
+      "capped": 0
+    },
+    "moviesPostersRapid": {
+      "fps": 59.9,
+      "longestFrameMs": 21,
+      "framesOver20ms": 1,
+      "framesOver50ms": 0
+    },
+    "moviesTitleOpen": {
+      "inputMs": 22.9,
+      "frameMs": 33.2,
+      "readyMs": 0,
+      "settleMs": 167,
+      "capped": false,
+      "longestFrameMs": 34
+    },
+    "moviesTitleBack": {
+      "inputMs": 1.9,
+      "frameMs": 14.3,
+      "readyMs": 0,
+      "settleMs": 174,
+      "capped": false,
+      "longestFrameMs": 22
+    },
+    "moviesRowsRapid": {
+      "fps": 26.6,
+      "longestFrameMs": 217,
+      "framesOver20ms": 29,
+      "framesOver50ms": 11,
+      "moved": 80
+    },
+    "moviesRowsUpRapid": {
+      "fps": 45.3,
+      "longestFrameMs": 44,
+      "framesOver20ms": 27,
+      "framesOver50ms": 0,
+      "moved": -80
+    },
+    "open-series": {
+      "inputMs": 1.1,
+      "frameMs": 123.9,
+      "readyMs": 0,
+      "settleMs": 588,
+      "capped": false,
+      "longestFrameMs": 140
+    },
+    "seriesGroups": {
+      "presses": 4,
+      "inputMsMedian": 3.4,
+      "inputMsMax": 3.6,
+      "frameMsMedian": 8.4,
+      "frameMsMax": 12.7,
+      "settleMsMedian": 417,
+      "settleMsMax": 575,
+      "longestFrameMs": 61,
+      "capped": 0
+    },
+    "seriesGroupOpen": {
+      "inputMs": 3,
+      "frameMs": 15.6,
+      "readyMs": 0,
+      "settleMs": 172,
+      "capped": false,
+      "longestFrameMs": 21
+    },
+    "seriesPosters": {
+      "presses": 10,
+      "inputMsMedian": 1.6,
+      "inputMsMax": 2.8,
+      "frameMsMedian": 5.6,
+      "frameMsMax": 7.7,
+      "settleMsMedian": 136,
+      "settleMsMax": 162,
+      "longestFrameMs": 33,
+      "capped": 0
+    },
+    "seriesPostersRapid": {
+      "fps": 57.2,
+      "longestFrameMs": 37,
+      "framesOver20ms": 8,
+      "framesOver50ms": 0
+    },
+    "seriesTitleOpen": {
+      "inputMs": 31.7,
+      "frameMs": 53.8,
+      "readyMs": 0,
+      "settleMs": 176,
+      "capped": false,
+      "longestFrameMs": 57
+    },
+    "seriesTitleBack": {
+      "inputMs": 1.9,
+      "frameMs": 7.4,
+      "readyMs": 0,
+      "settleMs": 167,
+      "capped": false,
+      "longestFrameMs": 31
+    },
+    "seriesRowsRapid": {
+      "fps": 45.3,
+      "longestFrameMs": 45,
+      "framesOver20ms": 36,
+      "framesOver50ms": 0,
+      "moved": 80
+    },
+    "seriesRowsUpRapid": {
+      "fps": 48.4,
+      "longestFrameMs": 41,
+      "framesOver20ms": 33,
+      "framesOver50ms": 0,
+      "moved": -80
+    },
+    "open-settings": {
+      "inputMs": 0.8,
+      "frameMs": 66.4,
+      "readyMs": 0,
+      "settleMs": 67,
+      "capped": false,
+      "longestFrameMs": 74
+    },
+    "settingsMove": {
+      "presses": 6,
+      "inputMsMedian": 2.6,
+      "inputMsMax": 3.2,
+      "frameMsMedian": 13.5,
+      "frameMsMax": 16.6,
+      "settleMsMedian": 268,
+      "settleMsMax": 281,
+      "longestFrameMs": 37,
+      "capped": 0
+    },
+    "open-live": {
+      "inputMs": 0.5,
+      "frameMs": 53.2,
+      "readyMs": 0,
+      "settleMs": 186,
+      "capped": false,
+      "longestFrameMs": 72
+    }
+  },
+  "screens": {
+    "guide": 221,
+    "guideFull": 221,
+    "menu": 221,
+    "movies": 138,
+    "moviesPosters": 138,
+    "moviesTitle": 162,
+    "series": 148,
+    "seriesPosters": 148,
+    "seriesTitle": 194,
+    "settings": 134
+  },
+  "endedOn": "#/",
+  "heapMB": 86.4
+}

@@ -12,7 +12,7 @@ import { settings, vodPins, vodSorts } from "../../library";
 import { createRestingCursor } from "../../restingCursor";
 import { scrollTop } from "../../live/listWindow";
 import { editText } from "../../textEntry";
-import { BOLD, colors, focusShadow, motion, radius, RING } from "../../theme";
+import { BOLD, colors, motion, radius, RING } from "../../theme";
 import { $t, $tn } from "../../translate";
 import { sayWhileFocused } from "../../voiceGuide";
 import { useWholeScreen } from "../../wholeScreen";
@@ -54,8 +54,11 @@ const LABEL_Y = 560;
 const LABEL_HEIGHT = 56;
 /** Where the row of posters with the cursor sits; the row below peeks in under it. */
 const GRID_Y = LABEL_Y + LABEL_HEIGHT;
-/** Room above it for a focused poster, grown and glowing. */
-const GRID_MARGIN = 36;
+/**
+ * Where the posters are cut off: under the group's name, so a row sliding up
+ * doesn't show through it. A focused poster, grown, still fits below.
+ */
+const CLIP_Y = LABEL_Y + LABEL_HEIGHT - 14;
 const POSTER_WIDTH = 182;
 const POSTER_HEIGHT = 273;
 const POSTER_GAP = 26;
@@ -66,6 +69,10 @@ const COLUMNS = Math.floor((PAGE_WIDTH - 2 * LEFT + POSTER_GAP) / STEP);
 /** Rows a Channel key moves. */
 const PAGE_ROWS = 3;
 const FOCUS_SCALE = 1.06;
+/** Rows of posters drawn, reused as the cursor moves (drawn rows, below). */
+const SLOT_ROWS = 5;
+const SLOTS = Array.from({ length: SLOT_ROWS }, (_, slot) => slot);
+const COLUMN_LIST = Array.from({ length: COLUMNS }, (_, column) => column);
 /** How long the cursor rests on a title before its details are asked for. */
 const DETAILS_DELAY_MS = 450;
 
@@ -589,12 +596,16 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
       settings.holdSpeed("posters"),
       by => focused() && !props.covered && area() === "grid" && moveRows(by),
     );
-  // The rows drawn: the one with the cursor, the two below, and the one
-  // above, hidden, so it slides in when the cursor moves up.
-  const drawnRows = () => {
-    const from = Math.max(0, gridRow() - 1);
-    const to = Math.min(rowCount(), gridRow() + 3);
-    return Array.from({ length: Math.max(0, to - from) }, (_, row) => from + row);
+  // The rows drawn: the one with the cursor, the one below, two more below
+  // out of sight and the one above, hidden, so the next ones' posters have
+  // loaded by the time they slide in. They're drawn in SLOT_ROWS slots that
+  // stay: a row moved out of sight takes the row coming next, so a move
+  // changes one row's titles instead of making eight posters and dropping
+  // eight, which on the TV took frames in garbage collection (PLAN.md,
+  // "Navigation speed").
+  const rowOfSlot = (slot: number) => {
+    const first = gridRow() - 1;
+    return first + ((((slot - first) % SLOT_ROWS) + SLOT_ROWS) % SLOT_ROWS);
   };
 
   return (
@@ -728,7 +739,7 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
             x={LEFT}
             y={LABEL_Y}
             width={PAGE_WIDTH - 2 * LEFT}
-            height={LABEL_HEIGHT - 14}
+            height={CLIP_Y - LABEL_Y}
             display="flex"
             flexDirection="row"
             alignItems="center"
@@ -756,81 +767,95 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
             </Text>
           </Show>
 
-          <View y={GRID_Y - GRID_MARGIN} width={PAGE_WIDTH} height={1080 - GRID_Y + GRID_MARGIN} clipping>
+          {/* The cursor's ring, one for the grid, drawn under the posters.
+              It jumps to the next poster with no slide and has no glow, as
+              asked (PLAN.md, "Scrolling down the poster grid"). The cursor's
+              row stays at GRID_Y as the rows slide. */}
+          <View
+            x={LEFT + (at() % COLUMNS) * STEP - RING}
+            y={GRID_Y - RING}
+            width={POSTER_WIDTH + 2 * RING}
+            height={POSTER_HEIGHT + 2 * RING}
+            borderRadius={radius.medium + RING}
+            color={colors.focus}
+            scale={FOCUS_SCALE}
+            alpha={inGrid() && !props.covered && items()[at()] ? 1 : 0}
+          />
+          {/* Starts under the group's name, so what slides up past it is
+              cut off there instead of showing through. */}
+          <View y={CLIP_Y} width={PAGE_WIDTH} height={1080 - CLIP_Y} clipping>
             {/* The strip slides, so it's as big as what it holds: the renderer
                 skips the children of a node it finds off screen, and with no
                 size the strip was, three rows down. */}
             <View
               x={LEFT}
-              y={GRID_MARGIN - gridRow() * ROW_HEIGHT}
+              y={GRID_Y - CLIP_Y - gridRow() * ROW_HEIGHT}
               width={COLUMNS * STEP}
               height={rowCount() * ROW_HEIGHT}
               transition={{ y: motion.normal }}
             >
-              <For each={drawnRows()}>
-                {row => (
-                  <For each={Array.from({ length: COLUMNS }, (_, column) => row * COLUMNS + column)}>
-                    {index => {
-                      const item = () => items()[index];
-                      const selected = () => inGrid() && !props.covered && at() === index;
-                      return (
-                        <Show when={item()}>
-                          {one => (
-                            <View
-                              x={(index % COLUMNS) * STEP}
-                              y={row * ROW_HEIGHT}
-                              width={POSTER_WIDTH}
-                              height={POSTER_HEIGHT}
-                              scale={selected() ? FOCUS_SCALE : 1}
-                              transition={{ scale: motion.normal }}
-                            >
-                              <View
-                                x={-RING}
-                                y={-RING}
-                                width={POSTER_WIDTH + 2 * RING}
-                                height={POSTER_HEIGHT + 2 * RING}
-                                borderRadius={radius.medium + RING}
-                                color={colors.focus}
-                                shadow={focusShadow}
-                                alpha={selected() ? 1 : 0}
-                              />
-                              <Artwork
-                                width={POSTER_WIDTH}
-                                height={POSTER_HEIGHT}
-                                src={one().poster}
-                                title={one().name}
-                                fontSize={24}
-                                wait={heldRacing()}
-                              />
-                              <Show when={one().progress}>
-                                {progress => (
-                                  <>
-                                    <View
-                                      x={12}
-                                      y={POSTER_HEIGHT - 18}
-                                      width={POSTER_WIDTH - 24}
-                                      height={6}
-                                      borderRadius={3}
-                                      color={colors.caption}
-                                    />
-                                    <View
-                                      x={12}
-                                      y={POSTER_HEIGHT - 18}
-                                      width={(POSTER_WIDTH - 24) * progress()}
-                                      height={6}
-                                      borderRadius={3}
-                                      color={colors.accent}
-                                    />
-                                  </>
-                                )}
-                              </Show>
-                            </View>
-                          )}
-                        </Show>
-                      );
-                    }}
-                  </For>
-                )}
+              <For each={SLOTS}>
+                {slot => {
+                  const row = createMemo(() => rowOfSlot(slot));
+                  return (
+                    <View y={row() * ROW_HEIGHT} width={COLUMNS * STEP} height={ROW_HEIGHT}>
+                      <For each={COLUMN_LIST}>
+                        {column => {
+                          const index = () => row() * COLUMNS + column;
+                          const item = () => (row() < 0 ? undefined : items()[index()]);
+                          const selected = () => inGrid() && !props.covered && at() === index();
+                          return (
+                            <Show when={item()}>
+                              {one => (
+                                <View
+                                  x={column * STEP}
+                                  width={POSTER_WIDTH}
+                                  height={POSTER_HEIGHT}
+                                  scale={selected() ? FOCUS_SCALE : 1}
+                                  transition={{ scale: motion.normal }}
+                                >
+                                  <Artwork
+                                    width={POSTER_WIDTH}
+                                    height={POSTER_HEIGHT}
+                                    src={one().poster}
+                                    title={one().name}
+                                    fontSize={24}
+                                    wait={heldRacing()}
+                                    // Only once the rows can slide: on the groups,
+                                    // it'd load posters for a group passed by.
+                                    preload={inGrid()}
+                                  />
+                                  <Show when={one().progress}>
+                                    {progress => (
+                                      <>
+                                        <View
+                                          x={12}
+                                          y={POSTER_HEIGHT - 18}
+                                          width={POSTER_WIDTH - 24}
+                                          height={6}
+                                          borderRadius={3}
+                                          color={colors.caption}
+                                        />
+                                        <View
+                                          x={12}
+                                          y={POSTER_HEIGHT - 18}
+                                          width={(POSTER_WIDTH - 24) * progress()}
+                                          height={6}
+                                          borderRadius={3}
+                                          color={colors.accent}
+                                        />
+                                      </>
+                                    )}
+                                  </Show>
+                                </View>
+                              )}
+                            </Show>
+                          );
+                        }}
+                      </For>
+                    </View>
+                  );
+                }}
               </For>
             </View>
           </View>

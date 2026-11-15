@@ -269,7 +269,7 @@
   "notFound": "Página não encontrada",
   "a11y.selected": "Selecionado",
   "settings.account": "Conta Velio",
-  "menu.profiles": "Perfis",
+  "menu.profileOf": "Perfil: {{ name }}",
   "profiles.title": "Quem está assistindo?",
   "profiles.locked": "PIN",
   "profiles.pin": "Digite o PIN de {{ name }}",

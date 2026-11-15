@@ -13,7 +13,7 @@ export const config: DeviceConfig = merge({}, common, {
   },
   lightning: {
     rendererOptions: {
-      numImageWorkers: 0,
+      numImageWorkers: 2,
     },
   },
   keys: {

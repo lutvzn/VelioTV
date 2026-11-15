@@ -3,14 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CURSOR_REST_MS, createRestingCursor } from "./restingCursor";
 
 /** A cursor over a shown value, and what was opened through it. */
-const make = (start = "a") =>
+const make = (start = "a", options?: { manual?: boolean }) =>
   createRoot(dispose => {
     const [shown, setShown] = createSignal(start);
     const opened: string[] = [];
-    const cursor = createRestingCursor(shown, id => {
-      opened.push(id);
-      setShown(id);
-    });
+    const cursor = createRestingCursor(
+      shown,
+      id => {
+        opened.push(id);
+        setShown(id);
+      },
+      options,
+    );
     return { cursor, shown, setShown, opened, dispose };
   });
 
@@ -33,6 +37,17 @@ describe("createRestingCursor", () => {
     vi.advanceTimersByTime(50);
     expect(opened).toEqual(["c"]);
     expect(cursor.at()).toBe("c");
+    dispose();
+  });
+
+  it("with manual, opens only on settle, never by resting", () => {
+    const { cursor, opened, dispose } = make("a", { manual: true });
+    cursor.move("b");
+    vi.advanceTimersByTime(CURSOR_REST_MS * 4);
+    expect(opened).toEqual([]);
+    expect(cursor.at()).toBe("b");
+    expect(cursor.settle()).toBe("b");
+    expect(opened).toEqual(["b"]);
     dispose();
   });
 

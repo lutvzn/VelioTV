@@ -12,11 +12,17 @@
 // page's own main thread is profiled only between a probe's
 // console.profile("name") and console.profileEnd("name"), saved as
 // page-<name>.cpuprofile.
+//
+// With PROBE_CONSOLE set, it also prints the app's errors and warnings to
+// stderr, from the app's start on (run.sh restarts it), with uncaught
+// exceptions and their stacks: a start that throws shows up here, where the
+// tests, which build without the TV's transforms, can miss it.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const [wsUrl, probeFile, input = "{}", timeoutSeconds = "900"] = process.argv.slice(2);
+const showConsole = Boolean(process.env.PROBE_CONSOLE);
 
 // Each probe file declares `async function probe(input)`.
 const expression = `${readFileSync(probeFile, "utf8")}\nprobe(${input});`;
@@ -86,11 +92,26 @@ ws.addEventListener("message", event => {
   if (message.method === "Runtime.consoleAPICalled") {
     const [first, ...rest] = message.params.args;
     if (first?.value === "[probe]") console.error(rest.map(arg => arg.value ?? arg.description).join(" "));
+    else if (showConsole && (message.params.type === "error" || message.params.type === "warning")) {
+      const text = message.params.args.map(arg => arg.value ?? arg.description).join(" ");
+      console.error(`[app ${message.params.type}] ${text}`);
+    }
+  }
+  if (showConsole && message.method === "Runtime.exceptionThrown") {
+    const details = message.params.exceptionDetails;
+    console.error(`[app exception] ${details.exception?.description ?? details.text}`);
+  }
+  // What the browser itself reports, such as a script or image that failed to load.
+  if (showConsole && message.method === "Log.entryAdded" && message.params.entry.level === "error") {
+    console.error(
+      `[app log] ${message.params.entry.text}${message.params.entry.url ? ` (${message.params.entry.url})` : ""}`,
+    );
   }
 });
 
 ws.addEventListener("open", async () => {
   await call("Runtime.enable");
+  if (showConsole) await call("Log.enable");
   // Lets the app finish starting. The debug port opens before the app's
   // page loads, and a probe run in the page before it reads and writes a
   // different storage, so this waits for the app's probe hooks (at most

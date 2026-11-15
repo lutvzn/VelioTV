@@ -28,7 +28,8 @@
     "package:tizen": "bash scripts/package-tizen.sh",
     "deploy:tizen": "./scripts/deploy-tizen.sh",
     "test-streams": "node scripts/test-streams/server.mjs",
-    "tv-probe": "./scripts/tv-probe/run.sh"
+    "tv-probe": "./scripts/tv-probe/run.sh",
+    "perf:nav": "node scripts/tv-probe/nav-perf.mjs"
   },
   "dependencies": {
     "@lightningtv/vite-hex-transform": "^1.1.0",

@@ -38,6 +38,8 @@ const episode = (season: number, number: number, id: string) => ({
   url: `http://example.invalid/${id}.mp4`,
 });
 
+const meta = (id: string) => ({ id, type: "movie", name: `Title ${id}` });
+
 describe("mergeFilms", () => {
   it("takes when its newest copy was added, and a rating from its match or else its best copy", () => {
     const films = [
@@ -191,6 +193,43 @@ describe("createFilmMerger", () => {
       const after = same();
       // Titles whose copies' matches didn't change are the same objects.
       expect(after.titles.filter(title => before.includes(title)).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("takes new add-on items without joining every film again, giving what mergeFilms() gives", () => {
+    const films = Array.from({ length: 40 }, (_, i) => film("a", `m:${i}`, `Film ${i % 30}`));
+    const matches = new Map<string, TitleMatch>([
+      ["m:1", { id: "tt1", name: "One", genres: [] }],
+      ["m:2", { id: "tt2", name: "Two", genres: [] }],
+    ]);
+    const matchFor = (item: { key: string }) => matches.get(item.key);
+    const lists: AddonItem[][] = [
+      [],
+      [{ meta: meta("tt1"), addon: "x" }],
+      [
+        { meta: meta("x:5"), addon: "x" },
+        { meta: meta("tt1"), addon: "x" },
+        { meta: meta("tt9"), addon: "y" },
+      ],
+      [
+        { meta: meta("tt9"), addon: "y" },
+        { meta: meta("tt2"), addon: "x" },
+      ],
+      [],
+    ];
+    const merger = createFilmMerger();
+    const changes: MatchChanges = { id: 1, keys: [] };
+    let before = merger(films, matchFor, [], changes).titles;
+    for (const items of lists) {
+      const want = mergeFilms(films, matchFor, items);
+      const got = merger(films, matchFor, items, changes);
+      expect(got.titles).toEqual(want.titles);
+      expect(new Set(got.byImdb.keys())).toEqual(new Set(want.byImdb.keys()));
+      // The films no add-on has are the same objects as before.
+      expect(got.titles.filter(title => before.includes(title)).length).toBeGreaterThan(
+        got.titles.length - 5,
+      );
+      before = got.titles;
     }
   });
 });

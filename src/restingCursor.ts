@@ -25,7 +25,12 @@ export interface RestingCursor {
  * another way, such as from a search or a remote's key, a move waiting to
  * open is dropped.
  */
-export const createRestingCursor = (shown: Accessor<string>, show: (id: string) => void): RestingCursor => {
+export const createRestingCursor = (
+  shown: Accessor<string>,
+  show: (id: string) => void,
+  /** With `manual`, a move opens nothing by itself: only `settle` (OK) does. */
+  options: { manual?: boolean } = {},
+): RestingCursor => {
   const [moved, setMoved] = createSignal<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   // What `settle` opened, which `shown` may reach only later (the router
@@ -56,7 +61,7 @@ export const createRestingCursor = (shown: Accessor<string>, show: (id: string) 
     }
     clearTimeout(timer);
     setMoved(id);
-    timer = setTimeout(rest, CURSOR_REST_MS);
+    if (!options.manual) timer = setTimeout(rest, CURSOR_REST_MS);
   };
 
   createEffect(

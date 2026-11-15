@@ -11,11 +11,17 @@
 // stop to show them.
 
 import { createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
-import type { AddonItem, Merger, Titles } from "../../data/titles";
+import {
+  createFilmMerger,
+  createSeriesMerger,
+  type AddonItem,
+  type Merger,
+  type Titles,
+} from "../../data/titles";
 import type { FilmEntry, SeriesEntry } from "../../data/vodLibrary";
-import { addons, cinemeta, library, titleMatcher, vodLayout } from "../../library";
+import { addons, cinemeta, library, titleMatcher, vod, vodLayout } from "../../library";
 import type { TitleType } from "../../stremio/addons";
-import { $t } from "../../translate";
+import { $t, warmFormats } from "../../translate";
 import { useAddonGroups } from "./addonGroups";
 import type { PickerLink } from "./StreamPicker";
 import type { ExtraGroup } from "./VodHub";
@@ -49,6 +55,87 @@ const useQuietVersion = () => {
   onCleanup(() => clearTimeout(timer));
   return shown;
 };
+
+/**
+ * Each kind's merger, kept from one visit to the next: it joins again only
+ * what changed since (src/data/titles.ts), so opening Movies again doesn't
+ * join every film anew (over a second on the TV with 36,000 films; PLAN.md,
+ * "Navigation speed").
+ */
+const mergers = new Map<TitleType, unknown>();
+/** The add-ons' items each kind's page last joined, which warming joins again. */
+const lastItems = new Map<TitleType, readonly AddonItem[]>();
+/** The kinds whose page is open, which warming leaves to the page. */
+const open = new Map<TitleType, number>();
+
+const mergerOf = <E extends FilmEntry | SeriesEntry, T extends Merged<E>>(
+  type: TitleType,
+  create: () => Merger<E, T>,
+) => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  const found = (mergers.get(type) as Merger<E, T> | undefined) ?? create();
+  mergers.set(type, found);
+  return found;
+};
+
+/** How long after the last key the titles are joined in the background. */
+const WARM_QUIET_MS = 2000;
+let warmTimer: ReturnType<typeof setTimeout> | undefined;
+/** What each kind was last warmed with, so the same isn't joined twice. */
+const warmedWith = new Map<TitleType, { entries: readonly unknown[]; id: number; at: number }>();
+
+/** Joins one kind's titles, unless its page is open or nothing changed; whether it did. */
+const warm = <E extends FilmEntry | SeriesEntry, T extends Merged<E>>(
+  type: TitleType,
+  entries: readonly E[],
+  create: () => Merger<E, T>,
+) => {
+  if (entries.length === 0 || open.get(type)) return false;
+  const changes = titleMatcher.changes();
+  const last = warmedWith.get(type);
+  if (last?.entries === entries && last.id === changes.id && last.at === changes.keys.length) return false;
+  mergerOf(type, create)(entries, titleMatcher.matchOf, lastItems.get(type) ?? [], changes);
+  warmedWith.set(type, { entries, id: changes.id, at: changes.keys.length });
+  return true;
+};
+
+const warmNow = () => {
+  warmTimer = undefined;
+  const wait = lastKeyAt + WARM_QUIET_MS - performance.now();
+  if (wait > 0) {
+    warmTimer = setTimeout(warmNow, wait);
+    return;
+  }
+  // One at a time, so a key pressed meanwhile waits for one only.
+  const did =
+    warmFormats() ||
+    warm("movie", untrack(vod.films), createFilmMerger) ||
+    warm("series", untrack(vod.series), createSeriesMerger);
+  if (did) warmTimer = setTimeout(warmNow, 0);
+};
+
+/**
+ * Joins the films and series in the background once no key has been
+ * pressed for a while, so opening Movies or Series only joins what changed
+ * since (PLAN.md, "Navigation speed"). Called again as they or their
+ * matches change.
+ */
+export const warmTitlesLater = () => {
+  warmTimer ??= setTimeout(warmNow, WARM_QUIET_MS);
+};
+
+/** The genre and category groups as last made, by kind, to give again while their titles are the same. */
+interface Sorted<T> {
+  all: readonly T[];
+  every: boolean;
+  categories: readonly string[];
+  matching: boolean;
+  /** The genres' order, kept while matching goes on. */
+  genreOrder: string[];
+  genres: ExtraGroup<T>[];
+  categoryGroups: ExtraGroup<T>[];
+}
+const sortedGroups = new Map<TitleType, unknown>();
 
 type Merged<E> = E & { links: E[]; genres: string[]; imdb?: string; progress?: number };
 
@@ -120,7 +207,13 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
     if (popular() && !popularPage()) morePopular();
   });
 
-  const joined = options.createMerger();
+  const joined = mergerOf(options.type, options.createMerger);
+  open.set(options.type, (open.get(options.type) ?? 0) + 1);
+  onCleanup(() => {
+    open.set(options.type, (open.get(options.type) ?? 1) - 1);
+    // What changed while it was open is joined before the next visit.
+    warmTitlesLater();
+  });
   const version = useQuietVersion();
   const titles = createMemo(() => {
     const items: AddonItem[] = [];
@@ -130,6 +223,7 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
       if (addons.answers("stream", options.type, meta.id)) items.push({ meta, addon: "" });
     // Once: matchOf() isn't tracked, as it's asked for every title.
     version();
+    lastItems.set(options.type, items);
     const merged = joined(options.entries(), titleMatcher.matchOf, items, titleMatcher.changes());
     // The few watched, not every title.
     for (const [key, part] of options.progress?.() ?? []) {
@@ -156,8 +250,67 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
 
   // Only when it starts or ends, not as each title is looked at.
   const matching = createMemo(() => titleMatcher.progress().running);
-  /** The genres' order, kept while matching goes on. */
-  let genreOrder: string[] = [];
+
+  /** The genres, most titles first, and the providers' categories, made again only when their titles change. */
+  const sorted = (all: readonly T[]): Sorted<T> => {
+    const every = vodLayout.categories() === "all";
+    const categories = options.categories();
+    const now = matching();
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const last = sortedGroups.get(options.type) as Sorted<T> | undefined;
+    if (
+      last &&
+      last.all === all &&
+      last.every === every &&
+      last.categories === categories &&
+      last.matching === now
+    )
+      return last;
+
+    const byGenre = new Map<string, T[]>();
+    for (const title of all) {
+      for (const genre of title.genres) {
+        let list = byGenre.get(genre);
+        if (!list) byGenre.set(genre, (list = []));
+        list.push(title);
+      }
+    }
+    let genreOrder = last?.genreOrder ?? [];
+    // oxlint-disable-next-line unicorn/no-array-sort
+    const ranked = [...byGenre].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+    if (!now || genreOrder.length === 0) genreOrder = ranked.map(([genre]) => genre);
+    else {
+      genreOrder = genreOrder.slice();
+      const known = new Set(genreOrder);
+      for (const [genre] of ranked) if (!known.has(genre)) genreOrder.push(genre);
+    }
+    const genres: ExtraGroup<T>[] = [];
+    for (const genre of genreOrder) {
+      const items = byGenre.get(genre);
+      if (items) genres.push({ id: `genre:${genre}`, label: genre, items, sortable: true });
+    }
+
+    // The sources' titles in their own categories: those Cinemeta doesn't have, or all.
+    const byCategory = new Map<string, T[]>();
+    for (const title of all) {
+      if (title.imdb && !every) continue;
+      for (const link of title.links) {
+        if (!link.category) continue;
+        let list = byCategory.get(link.category);
+        if (!list) byCategory.set(link.category, (list = []));
+        // Two copies in the same category: once. A title's are added together, so it'd be the last.
+        if (list[list.length - 1] !== title) list.push(title);
+      }
+    }
+    const categoryGroups: ExtraGroup<T>[] = [];
+    for (const name of categories) {
+      const items = byCategory.get(name);
+      if (items) categoryGroups.push({ id: `category:${name}`, label: name, items, sortable: true });
+    }
+    const made = { all, every, categories, matching: now, genreOrder, genres, categoryGroups };
+    sortedGroups.set(options.type, made);
+    return made;
+  };
 
   const groups = createMemo((): ExtraGroup<T>[] => {
     const { titles: all, byKey } = titles();
@@ -170,26 +323,8 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
         items: popularTitles(),
         loading: !page || page.loading,
       });
-
-    const byGenre = new Map<string, T[]>();
-    for (const title of all) {
-      for (const genre of title.genres) {
-        let list = byGenre.get(genre);
-        if (!list) byGenre.set(genre, (list = []));
-        list.push(title);
-      }
-    }
-    // oxlint-disable-next-line unicorn/no-array-sort
-    const genres = [...byGenre].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
-    if (!matching() || genreOrder.length === 0) genreOrder = genres.map(([genre]) => genre);
-    else {
-      const known = new Set(genreOrder);
-      for (const [genre] of genres) if (!known.has(genre)) genreOrder.push(genre);
-    }
-    for (const genre of genreOrder) {
-      const items = byGenre.get(genre);
-      if (items) out.push({ id: `genre:${genre}`, label: genre, items, sortable: true });
-    }
+    const { genres, categoryGroups } = sorted(all);
+    out.push(...genres);
 
     for (const group of fromAddons.extraGroups()) {
       const seen = new Set<T>();
@@ -199,24 +334,7 @@ export const useModernTitles = <E extends FilmEntry | SeriesEntry, T extends Mer
       }
       out.push({ id: group.id, label: group.label, items: [...seen], loading: group.loading });
     }
-
-    // The sources' titles in their own categories: those Cinemeta doesn't have, or all.
-    const every = vodLayout.categories() === "all";
-    const byCategory = new Map<string, T[]>();
-    for (const title of all) {
-      if (title.imdb && !every) continue;
-      for (const link of title.links) {
-        if (!link.category) continue;
-        let list = byCategory.get(link.category);
-        if (!list) byCategory.set(link.category, (list = []));
-        // Two copies in the same category: once. A title's are added together, so it'd be the last.
-        if (list[list.length - 1] !== title) list.push(title);
-      }
-    }
-    for (const name of options.categories()) {
-      const items = byCategory.get(name);
-      if (items) out.push({ id: `category:${name}`, label: name, items, sortable: true });
-    }
+    out.push(...categoryGroups);
     return out;
   });
 

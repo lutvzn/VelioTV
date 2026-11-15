@@ -2,7 +2,7 @@
 // 12-hour one if the user picks it in Settings (PLAN.md, Phase 5, step 6).
 
 import { createSignal } from "solid-js";
-import { locale } from "../translate";
+import { shortDate } from "../translate";
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
@@ -37,7 +37,7 @@ export const dayLabel = (
   if (days === 0) return words.today;
   if (days === 1) return words.tomorrow;
   if (days === -1 && words.yesterday) return words.yesterday;
-  return new Date(ms).toLocaleDateString(locale(), { weekday: "short", day: "numeric", month: "short" });
+  return shortDate(ms);
 };
 
 /** A length or position as "1:02:03", or "2:03" under an hour. */
