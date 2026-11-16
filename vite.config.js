@@ -48,6 +48,7 @@ export default defineConfig(({ mode }) => {
     envDir,
     define: {
       __DEV__: mode !== "production",
+      __VERSION__: JSON.stringify(process.env.npm_package_version ?? "dev"),
       __TMDB_KEY__: JSON.stringify(mode === "test" ? "" : tmdbKey()),
     },
     plugins: [

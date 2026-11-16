@@ -6,7 +6,7 @@ import { Glow } from "../components/Glow";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { profiles } from "../library";
 import { askProfilePin } from "../pin";
-import type { DeviceProfile } from "../sync-core/device";
+import type { DeviceProfile } from "../data/accountView";
 import { BOLD, colors } from "../theme";
 import { $t } from "../translate";
 
@@ -58,7 +58,7 @@ const ProfileCard = (props: { profile: DeviceProfile; current: boolean; onEnter:
         textAlign="center"
         fontSize={22}
         color={colors.textFaint}
-        alpha={props.profile.pin ? 1 : 0}
+        alpha={props.profile.locked ? 1 : 0}
       >
         {$t("profiles.locked")}
       </Text>

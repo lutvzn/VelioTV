@@ -5,13 +5,13 @@
 // shows with them (src/live/liveView.ts), and the app's settings
 // (src/data/appSettings.ts), which a backup holds with the sources, where
 // films were left (src/data/watched.ts) and the reminders
-// (src/data/reminders.ts). Velio Sync (src/data/sync.ts) adds the account's
+// (src/data/reminders.ts). The account (src/data/sync.ts) adds its
 // lists to the sources, and its profiles (src/data/profiles.ts), each with
 // its own edits, watched and reminders. Lists that are Stremio add-ons
 // aren't sources: they're the profile's add-ons (src/stremio/addons.ts),
 // whose films and series show in Movies and Series.
 
-import { createEffect, createMemo, createRoot, createSignal, on, untrack } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, on, onCleanup, untrack } from "solid-js";
 import { createAppSettings } from "./data/appSettings";
 import { fetchBackup, makeBackup, sendBackup, type Backup } from "./data/backup";
 import { createChannelEdits } from "./data/channelEdits";
@@ -24,9 +24,8 @@ import { createProfiles, profileStorage } from "./data/profiles";
 import { createReminders } from "./data/reminders";
 import { sourcesFor, syncedSource } from "./data/sources";
 import { createSync } from "./data/sync";
-import { createSyncEvents } from "./data/syncEvents";
-import { openInWorker } from "./data/syncOpen";
-import type { DeviceView } from "./sync-core/device";
+import { tvName } from "./data/pairing";
+import type { DeviceView } from "./data/accountView";
 import { createVodLibrary } from "./data/vodLibrary";
 import { createVodLayout } from "./data/vodLayout";
 import { createPlayChoices } from "./data/playChoices";
@@ -52,7 +51,7 @@ import { buildLiveView } from "./live/liveView";
 import { channelNumbers } from "./live/zapper";
 import { createSourceManager } from "./data/sourceManager";
 import { appStorage, settingsCopy } from "./data/settingsCopy";
-import { setLanguage } from "./translate";
+import { $t, setLanguage } from "./translate";
 import { createAddons, type AddonList } from "./stremio/addons";
 import { createDbSnapshots } from "./stremio/catalogSnapshot";
 import { addonDetails } from "./stremio/vodEntries";
@@ -75,13 +74,13 @@ const syncedSources = (view: DeviceView | undefined) =>
 
 export const sync = createSync({
   storage: appStorage,
-  open: openInWorker,
+  mainProfileName: () => $t("profiles.main"),
+  deviceName: tvName,
   onView: (view, before) => {
     profiles.viewChanged(view, before);
     void library.applySynced(syncedSources(view)).then(removed => removed.forEach(forgetSourceData));
   },
   onSignedOut: view => {
-    events.stop();
     profiles.signedOut(view);
     void library.applySynced([]).then(removed => removed.forEach(forgetSourceData));
   },
@@ -347,23 +346,27 @@ createRoot(() =>
 // The one profile, with no PIN, needs no picker.
 createRoot(() => createEffect(() => profiles.chooseOnly()));
 
-/** Live updates (src/data/syncEvents.ts), while signed in and in view. */
-export const events = createSyncEvents({
-  site: sync.site,
-  token: () => sync.saved().token,
-  rev: () => sync.view()?.rev,
-  pull: sync.pull,
-});
+/**
+ * The account's changes, while signed in and in view: a pull every few
+ * minutes, and one on coming back into view. Nuvio's API has no live
+ * updates, so the TV asks, as Nuvio's apps do.
+ */
+const PULL_EVERY_MS = 5 * 60_000;
 const [inView, setInView] = createSignal(
   typeof document === "undefined" || document.visibilityState !== "hidden",
 );
 if (typeof document !== "undefined")
   document.addEventListener("visibilitychange", () => setInView(document.visibilityState !== "hidden"));
 createRoot(() =>
-  createEffect(() => {
-    if (sync.signedIn() && inView()) events.start();
-    else events.stop();
-  }),
+  createEffect(
+    on([sync.signedIn, inView], ([signedIn, shown], before) => {
+      if (!signedIn || !shown) return;
+      // Back in view, after a while away: what changed meanwhile.
+      if (before && !before[1]) void sync.pull();
+      const timer = setInterval(() => void sync.pull(), PULL_EVERY_MS);
+      onCleanup(() => clearInterval(timer));
+    }),
+  ),
 );
 createRoot(() => createEffect(() => setTwelveHour(settings.clock() === "12h")));
 createRoot(() =>

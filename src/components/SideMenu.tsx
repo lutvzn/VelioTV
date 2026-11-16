@@ -4,7 +4,7 @@ import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { OVERLAY_Z } from "../pages/live/ChannelOptions";
 import { CURSOR_REST_MS, createRestingCursor } from "../restingCursor";
 import type { Section } from "../sections";
-import type { DeviceProfile } from "../sync-core/device";
+import type { DeviceProfile } from "../data/accountView";
 import { BOLD, colors, radius, RING } from "../theme";
 import { $t, type TextKey } from "../translate";
 import { Fill } from "./Fill";

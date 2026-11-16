@@ -7,7 +7,7 @@
 
 import type { ImportState } from "./db";
 import type { ImportRequest } from "./importer";
-import type { SyncedList } from "../sync-core/records";
+import type { SyncedList } from "./accountView";
 import { normalizeServer } from "./xtream";
 
 export type SourceKind = "m3u" | "xtream";

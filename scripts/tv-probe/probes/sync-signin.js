@@ -1,15 +1,16 @@
-// Velio Sync on the TV (SYNC-PLAN.md, steps 2–7), against the test server's
-// made-up account (scripts/test-streams/syncServer.mjs): `pnpm test-streams`
-// on the dev machine. Each step is a few seconds.
+// The account on the TV (SYNC-PLAN.md), against the test server's made-up
+// account on a fake Nuvio server (scripts/test-streams/syncServer.mjs):
+// `pnpm test-streams` on the dev machine. Each step is a few seconds.
 //
-//   "signin"   signs out if signed in, points the app at `base`, starts a
-//              pairing, approves it as the phone would (with `profiles`),
-//              then signs in and pulls. Says how long the open took in the
-//              worker, the frames during it, and the socket's state.
-//   "addlist"  adds a list on the "web" for `profiles`, and times how long
-//              the TV takes to have it as a source (the socket's "rev N").
-//   "pin"      sets `pin` on the profile `profile` ("" removes it).
-//   "remove"   removes the TV from the account; the TV should sign out.
+//   "signin"   signs out if signed in, points the app at `base`, asks for a
+//              code, approves it as the phone would, then signs in and
+//              pulls. Says how long each took, and the frames during the pull.
+//   "addlist"  adds a list on the "web" for `profiles`, pulls (the TV pulls
+//              by itself every 5 minutes), and times how long the TV takes
+//              to have it as a source.
+//   "pin"      sets `pin` on the profile `profile` ("" removes it), pulls,
+//              and checks the PIN with the server.
+//   "remove"   signs the TV out on the account; the next pull signs it out.
 //   "signout"  signs out from the TV, then points it at `site` if given
 //              (such as "https://velio.tv", to undo "signin"'s `base`).
 //   "status"   what the TV has.
@@ -17,13 +18,13 @@
 // Input:
 //   "step": "signin" | "addlist" | "pin" | "remove" | "signout" | "status"
 //   "base": "http://<dev machine>:8090"
-//   "profiles": "Living room,Kids"      for signin and addlist
+//   "profiles": "Living room,Kids"      for addlist
 //   "profile": "Kids", "pin": "1234"     for pin
 
 async function probe(input) {
   const app = window.velio;
   if (!app?.sync) return { error: "window.velio.sync is missing: deploy the app first" };
-  const { sync, profiles, events, library } = app;
+  const { sync, profiles, library } = app;
   const base = (input.base || "").replace(/\/$/, "");
   const owner = async (action, query) => {
     const response = await fetch(`${base}/sync/${action}?${new URLSearchParams(query || {})}`);
@@ -43,15 +44,13 @@ async function probe(input) {
   const status = () => ({
     signedIn: sync.signedIn(),
     site: sync.site(),
-    rev: sync.view()?.rev,
-    profiles: profiles.list().map(p => `${p.name}${p.pin ? " (PIN)" : ""}`),
+    profiles: profiles.list().map(p => `${p.name}${p.locked ? " (PIN)" : ""}`),
     current: profiles.current()?.name,
     needsPick: profiles.needsPick(),
     sources: library
       .sources()
       .map(s => `${s.name}${s.synced ? ` [synced: ${(s.profiles || []).length}]` : ""}`),
     shown: app.shownSources().map(s => s.name),
-    socket: events.state(),
     lastPull: sync.status().last && {
       result: sync.status().last.result,
       problem: sync.status().last.problem,
@@ -73,12 +72,12 @@ async function probe(input) {
     const startedAt = performance.now();
     const pairing = await app.pairing.startPairing(base, app.pairing.tvName(), (a, b) => fetch(a, b));
     const run = app.pairing.waitForOwner(pairing, (a, b) => fetch(a, b));
-    const approved = await owner("approve", { code: pairing.code, profiles: input.profiles || "" });
+    const approved = await owner("approve", { code: pairing.userCode || pairing.url });
     const step = await run.done;
     if (!step || step.status !== "done") return { error: "Sign-in didn't finish", step, approved };
     const signedInMs = Math.round(performance.now() - startedAt);
 
-    // Frames while the pull is checked and opened in the worker.
+    // Frames while the pull is read and the view built.
     let frames = 0;
     let worst = 0;
     let last = performance.now();
@@ -92,22 +91,20 @@ async function probe(input) {
     };
     requestAnimationFrame(tick);
     const pullStarted = performance.now();
-    const outcome = await sync.signIn(step.trust, step.token);
+    const outcome = await sync.signIn(step.server, step.session);
     const pullMs = Math.round(performance.now() - pullStarted);
     counting = false;
-    const socketMs = await until(() => events.state() === "open", 5000);
     return {
-      device: approved.device,
       name: approved.name,
+      userCode: pairing.userCode,
       signedInMs,
       pull: {
         result: outcome.result,
+        problem: outcome.problem,
         ms: pullMs,
-        open: { ...app.syncOpen },
         frames,
         worstFrameMs: Math.round(worst),
       },
-      socketMs,
       ...status(),
     };
   }
@@ -117,6 +114,7 @@ async function probe(input) {
     const name = `Added ${Date.now() % 100000}`;
     const started = Date.now();
     await owner("add-list", { name, channels: 10, profiles: input.profiles || "" });
+    const pulled = await sync.pull();
     const ms = await until(() => library.sources().some(s => s.name === name), 20000);
     const importing = await until(() => {
       const source = library.sources().find(s => s.name === name);
@@ -125,6 +123,7 @@ async function probe(input) {
     return {
       name,
       before,
+      pulled: pulled.result,
       sourceAfterMs: ms,
       importStartedAfterMs: importing,
       totalMs: Date.now() - started,
@@ -134,17 +133,21 @@ async function probe(input) {
 
   if (input.step === "pin") {
     await owner("pin", { profile: input.profile || "", pin: input.pin || "" });
+    const pulled = await sync.pull();
     const ms = await until(
-      () => profiles.list().some(p => p.name === input.profile && (input.pin ? p.pin === input.pin : !p.pin)),
+      () => profiles.list().some(p => p.name === input.profile && Boolean(p.locked) === Boolean(input.pin)),
       20000,
     );
-    return { ms, ...status() };
+    const profile = profiles.list().find(p => p.name === input.profile);
+    const checked = input.pin && profile ? await sync.checkPin(profile.id, input.pin) : undefined;
+    return { pulled: pulled.result, ms, checked, ...status() };
   }
 
   if (input.step === "remove") {
     await owner("remove-device");
+    const pulled = await sync.pull();
     const ms = await until(() => !sync.signedIn(), 20000);
-    return { signedOutAfterMs: ms, ...status() };
+    return { pulled: pulled.result, signedOutAfterMs: ms, ...status() };
   }
 
   return { error: `No step ${input.step}` };

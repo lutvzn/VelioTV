@@ -67,8 +67,9 @@
 // /catchup/log lists the last recordings asked for, to check their times.
 // /echo answers with the request's method and headers, to see which headers
 // a TV really sends.
-// A made-up Velio Sync account (syncServer.mjs) answers /v1/ as velio.tv
-// does, with the owner's side under /sync/ and the phone's /pair page.
+// A made-up account on a fake Nuvio server (syncServer.mjs, nuvio.ts)
+// answers Nuvio's API as velio.tv does, with the owner's side under /sync/
+// and the phone's /link page.
 // /backup/<name>.json keeps an app backup (PLAN.md, Phase 5, step 7): PUT
 // stores it, in memory until the server stops, and GET answers with it.
 // /backup/sample.json is a made-up one, with a 50-channel playlist from
@@ -106,7 +107,7 @@ import {
   sources,
   subtitles,
 } from "./streams.mjs";
-import { handleSync, upgradeSync } from "./syncServer.mjs";
+import { handleSync } from "./syncServer.mjs";
 import { encodeDebridFiles, handleDebrid } from "./debrid.mjs";
 import { handleCinemeta, handleStremio, handleTmdb, handleWikidata, titleLabel } from "./stremio.mjs";
 import { handleXtream } from "./xtream.mjs";
@@ -943,9 +944,6 @@ await encodeDebridFiles({ ffmpeg, finished, source: filmPath("mp4"), dir: debrid
 for (const stream of STREAMS) startHls(stream);
 
 const server = http.createServer(handle);
-server.on("upgrade", (req, socket) => {
-  if (!upgradeSync(req, socket, `http://${req.headers.host ?? "localhost"}`)) socket.destroy();
-});
 server.listen(PORT, () => {
   const addresses = Object.values(networkInterfaces())
     .flat()

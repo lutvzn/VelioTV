@@ -14,7 +14,7 @@
 // The profile last chosen is kept per TV as "velio.profile".
 
 import { createRoot, createSignal } from "solid-js";
-import type { DeviceProfile, DeviceView } from "../sync-core/device";
+import type { DeviceProfile, DeviceView } from "./accountView";
 
 export const PROFILE_KEY = "velio.profile";
 
@@ -112,12 +112,12 @@ export const createProfiles = (options: ProfilesOptions) =>
       needsPick: () => {
         const list = options.profiles();
         if (list.length === 0 || current()) return false;
-        return !(list.length === 1 && !list[0].pin);
+        return !(list.length === 1 && !list[0].locked);
       },
       /** Chooses the TV's only profile when it has no PIN; whether it did. */
       chooseOnly: () => {
         const list = options.profiles();
-        if (current() || list.length !== 1 || list[0].pin) return false;
+        if (current() || list.length !== 1 || list[0].locked) return false;
         return choose(list[0].id);
       },
 

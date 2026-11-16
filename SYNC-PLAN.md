@@ -1,5 +1,7 @@
 # Velio Sync in VelioTV: implementation plan
 
+> **Replaced (2026-11-16):** the server now answers as Nuvio's does, without end-to-end encryption, and the TV uses those endpoints: see `PLAN.md`, "The account on Nuvio's API". `sync-core`, pairing by sealed payloads, the worker and the WebSocket below are gone. This file is kept as the record of the first version.
+
 **The server side of Velio Sync is built. What's left is VelioTV's half: signing a TV in by QR code, pulling and decrypting its lists, profiles on the TV, live updates, and signing out when the TV is removed.** This file is the plan for that half, written 2026-11-10, for picking the work up from this repo.
 
 The design, the server, and what each server phase built are in VelioPlatform's `PLAN.md` (`../VelioPlatform/PLAN.md`). Read its sections "Accounts, profiles and lists", "Signing in a TV", "VelioTV pulling" and "VelioTV changes" before starting. When the two disagree, that file is the design; this one is the order of work on the TV.

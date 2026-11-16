@@ -20,19 +20,13 @@ const QR_FRAME = 520;
 /** "velio.tv", from the site's address. */
 const siteName = (site: string) => site.replace(/^https?:\/\//i, "");
 
-/** "velio.tv/pair", from the site's address. */
-const pairPage = (site: string) => `${siteName(site)}/pair`;
-
-/** A code read out a character at a time, a group at a time: "K 7 Q M, 2 X H F, …". */
+/** A code read out a character at a time, three at a time: "K 7 Q, M 2 X". */
 const spokenCode = (code: string) =>
-  code
-    .split("-")
-    .map(group => group.split("").join(" "))
-    .join(", ");
+  (code.match(/.{1,3}/g) ?? []).map(group => group.split("").join(" ")).join(", ");
 
 /**
  * Settings → Velio account (SYNC-PLAN.md, step 3): signing this TV in by a
- * phone, which scans the QR code or types the code at velio.tv/pair; then
+ * phone, which scans the QR code or types the code at velio.tv/link; then
  * the TV's profiles, its last pull, and signing out. While signed out, the
  * server can be changed, for a self-hosted one.
  */
@@ -87,7 +81,7 @@ export const AccountPage = (props: { onClose: () => void }) => {
     if (step.status === "done") {
       setPairing(undefined);
       say($t("account.signedIn"));
-      const outcome = await sync.signIn(step.trust, step.token);
+      const outcome = await sync.signIn(step.server, step.session);
       if (outcome.result === "failed") say($t("account.pullFailed", { error: outcome.problem }), true);
     } else if (step.status === "expired") {
       setPairing(undefined);
@@ -147,9 +141,14 @@ export const AccountPage = (props: { onClose: () => void }) => {
     () => pairing() !== undefined,
     () => {
       const shown = pairing();
-      return shown
-        ? [$t("account.scan"), $t("account.orType", { page: pairPage(shown.site) }), spokenCode(shown.code)]
-        : undefined;
+      if (!shown) return undefined;
+      return shown.userCode && shown.page
+        ? [
+            $t("account.scan"),
+            $t("account.orType", { page: siteName(shown.page) }),
+            spokenCode(shown.userCode),
+          ]
+        : [$t("account.scan")];
     },
   );
 
@@ -242,19 +241,21 @@ export const AccountPage = (props: { onClose: () => void }) => {
                     >
                       {$t("account.scan")}
                     </Text>
-                    <Text
-                      x={QR_FRAME + 48}
-                      y={180}
-                      width={FIELD_WIDTH - QR_FRAME - 48}
-                      contain="width"
-                      fontSize={26}
-                      color={colors.textDim}
-                    >
-                      {$t("account.orType", { page: pairPage(shown().site) })}
-                    </Text>
-                    <Text x={QR_FRAME + 48} y={290} fontSize={48} fontFamily={BOLD} letterSpacing={4}>
-                      {shown().code}
-                    </Text>
+                    <Show when={shown().userCode && shown().page}>
+                      <Text
+                        x={QR_FRAME + 48}
+                        y={180}
+                        width={FIELD_WIDTH - QR_FRAME - 48}
+                        contain="width"
+                        fontSize={26}
+                        color={colors.textDim}
+                      >
+                        {$t("account.orType", { page: siteName(shown().page ?? "") })}
+                      </Text>
+                      <Text x={QR_FRAME + 48} y={290} fontSize={64} fontFamily={BOLD} letterSpacing={8}>
+                        {shown().userCode}
+                      </Text>
+                    </Show>
                   </View>
                   <FormButton label={$t("account.cancel")} onEnter={stop} />
                 </>

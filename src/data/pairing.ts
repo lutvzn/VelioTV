@@ -1,63 +1,64 @@
-// Signing this TV in to a Velio account (SYNC-PLAN.md, step 3; VelioPlatform's
-// PLAN.md, "Signing in a TV"). The TV makes a box key pair and two pairing
-// secrets, one for a QR code and one to type, and asks the server for a
-// pairing (POST /v1/pair). The owner's phone reads the code, gives the TV
-// profiles, and answers sealed under the secret. The TV waits for that with
-// long polls (GET /v1/pair/:id), opens it, and keeps its keys and the
-// device token: the server never sees the secret.
+// Signing this TV in to an account, as Nuvio's TV app does (VelioPlatform's
+// PLAN.md, "Nuvio compatibility"). The TV asks for a sign-in code
+// (start_device_login_session), and shows it as a QR code, which opens the
+// site's /link page with the code, and as a six-character code to type
+// there. Whoever approves it there signs the TV in to their account. The
+// TV polls (poll_tv_login_session) until then, and exchanges the code for a
+// session of its own (tv-logins-exchange); only this TV knows the nonce the
+// code was asked for with, so a code seen over a shoulder signs nothing in.
+//
+// A server without the typed code (an older Nuvio one) still has the QR
+// sign-in: start_tv_login_session, approved at /tv-login.
 
-import { toBase64 } from "../sync-core/bytes";
-import { newBoxKeyPair, type KeyPair, isSealed } from "../sync-core/crypto";
-import type { DeviceTrust } from "../sync-core/device";
+import { MAX_DEVICE_NAME_LENGTH } from "./accountView";
 import {
-  MAX_DEVICE_NAME_LENGTH,
-  newPairingSecrets,
-  openPairingPayload,
-  pairingCode,
-  pairingUrl,
-  pairRequest,
-  type PairingKind,
-  type PairingSecrets,
-} from "../sync-core/pairing";
-import { fetchWithin } from "./sync";
+  call,
+  discover,
+  errorText,
+  isMissingFunction,
+  isRecord,
+  isText,
+  problemOf,
+  randomHex,
+  readTokens,
+  type Server,
+  type Session,
+} from "./nuvio";
 
-const START_TIMEOUT_MS = 20_000;
-/** The server waits up to 20 s for an answer; this allows for the network on top. */
-const POLL_TIMEOUT_MS = 35_000;
-/** Polls that come back sooner than this wait the rest, to stay under the server's 20 a minute. */
+/** How long a code lasts when the server doesn't say: Nuvio's 5 minutes. */
+const DEFAULT_LIFETIME_MS = 5 * 60_000;
+/** The least time between polls, whatever the server asks for. */
 const POLL_AT_LEAST_MS = 3_000;
 
 export interface Pairing {
-  site: string;
-  id: string;
-  pollToken: string;
-  /** When the server forgets it, by the server's clock: 10 minutes after it started. */
-  expiresAt: number;
-  /** When it started, by this TV's clock, as the TV's clock may be wrong. */
-  startedAt: number;
-  secrets: PairingSecrets;
-  keys: KeyPair;
-  publicKey: string;
-  /** The address the QR code holds, such as https://velio.tv/pair#K7QM.… */
-  url: string;
-  /** The code to type, such as K7QM-2XHF-9WRT. */
+  server: Server;
+  /** The code the TV polls and exchanges. */
   code: string;
+  /** Known only to this TV: the exchange needs it. */
+  nonce: string;
+  /** The address the QR code holds, such as https://velio.tv/link?code=K7QM2X. */
+  url: string;
+  /** The code to type, such as K7QM2X; none on a server without it. */
+  userCode?: string;
+  /** Where to type it, such as https://velio.tv/link. */
+  page?: string;
+  /** When it started, and how long it lasts, by this TV's clock (the TV's clock may be wrong). */
+  startedAt: number;
+  lifetime: number;
+  pollMs: number;
 }
 
 export type PairingStep =
   | { status: "waiting" }
-  | { status: "done"; trust: DeviceTrust; token: string }
+  | { status: "done"; server: Server; session: Session }
   /** Expired or already used: start again with a new code. */
   | { status: "expired" }
   | { status: "failed"; problem: string };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 declare const webapis: { productinfo?: { getRealModel?: () => string } } | undefined;
 declare const webOS: unknown;
 
-/** What the owner sees on the TVs page: "Samsung TV" and its model, or the like. */
+/** What the owner sees on the devices page: "Samsung TV" and its model, or the like. */
 export const tvName = () => {
   let name = "Velio TV";
   if (typeof webapis !== "undefined") {
@@ -73,132 +74,146 @@ export const tvName = () => {
   return name.slice(0, MAX_DEVICE_NAME_LENGTH);
 };
 
-const problemOf = async (response: Response) => {
-  try {
-    const body: unknown = await response.json();
-    if (isRecord(body) && typeof body.problem === "string") return body.problem;
-  } catch {
-    // Not JSON.
-  }
-  return `HTTP ${response.status}`;
+/**
+ * A timestamptz as PostgREST or Postgres writes it, read by an old TV's
+ * Date.parse too: it takes 3 decimals at most, and an offset with minutes.
+ */
+export const readTime = (value: unknown) =>
+  typeof value === "string"
+    ? Date.parse(
+        value
+          .replace(" ", "T")
+          .replace(/(\.\d{3})\d+/, "$1")
+          .replace(/([+-]\d{2})$/, "$1:00"),
+      )
+    : Number.NaN;
+
+/** How long the code lasts, from its expiry and the server's clock (its Date header). */
+const lifetimeOf = (expiresAt: unknown, response: Response) => {
+  const lifetime = readTime(expiresAt) - Date.parse(response.headers.get("Date") ?? "");
+  return lifetime > 0 && lifetime < 60 * 60_000 ? lifetime : DEFAULT_LIFETIME_MS;
 };
 
-/** Asks the server for a pairing; throws an Error with text to show if it can't. */
+const pollMsOf = (seconds: unknown) =>
+  typeof seconds === "number" && seconds > 0 ? Math.max(POLL_AT_LEAST_MS, seconds * 1000) : 5_000;
+
+const firstRow = async (response: Response): Promise<Record<string, unknown> | undefined> => {
+  const body: unknown = await response.json().catch(() => null);
+  const row: unknown = Array.isArray(body) ? body[0] : body;
+  return isRecord(row) ? row : undefined;
+};
+
+const NOT_UNDERSTOOD = "The server's answer wasn't understood";
+
+/** Asks the server for a code; throws an Error with text to show if it can't. */
 export const startPairing = async (
   site: string,
   name: string,
   fetcher: typeof fetch,
   now: () => number = Date.now,
 ): Promise<Pairing> => {
-  const keys = newBoxKeyPair();
-  const secrets = newPairingSecrets();
-  const publicKey = toBase64(keys.publicKey);
-  const response = await fetchWithin(
-    fetcher,
-    `${site}/v1/pair`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(pairRequest(secrets, { format: 1, publicKey, name })),
+  const server = await discover(site, fetcher);
+  const nonce = randomHex(16);
+  const started = await call(fetcher, server, "/rest/v1/rpc/start_device_login_session", {
+    body: {
+      p_device_nonce: nonce,
+      p_redirect_base_url: `${site}/link`,
+      p_device_name: name,
+      p_device_type: "tv",
     },
-    START_TIMEOUT_MS,
-  );
-  if (response.status !== 201) throw new Error(await problemOf(response));
-  const body: unknown = await response.json();
-  if (
-    !isRecord(body) ||
-    typeof body.id !== "string" ||
-    typeof body.pollToken !== "string" ||
-    typeof body.expiresAt !== "number"
-  )
-    throw new Error("The server's answer wasn't understood");
+  });
+  if (started.ok) {
+    const row = await firstRow(started);
+    if (!row || !isText(row.device_code) || !isText(row.verification_uri_complete))
+      throw new Error(NOT_UNDERSTOOD);
+    return {
+      server,
+      code: row.device_code,
+      nonce,
+      url: row.verification_uri_complete,
+      userCode: isText(row.user_code) ? row.user_code : undefined,
+      page: isText(row.verification_uri) ? row.verification_uri : undefined,
+      startedAt: now(),
+      lifetime: lifetimeOf(row.expires_at, started),
+      pollMs: pollMsOf(row.poll_interval_seconds),
+    };
+  }
+  if (!(await isMissingFunction(started))) throw new Error(await problemOf(started));
+
+  // Only the QR code.
+  const qr = await call(fetcher, server, "/rest/v1/rpc/start_tv_login_session", {
+    body: { p_device_nonce: nonce, p_redirect_base_url: `${site}/tv-login`, p_device_name: name },
+  });
+  if (!qr.ok) throw new Error(await problemOf(qr));
+  const row = await firstRow(qr);
+  if (!row || !isText(row.code) || !isText(row.web_url)) throw new Error(NOT_UNDERSTOOD);
   return {
-    site,
-    id: body.id,
-    pollToken: body.pollToken,
-    expiresAt: body.expiresAt,
+    server,
+    code: row.code,
+    nonce,
+    url: row.web_url,
     startedAt: now(),
-    secrets,
-    keys,
-    publicKey,
-    url: pairingUrl(site, body.id, secrets),
-    code: pairingCode(body.id, secrets),
+    lifetime: lifetimeOf(row.expires_at, qr),
+    pollMs: pollMsOf(row.poll_interval_seconds),
   };
 };
 
-/** Opens the phone's answer and keeps what the TV must trust. */
-export const finishPairing = (pairing: Pairing, answer: Record<string, unknown>): PairingStep => {
-  const { deviceId, deviceToken, kind, payload } = answer;
-  if (
-    typeof deviceId !== "string" ||
-    typeof deviceToken !== "string" ||
-    (kind !== "qr" && kind !== "code") ||
-    !isSealed(payload)
-  )
-    return { status: "failed", problem: "The server's answer wasn't understood" };
+/** Trades the approved code for this TV's own session. */
+export const exchangePairing = async (
+  pairing: Pairing,
+  fetcher: typeof fetch,
+  now: () => number = Date.now,
+): Promise<PairingStep> => {
+  let response: Response;
   try {
-    const opened = openPairingPayload(
-      kind satisfies PairingKind,
-      pairing.secrets,
-      payload,
-      pairing.publicKey,
-    );
-    if (opened.device !== deviceId) return { status: "failed", problem: "The sign-in is for another TV" };
-    return {
-      status: "done",
-      token: deviceToken,
-      trust: {
-        account: opened.account,
-        device: opened.device,
-        secretKey: toBase64(pairing.keys.secretKey),
-        signPublicKey: opened.signPublicKey,
-        boxPublicKey: opened.boxPublicKey,
-      },
-    };
+    response = await call(fetcher, pairing.server, "/functions/v1/tv-logins-exchange", {
+      body: { code: pairing.code, device_nonce: pairing.nonce },
+    });
   } catch (error) {
-    return { status: "failed", problem: error instanceof Error ? error.message : String(error) };
+    return { status: "failed", problem: errorText(error) };
   }
+  // Refused: past the account's TV limit, or the like.
+  if (!response.ok) return { status: "failed", problem: await problemOf(response) };
+  const session = readTokens(await response.json().catch(() => null), now());
+  if (!session) return { status: "failed", problem: NOT_UNDERSTOOD };
+  return { status: "done", server: pairing.server, session };
 };
 
 /**
- * Waits once for the owner (the server holds the request up to 20 s).
- * A network failure answers "waiting", so the caller simply asks again.
+ * Asks once whether the code was approved, and if so exchanges it. A
+ * network failure answers "waiting", so the caller simply asks again.
  */
-export const pollPairing = async (pairing: Pairing, fetcher: typeof fetch): Promise<PairingStep> => {
+export const pollPairing = async (
+  pairing: Pairing,
+  fetcher: typeof fetch,
+  now: () => number = Date.now,
+): Promise<PairingStep> => {
   let response: Response;
   try {
-    response = await fetchWithin(
-      fetcher,
-      `${pairing.site}/v1/pair/${pairing.id}`,
-      { method: "GET", headers: { Authorization: `Bearer ${pairing.pollToken}` }, cache: "no-store" },
-      POLL_TIMEOUT_MS,
-    );
+    response = await call(fetcher, pairing.server, "/rest/v1/rpc/poll_tv_login_session", {
+      body: { p_code: pairing.code, p_device_nonce: pairing.nonce },
+    });
   } catch {
     return { status: "waiting" };
   }
-  if (response.status === 410 || response.status === 404) return { status: "expired" };
-  // Too many polls: wait, as for "waiting".
-  if (response.status === 429) return { status: "waiting" };
-  if (!response.ok) return { status: "failed", problem: await problemOf(response) };
-  const body: unknown = await response.json().catch(() => null);
-  if (!isRecord(body)) return { status: "failed", problem: "The server's answer wasn't understood" };
-  if (body.status === "waiting") return { status: "waiting" };
-  if (body.status === "done") return finishPairing(pairing, body);
-  return { status: "failed", problem: "The server's answer wasn't understood" };
+  if (response.status === 429 || response.status >= 500) return { status: "waiting" };
+  // "Invalid TV login session": it's gone.
+  if (!response.ok) return { status: "expired" };
+  const status = (await firstRow(response))?.status;
+  if (status === "pending") return { status: "waiting" };
+  if (status === "approved") return exchangePairing(pairing, fetcher, now);
+  if (status === "expired" || status === "exchanged") return { status: "expired" };
+  return { status: "failed", problem: NOT_UNDERSTOOD };
 };
 
 export interface PairingRun {
-  /** Stops waiting; the pairing expires on the server by itself. */
+  /** Stops waiting; the code expires on the server by itself. */
   stop: () => void;
   /** Resolves when it ends: signed in, expired, failed, or stopped (undefined). */
   done: Promise<PairingStep | undefined>;
 }
 
-/**
- * Polls until the owner answers, the pairing expires, or stop(). After an
- * answer in under 3 s, it waits the rest, so a server that answers at once
- * isn't asked more than 20 times a minute.
- */
+/** Polls, as often as the server asks, until the code is approved, expires, or stop(). */
 export const waitForOwner = (
   pairing: Pairing,
   fetcher: typeof fetch,
@@ -206,18 +221,14 @@ export const waitForOwner = (
   wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
 ): PairingRun => {
   let stopped = false;
-  const lifetime = pairing.expiresAt - pairing.startedAt;
   const run = async (): Promise<PairingStep | undefined> => {
     for (;;) {
+      await wait(pairing.pollMs);
       if (stopped) return undefined;
-      // By this TV's clock: the server's 10 minutes from when it started.
-      if (lifetime > 0 && now() - pairing.startedAt >= lifetime) return { status: "expired" };
-      const asked = now();
-      const step = await pollPairing(pairing, fetcher);
+      if (now() - pairing.startedAt >= pairing.lifetime) return { status: "expired" };
+      const step = await pollPairing(pairing, fetcher, now);
       if (stopped) return undefined;
       if (step.status !== "waiting") return step;
-      const took = now() - asked;
-      if (took < POLL_AT_LEAST_MS) await wait(POLL_AT_LEAST_MS - took);
     }
   };
   return {

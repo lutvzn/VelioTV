@@ -1,7 +1,7 @@
 // The profile's debrid accounts (src/debrid/services.ts): a key for each
 // service signed in to, and the one torrents play through. Kept as one
 // record in the profile's storage (src/data/profiles.ts), which backups
-// and Velio Sync don't send, so the keys stay on the TV.
+// and the account don't send, so the keys stay on the TV.
 
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { SERVICE_IDS, type ServiceId } from "../debrid/services";

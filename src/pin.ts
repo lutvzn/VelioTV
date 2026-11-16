@@ -4,15 +4,21 @@
 
 import { createSignal } from "solid-js";
 import { PIN_LENGTH } from "./data/appSettings";
-import { settings } from "./library";
-import type { DeviceProfile } from "./sync-core/device";
-import { profilePinMatches } from "./sync-core/records";
-import { $t } from "./translate";
+import type { DeviceProfile } from "./data/accountView";
+import { settings, sync } from "./library";
+import { $t, $tn } from "./translate";
+
+/**
+ * What checking a PIN came to: true closes the prompt; false says it's
+ * wrong and asks again, as does text, which says that instead (such as
+ * "Try again in 5 minutes").
+ */
+export type PinCheck = boolean | string;
 
 export interface PinRequest {
   title: string;
-  /** Takes the digits typed: true closes the prompt, false says they're wrong and asks again. */
-  check: (pin: string) => boolean;
+  /** Takes the digits typed; a profile's PIN is checked by the server, so it may take a moment. */
+  check: (pin: string) => PinCheck | Promise<PinCheck>;
   /** Called with the PIN when it's taken, or undefined when Back cancels. */
   done: (pin: string | undefined) => void;
 }
@@ -21,7 +27,7 @@ const [request, setRequest] = createSignal<PinRequest>();
 export { request as pinRequest };
 
 /** Shows the prompt; resolves with the PIN taken, or undefined if cancelled. */
-const prompt = (title: string, check: (pin: string) => boolean) =>
+const prompt = (title: string, check: PinRequest["check"]) =>
   new Promise<string | undefined>(resolve => {
     // After the key that asked has finished with the focus, such as an
     // options panel giving it back to its page.
@@ -59,11 +65,25 @@ export const askNewPin = async () => {
 
 export { PIN_LENGTH };
 
-/** Asks for a profile's PIN, set at velio.tv; resolves true at once when it has none. */
+/** "Try again in 5 minutes", or in seconds under a minute. */
+const tryAgainIn = (seconds: number) =>
+  seconds >= 60
+    ? $tn("pin.tryInMinutes", Math.ceil(seconds / 60))
+    : $tn("pin.tryInSeconds", Math.ceil(seconds));
+
+/**
+ * Asks for a profile's PIN, set on the web or in a Nuvio app; resolves true
+ * at once when it has none. The server checks it (and after a few wrong
+ * ones, waits a while before it checks another).
+ */
 export const askProfilePin = async (profile: DeviceProfile) => {
-  if (!profile.pin) return true;
-  const pin = await prompt($t("profiles.pin", { name: profile.name }), typed =>
-    profilePinMatches(profile, typed),
-  );
+  if (!profile.locked) return true;
+  const pin = await prompt($t("profiles.pin", { name: profile.name }), async typed => {
+    const outcome = await sync.checkPin(profile.id, typed);
+    if (outcome.result === "unlocked") return true;
+    if (outcome.result === "wrong") return false;
+    if (outcome.result === "locked") return tryAgainIn(outcome.seconds);
+    return $t("pin.notChecked");
+  });
   return pin !== undefined;
 };

@@ -149,9 +149,7 @@ describe("synced lists", () => {
   it("become sources that keep their id, profiles and settings", () => {
     const source = syncedSource(
       {
-        format: 1,
         id: "list-1",
-        rev: 3,
         name: "Account list",
         kind: "xtream",
         server: "http://xtream.example.invalid",

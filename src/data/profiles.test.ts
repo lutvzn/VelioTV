@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
-import type { DeviceProfile, DeviceView } from "../sync-core/device";
+import type { DeviceProfile, DeviceView } from "./accountView";
 import { createProfiles, PROFILE_KEY, profileKey, profileStorage } from "./profiles";
 
 class MemoryStorage implements Storage {
@@ -26,8 +26,14 @@ class MemoryStorage implements Storage {
   }
 }
 
-const profile = (id: string, pin?: string): DeviceProfile => ({ id, name: id, color: 0, lists: [], pin });
-const view = (rev: number, ...profiles: DeviceProfile[]): DeviceView => ({ rev, profiles, lists: [] });
+const profile = (id: string, locked?: true): DeviceProfile => ({
+  id,
+  name: id,
+  color: "#1E88E5",
+  lists: [],
+  locked,
+});
+const view = (_rev: number, ...profiles: DeviceProfile[]): DeviceView => ({ profiles, lists: [] });
 
 const setup = (storage = new MemoryStorage()) => {
   const [list, setList] = createSignal<DeviceProfile[]>([]);
@@ -75,7 +81,7 @@ describe("profiles on the TV", () => {
 
   it("chooses the only profile by itself, unless it has a PIN", () => {
     const { profiles, setList } = setup();
-    setList([profile("a", "1234")]);
+    setList([profile("a", true)]);
     expect(profiles.needsPick()).toBe(true);
     expect(profiles.chooseOnly()).toBe(false);
     setList([profile("a")]);

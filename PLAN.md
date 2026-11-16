@@ -1017,6 +1017,21 @@ The user asked to build debrid into the app, as NuvioTVSmart does (`js/core/debr
 - **For the user to look at on the TV:** the picker's labels, the settings page and the QR sign-in.
 - **Not tried with a real account:** Real-Debrid, Premiumize, AllDebrid, Debrid-Link, EasyDebrid and Offcloud, which were written from their APIs' documents only.
 
+## The account on Nuvio's API (2026-11-16)
+
+The user asked for the Velio server to answer as Nuvio's does, without the end-to-end encryption, and for the TV to use the same endpoints (VelioPlatform's `PLAN.md`, "Nuvio compatibility"). `SYNC-PLAN.md` and "Velio Sync in the app" above describe the version this replaces.
+
+- **The API** (`src/data/nuvio.ts`): the site's `/.well-known/nuvio` gives the backend and the publishable key; every call sends the key as `apikey` and the user's access token (or the key) as `Authorization: Bearer`. It works against velio.tv, a self-hosted Velio server, or Nuvio's own.
+- **Signing in** (`src/data/pairing.ts`): `start_device_login_session` gives a device code, a six-character code to type at `{site}/link`, and the QR code's address. The TV polls `poll_tv_login_session` as often as the server says (at least every 3 s), and exchanges the approved code with its nonce at `tv-logins-exchange` for a session of its own. A server without the typed code (`PGRST202`) falls back to `start_tv_login_session`, the QR code only, at `/tv-login`. Past the account's TV limit the exchange answers 403, and the page says why. There's no email and password sign-in on the TV.
+- **The session** (`src/data/sync.ts`): access and refresh tokens, refreshed a minute before the access token ends and once after a 401, one refresh at a time (a refresh token works once). A refused refresh (a 4xx) means the account signed the TV out: it forgets the session and says so once. After signing in the TV calls `register_current_device` ("Velio TV", platform "tv", its installation id `velio.installation`), so it's on the account's devices page. Signing out calls `/auth/v1/logout?scope=local`, then forgets the session whatever the answer.
+- **The view**: profiles from `sync_pull_profiles` (Nuvio's `profile_index` is the id; an account with none has the main profile, 1), add-ons from `public.addons` (per profile; a profile with `uses_primary_addons` has profile 1's), and IPTV lists from the `velio_iptv_lists` table (each for every profile or for some, by `profile_ids`). Nuvio's own server has no such table (404), so there it's add-ons only. Every profile on the account is on every TV: Nuvio has no profiles per device. A pull that changes nothing writes nothing.
+- **Updates**: there's no WebSocket any more. The TV pulls every 5 minutes while signed in, and when the app comes back into view (`src/library.ts`).
+- **PINs** are checked by the server (`verify_profile_pin`), which waits 5 minutes after 5 wrong ones; the prompt says "Checking…" meanwhile, and how long to wait (`src/pin.ts`, `PinPrompt.tsx`).
+- **Removed**: `src/sync-core/` and its copy script, the worker that opened pulls, the WebSocket events, `tweetnacl`, and the `sync` probe.
+- **Test data**: `scripts/test-streams/nuvio.ts` is a fake Nuvio server with a made-up account (profiles Living room, Kids and Guest, four test lists), used by the tests and served by `pnpm test-streams` (`syncServer.mjs`: the API, `/link`, and the owner's actions under `/sync/`). The `sync-signin` probe drives it, pulling after each owner action.
+- **Checked (2026-11-16)**: `CI=1 pnpm check` (463 tests, including new ones for signing in, pulling, refreshing, PINs and signing out), the build and `pnpm check:old-tvs`. VelioTV's own `pairing.ts` and `sync.ts` were also run once against the real Velio server in VelioPlatform's e2e setup (typed-code sign-in, pull, PIN, refresh, sign-out ending the session), and passed. The server gives each new profile Nuvio's default add-ons (Nuvio's catalog and OpenSubtitles), as Nuvio does, so they show on the TV too.
+- **Left**: a run on the test TV with the `sync-signin` probe against `pnpm test-streams`, then against velio.tv once it runs the new server.
+
 ## What you need before starting
 
 - **TVs:** at least one Samsung in developer mode now, and an LG in developer mode by Phase 9. The oldest models you own set the realistic support floor.

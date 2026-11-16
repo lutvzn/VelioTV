@@ -4,7 +4,6 @@
 
 import { activeElement, type ElementNode } from "@solidtv/solid";
 import { onCleanup } from "solid-js";
-import nacl from "tweetnacl";
 import { channelKeys } from "./data/channelKey";
 import * as db from "./data/db";
 import { createGuideClient } from "./data/guideClient";
@@ -31,7 +30,6 @@ import {
   wikidata,
   currentBackup,
   edits,
-  events,
   guide,
   guideReader,
   isBlocked,
@@ -54,7 +52,6 @@ import { createTitleMatcher } from "./data/titleMatches";
 import { createMoreMatches, MORE_AT_ONCE } from "./data/moreMatches";
 import { cleanTitle, nameKey } from "./stremio/cinemeta";
 import { startPairing, tvName, waitForOwner } from "./data/pairing";
-import { lastOpen } from "./data/syncOpen";
 import { handPlay } from "./play/session";
 import { player, secondPlayer } from "./player";
 import { $t, language } from "./translate";
@@ -88,10 +85,9 @@ const hooks: Record<string, unknown> = {
   /** The Movies and Series groups pinned, for the `pins` probe. */
   vodPins,
   handPlay,
-  /** Velio Sync (SYNC-PLAN.md): the sign-in, profiles and live updates, for the sync-signin probe. */
+  /** The account (SYNC-PLAN.md): the sign-in, profiles and pulls, for the sync-signin probe. */
   sync,
   profiles,
-  events,
   shownSources,
   /** The current profile's Stremio add-ons, for the `stremio` probe. */
   addons,
@@ -123,10 +119,6 @@ const hooks: Record<string, unknown> = {
   cleanTitle,
   nameKey,
   pairing: { startPairing, tvName, waitForOwner },
-  /** How long the last pull took to open, in the worker and in all. */
-  syncOpen: lastOpen,
-  /** TweetNaCl, as the app's build has it, for the `sync` probe (Velio Sync, Phase 0). */
-  nacl,
   /** The app's text, and the language it shows (settings.setLanguage() picks one). */
   text: $t,
   language,

@@ -1,12 +1,12 @@
 import { Text, View } from "@solidtv/solid";
-import type { DeviceProfile } from "../sync-core/device";
-import { PROFILE_COLORS, PROFILE_LETTER_COLOR, profileColor, profileInitial } from "../sync-core/records";
+import { PROFILE_LETTER_COLOR, profileInitial, type DeviceProfile } from "../data/accountView";
 import { BOLD } from "../theme";
 
 /**
- * A "#rrggbb" from sync-core as the renderer's 0xrrggbbaa. In the build,
+ * A "#rrggbb", from the account or a literal, as the renderer's 0xrrggbbaa. In the build,
  * @lightningtv/vite-hex-transform has already turned the literal into that
- * number, as it does every colour literal; in tests it's still text.
+ * number, as it does every colour literal; the account's colours, and
+ * literals in tests, are still text.
  */
 const toColor = (hex: string) => {
   const value: unknown = hex;
@@ -19,7 +19,7 @@ export const ProfileBadge = (props: { profile: DeviceProfile; size: number }) =>
     width={props.size}
     height={props.size}
     borderRadius={props.size / 2}
-    color={toColor(PROFILE_COLORS[profileColor(props.profile)]?.background ?? PROFILE_COLORS[0].background)}
+    color={toColor(props.profile.color)}
     skipFocus
   >
     <Text
