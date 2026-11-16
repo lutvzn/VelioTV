@@ -396,10 +396,21 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
 
     after(stream.startTimeoutMs ?? options.startTimeoutMs ?? START_TIMEOUT_MS, () => fail(TIMEOUT));
     let url = stream.url;
+    if (stream.resolve && !stream.referer) {
+      // The stream before stops while this one's link is asked for.
+      active.stop();
+      try {
+        url = await stream.resolve();
+      } catch (error) {
+        fail(errorText(error));
+        return;
+      }
+      if (mine !== session) return;
+    }
     if (stream.redirects && !stream.referer) {
       // The stream before stops while this one's link is followed.
       active.stop();
-      url = await (options.followRedirects ?? followRedirects)(stream.url);
+      url = await (options.followRedirects ?? followRedirects)(url);
       if (mine !== session) return;
     }
     try {

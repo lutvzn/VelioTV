@@ -2,8 +2,9 @@ import { activeElement, type ElementNode, Text, View } from "@solidtv/solid";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Fill } from "../../components/Fill";
 import { exposeToProbes } from "../../devHooks";
-import { addons, lastLinks, playChoices } from "../../library";
-import { type ChosenStream, chosenStreams, streamText } from "../../play/addonPlay";
+import { serviceInfo } from "../../debrid/services";
+import { addons, debrid, lastLinks, playChoices } from "../../library";
+import { type ChosenStream, chosenStreams, playable, streamText } from "../../play/addonPlay";
 import { autoPick, autoPlayable, type Candidate } from "../../play/autoPlay";
 import type { AutoPicked, TitleChoice } from "../../play/titlePlay";
 import type { FoundStreams, StreamSearch, TitleType } from "../../stremio/addons";
@@ -21,7 +22,7 @@ const ROWS_Y = 130;
 const SHOWN = 6;
 const ROW_WIDTH = WIDTH - 80;
 /** Room on a row's right for its quality and size. */
-const LABEL_WIDTH = 240;
+const LABEL_WIDTH = 300;
 /** How long the picker shows what auto-play will play, so a key can stop it. */
 export const AUTO_PLAY_WAIT_MS = 1500;
 
@@ -73,12 +74,27 @@ interface Row<L> {
   settled: boolean;
 }
 
+/** The torrents' info hashes, once each. */
+const torrentHashes = (found: FoundStreams[]) => {
+  const hashes = found.flatMap(one =>
+    one.streams.flatMap(stream => (stream.torrent ? [stream.torrent.infoHash] : [])),
+  );
+  return hashes.filter((hash, at) => hashes.indexOf(hash) === at);
+};
+
 /** Why nothing can be played: what the add-ons had that the TV can't. */
 const noneText = (found: FoundStreams[]) => {
   const lines = [$t("stremio.noStreams")];
-  const unplayable = found.reduce((sum, one) => sum + one.unplayable, 0);
+  const service = debrid.service();
+  const torrents = found.reduce((sum, one) => sum + one.torrents, 0);
+  // Without a debrid service, torrents are among the streams the TV can't open.
+  const unplayable = found.reduce((sum, one) => sum + one.unplayable, 0) + (service ? 0 : torrents);
   const referer = found.reduce((sum, one) => sum + one.needReferer, 0);
   if (unplayable) lines.push($tn("stremio.unplayable", unplayable));
+  if (service) {
+    const missing = torrentHashes(found).filter(hash => debrid.stateOf(hash) === "notCached").length;
+    if (missing) lines.push($tn("debrid.notReady", missing, { name: serviceInfo(service).name }));
+  } else if (torrents) lines.push($t("debrid.noService"));
   if (referer) lines.push($tn("stremio.needReferer", referer));
   for (const one of found)
     if (one.problem) lines.push($t("stremio.addonFailed", { addon: one.addonName, problem: one.problem }));
@@ -93,9 +109,23 @@ const firstLine = (text: string) => text.split("\n")[0] ?? "";
 const rowText = (chosen: ChosenStream) =>
   chosen.stream.name ? `${chosen.addonName} · ${chosen.stream.name.replace(/\n/g, " ")}` : chosen.addonName;
 
-/** "4K  2.1 GB": what the stream's text says of its picture and size. */
+/**
+ * A torrent's debrid service, as "TB+" when it has it, "TB…" while it's
+ * asked, and "TB" when it can't say; Torrentio names its own the same.
+ */
+const debridLabel = (chosen: ChosenStream) => {
+  const service = debrid.service();
+  if (!chosen.stream.torrent || !service) return "";
+  const short = serviceInfo(service).short;
+  const state = debrid.stateOf(chosen.stream.torrent.infoHash);
+  return state === "cached" ? `${short}+` : state === "checking" ? `${short}…` : short;
+};
+
+/** "TB+  4K  2.1 GB": its debrid service, and what the stream's text says of its picture and size. */
 const labelOf = (chosen: ChosenStream) =>
-  [heightLabel(chosen.stream.height), sizeLabel(chosen.stream.sizeBytes)].filter(Boolean).join("  ");
+  [debridLabel(chosen), heightLabel(chosen.stream.height), sizeLabel(chosen.stream.sizeBytes)]
+    .filter(Boolean)
+    .join("  ");
 
 const streamKey = (chosen: ChosenStream) => `${chosen.addon} ${chosen.stream.url}`;
 
@@ -104,6 +134,8 @@ const streamKey = (chosen: ChosenStream) => `${chosen.addon} ${chosen.stream.url
  * its own has answered, or all have for one listed last for its sound.
  */
 const isSettled = (search: StreamSearch, chosen: ChosenStream) => {
+  // A torrent may yet be found not to be at the debrid service.
+  if (chosen.stream.torrent && debrid.stateOf(chosen.stream.torrent.infoHash) === "checking") return false;
   if (search.done) return true;
   if (chosen.stream.silent) return false;
   const at = search.asked.indexOf(chosen.addon);
@@ -128,6 +160,15 @@ export const StreamPicker = <L,>(props: StreamPickerProps<L>) => {
   const found = () => (search().done ? search().found : undefined);
   const [cursor, setCursor] = createSignal(0);
   const streams = createMemo(() => chosenStreams(search().found));
+  // The debrid service is asked which torrents it has, as they come.
+  createEffect(
+    on(
+      () => (debrid.service() ? torrentHashes(search().found).join(" ") : ""),
+      hashes => {
+        if (hashes) void debrid.check(hashes.split(" "));
+      },
+    ),
+  );
   // What the sources' servers say of their files, by the link's place.
   const [told, setTold] = createSignal<(FileQuality | undefined)[]>([]);
   onMount(() =>
@@ -192,7 +233,10 @@ export const StreamPicker = <L,>(props: StreamPickerProps<L>) => {
   const reused = (() => {
     if (!choices.reuseLast || !props.itemKey) return undefined;
     const link = lastLinks.find(props.itemKey);
-    return link ? { addon: link.addon, addonName: link.addonName, stream: link.stream } : undefined;
+    // A torrent plays again only through a debrid service.
+    return link && playable(link.stream)
+      ? { addon: link.addon, addonName: link.addonName, stream: link.stream }
+      : undefined;
   })();
   const candidates = (): Candidate<Row<L>>[] =>
     rows().map(row => ({ choice: row, text: row.match, settled: row.settled }));

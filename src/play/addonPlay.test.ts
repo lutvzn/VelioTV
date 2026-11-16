@@ -14,7 +14,11 @@ import {
 // The library starts the app's stores; only the add-ons and choices are needed here (vi.mock is hoisted).
 vi.mock("../library", async () => {
   const { DEFAULT_PLAY_CHOICES: choices } = await import("../data/playChoices");
-  return { addons: {}, playChoices: { choices: () => choices } };
+  return {
+    addons: {},
+    playChoices: { choices: () => choices },
+    debrid: { service: () => undefined, stateOf: () => "unknown" },
+  };
 });
 
 const stream = (url: string, bingeGroup?: string): AddonStream => ({
@@ -33,8 +37,9 @@ describe("an add-on's next episode", () => {
       streams: [stream("a1", "hd"), stream("a2", "sd")],
       unplayable: 0,
       needReferer: 0,
+      torrents: 0,
     },
-    { addon: "b", addonName: "B", streams: [stream("b1", "sd")], unplayable: 0, needReferer: 0 },
+    { addon: "b", addonName: "B", streams: [stream("b1", "sd")], unplayable: 0, needReferer: 0, torrents: 0 },
   ]);
 
   it("plays the same add-on's stream of the same kind", () => {
@@ -56,8 +61,15 @@ describe("an add-on's streams", () => {
   it("put those the TV may play silent last, and wait longer for each to start", () => {
     const silent: AddonStream = { ...stream("dts"), silent: true };
     const found = chosenStreams([
-      { addon: "a", addonName: "A", streams: [silent, stream("a1")], unplayable: 0, needReferer: 0 },
-      { addon: "b", addonName: "B", streams: [stream("b1")], unplayable: 0, needReferer: 0 },
+      {
+        addon: "a",
+        addonName: "A",
+        streams: [silent, stream("a1")],
+        unplayable: 0,
+        needReferer: 0,
+        torrents: 0,
+      },
+      { addon: "b", addonName: "B", streams: [stream("b1")], unplayable: 0, needReferer: 0, torrents: 0 },
     ]);
     expect(found.map(one => one.stream.url)).toEqual(["a1", "b1", "dts"]);
     expect(streamOf(found[0])).toEqual({
@@ -87,8 +99,16 @@ describe("the streams' order and the ones tried after", () => {
       streams: [sized("a720", 720), sized("a4k-small", 2160, 5), sized("a4k-big", 2160, 9), sized("a-none")],
       unplayable: 0,
       needReferer: 0,
+      torrents: 0,
     },
-    { addon: "b", addonName: "B", streams: [sized("b1080", 1080)], unplayable: 0, needReferer: 0 },
+    {
+      addon: "b",
+      addonName: "B",
+      streams: [sized("b1080", 1080)],
+      unplayable: 0,
+      needReferer: 0,
+      torrents: 0,
+    },
   ];
 
   it("keeps the add-ons in the account's order, and by quality the best picture, then the biggest, first", () => {
@@ -134,6 +154,7 @@ describe("the streams' order and the ones tried after", () => {
           streams: [named("other", "Show.S01E05.mkv"), named("wanted", "show.s01e04.MKV", "x")],
           unplayable: 0,
           needReferer: 0,
+          torrents: 0,
         },
       ],
       "addon",

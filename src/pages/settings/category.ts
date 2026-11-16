@@ -12,6 +12,7 @@ export type SettingsCategory =
   | "live"
   | "vod"
   | "playing"
+  | "debrid"
   | "scrolling"
   | "pin"
   | "backup"

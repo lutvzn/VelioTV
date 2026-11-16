@@ -396,6 +396,7 @@ export const createAddons = (options: AddonsOptions) =>
           streams: video.streams,
           unplayable: 0,
           needReferer: 0,
+          torrents: video.streams.filter(stream => stream.torrent).length,
         });
       }
     };
@@ -453,7 +454,7 @@ export const createAddons = (options: AddonsOptions) =>
             .then((value): FoundStreams => ({
               addon: state.list.id,
               addonName: state.manifest.name,
-              ...readStreams(value),
+              ...readStreams(value, id),
             }))
             .catch((error: unknown): FoundStreams => {
               search.failed = true;
@@ -463,6 +464,7 @@ export const createAddons = (options: AddonsOptions) =>
                 streams: [],
                 unplayable: 0,
                 needReferer: 0,
+                torrents: 0,
                 problem: problemText(error),
               };
             })

@@ -32,6 +32,7 @@ import { GeneralPage, VodPage } from "./settings/GeneralPage";
 import { LivePage } from "./settings/LivePage";
 import { PinPage } from "./settings/PinPage";
 import { PlayingPage } from "./settings/PlayingPage";
+import { DebridPage } from "./settings/DebridPage";
 import { ScrollingPage } from "./settings/ScrollingPage";
 import { SourceForm } from "./settings/SourceForm";
 import { SettingsPane, SubPage } from "./settings/SubPage";
@@ -60,6 +61,7 @@ const CATEGORIES: { id: SettingsCategory; label: TextKey }[] = [
   { id: "live", label: "menu.live" },
   { id: "vod", label: "settings.vod" },
   { id: "playing", label: "settings.playing" },
+  { id: "debrid", label: "settings.debrid" },
   { id: "scrolling", label: "settings.scrolling" },
   { id: "pin", label: "settings.pin" },
   { id: "backup", label: "settings.backup" },
@@ -373,6 +375,9 @@ export default () => {
             </Match>
             <Match when={settingsCategory() === "playing"}>
               <PlayingPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "debrid"}>
+              <DebridPage onClose={toColumn} />
             </Match>
             <Match when={settingsCategory() === "scrolling"}>
               <ScrollingPage onClose={toColumn} />

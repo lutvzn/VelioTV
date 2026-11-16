@@ -5,6 +5,7 @@
 // streams and subtitles. Everything it sends is read loosely, keeping what
 // fits and leaving the rest, as add-ons differ.
 
+import { infoHashOf, type Torrent } from "../debrid/files";
 import { ensureFetch } from "../polyfills/fetch";
 import { heightOf, sizeOf } from "./streamText";
 
@@ -89,6 +90,11 @@ export interface AddonStream {
   height?: number;
   /** The file's size in bytes, from `behaviorHints.videoSize` or its text. */
   sizeBytes?: number;
+  /**
+   * A torrent, which plays through the profile's debrid service
+   * (src/debrid/); its `url` is then only a name for it, as a magnet link.
+   */
+  torrent?: Torrent;
 }
 
 export interface AddonSubtitle {
@@ -101,8 +107,10 @@ export interface AddonSubtitle {
 /** What streams an add-on had that the TV can't play, to say why there are none. */
 export interface StreamsRead {
   streams: AddonStream[];
-  /** Torrents, YouTube ids and links to open elsewhere. */
+  /** YouTube ids and links to open elsewhere. */
   unplayable: number;
+  /** Torrents, which play only through a debrid service. */
+  torrents: number;
   /** Streams that need a Referer, which no engine can send. */
   needReferer: number;
 }
@@ -278,7 +286,7 @@ const readVideo = (value: unknown): AddonVideo | undefined => {
   const released = timeOf(value.released ?? value.firstAired);
   if (released !== undefined) video.released = released;
   if (Array.isArray(value.streams)) {
-    const { streams } = readStreams({ streams: value.streams.slice(0, 50) });
+    const { streams } = readStreams({ streams: value.streams.slice(0, 50) }, id);
     if (streams.length > 0) video.streams = streams;
   }
   return video;
@@ -375,12 +383,33 @@ const HEARD = word("aac|e?-?ac-?3|dd\\+|ddp|dd|opus|mp3");
  */
 export const silentSound = (words: string) => SILENT.test(words) && !HEARD.test(words);
 
-export const readStreams = (value: unknown): StreamsRead => {
+/** The season and episode in a series' episode id, such as "tt123:1:2". */
+const episodeOf = (id: string | undefined) => {
+  const parts = (id ?? "").split(":");
+  const season = parts.length >= 3 ? count(parts[parts.length - 2]) : undefined;
+  const episode = parts.length >= 3 ? count(parts[parts.length - 1]) : undefined;
+  return season !== undefined && episode !== undefined ? { season, episode } : {};
+};
+
+/** A torrent's stream (an info hash, as Torrentio lists without a debrid key). */
+const readTorrent = (item: Json, id: string | undefined): { url: string; torrent: Torrent } | undefined => {
+  const infoHash = infoHashOf(item.infoHash);
+  if (!infoHash) return undefined;
+  const fileIdx = count(item.fileIdx);
+  const torrent: Torrent = { infoHash, sources: texts(item.sources, 50), ...episodeOf(id) };
+  if (fileIdx !== undefined) torrent.fileIdx = fileIdx;
+  const url = `magnet:?xt=urn:btih:${infoHash}${fileIdx === undefined ? "" : `&fileIdx=${fileIdx}`}`;
+  return { url, torrent };
+};
+
+/** An add-on's streams; `id` is the title's, to find an episode's file in a torrent. */
+export const readStreams = (value: unknown, id?: string): StreamsRead => {
   const list = isObject(value) && Array.isArray(value.streams) ? value.streams : [];
-  const read: StreamsRead = { streams: [], unplayable: 0, needReferer: 0 };
+  const read: StreamsRead = { streams: [], unplayable: 0, needReferer: 0, torrents: 0 };
   for (const item of list.slice(0, 500)) {
     if (!isObject(item)) continue;
-    const url = webUrl(item.url);
+    const torrent = item.url === undefined ? readTorrent(item, id) : undefined;
+    const url = torrent?.url ?? webUrl(item.url);
     if (!url) {
       if (item.infoHash || item.ytId || item.externalUrl || item.url) read.unplayable++;
       continue;
@@ -413,6 +442,10 @@ export const readStreams = (value: unknown): StreamsRead => {
         ? Math.floor(hints.videoSize)
         : sizeOf([description, stream.name]);
     if (size !== undefined) stream.sizeBytes = size;
+    if (torrent) {
+      stream.torrent = torrent.torrent;
+      read.torrents++;
+    }
     read.streams.push(stream);
   }
   return read;

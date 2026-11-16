@@ -39,6 +39,12 @@ export interface Stream {
    * player follows it first, and gives the engine where it ends.
    */
   redirects?: boolean;
+  /**
+   * Gives the link to play, when it must first be asked for, as a debrid
+   * service's for a torrent (src/debrid/). The app's player asks for it
+   * first; its error is the stream's.
+   */
+  resolve?: () => Promise<string>;
 }
 
 /** An audio or subtitle track of the stream playing. */

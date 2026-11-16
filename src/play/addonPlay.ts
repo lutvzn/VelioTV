@@ -13,7 +13,10 @@ import type { Stream } from "#devices/common/player";
 import type { PlayChoices, StreamOrder } from "../data/playChoices";
 import type { Episode, SeriesDetails } from "../data/vod";
 import type { FilmEntry, SeriesEntry } from "../data/vodLibrary";
-import { addons, playChoices } from "../library";
+import { failKind } from "../debrid/api";
+import { serviceInfo } from "../debrid/services";
+import { addons, debrid, playChoices } from "../library";
+import { $t } from "../translate";
 import type { AddonStream } from "../stremio/addon";
 import type { FoundStreams } from "../stremio/addons";
 import { nextFileName, sameFileName } from "../stremio/episodeFile";
@@ -43,6 +46,14 @@ const byQuality = (streams: AddonStream[]) =>
     .map(one => one.stream);
 
 /**
+ * Whether a stream can play: a torrent only through the profile's debrid
+ * service, and not when the service has said it doesn't have it.
+ */
+export const playable = (stream: AddonStream) =>
+  !stream.torrent ||
+  (debrid.service() !== undefined && debrid.stateOf(stream.torrent.infoHash) !== "notCached");
+
+/**
  * Every playable stream found, in order, with its add-on; those whose sound
  * the TV may not play (DTS or TrueHD) after the rest. With `order`
  * "quality", each add-on's best picture comes first.
@@ -52,7 +63,7 @@ export const chosenStreams = (
   order: StreamOrder = playChoices.choices().order,
 ): ChosenStream[] => {
   const all = found.flatMap(one =>
-    (order === "quality" ? byQuality(one.streams) : one.streams).map(stream => ({
+    (order === "quality" ? byQuality(one.streams) : one.streams).filter(playable).map(stream => ({
       addon: one.addon,
       addonName: one.addonName,
       stream,
@@ -93,13 +104,49 @@ export const fallbackStreams = (found: ChosenStream[], chosen: ChosenStream, cho
     .slice(0, choices.fallbacks)
     .map(one => one.choice);
 
-export const streamOf = (chosen: ChosenStream, startTimeoutMs = ADDON_START_TIMEOUT_MS): Stream => ({
-  url: chosen.stream.url,
-  ...(chosen.stream.userAgent ? { userAgent: chosen.stream.userAgent } : {}),
-  startTimeoutMs,
-  from: chosen.addonName,
-  redirects: true,
-});
+/** Why a torrent didn't play, as the player says it. */
+export const debridErrorText = (error: unknown, name: string) => {
+  switch (failKind(error)) {
+    case "notCached":
+      return $t("debrid.error.notCached", { name });
+    case "key":
+      return $t("debrid.error.key", { name });
+    case "busy":
+      return $t("debrid.error.busy", { name });
+    case "noVideo":
+      return $t("debrid.error.noVideo");
+    default:
+      return $t("debrid.error.failed", { name, why: error instanceof Error ? error.message : String(error) });
+  }
+};
+
+export const streamOf = (chosen: ChosenStream, startTimeoutMs = ADDON_START_TIMEOUT_MS): Stream => {
+  const { stream } = chosen;
+  const torrent = stream.torrent;
+  const service = debrid.service();
+  if (torrent && service) {
+    const name = serviceInfo(service).name;
+    return {
+      url: stream.url,
+      startTimeoutMs,
+      from: name,
+      resolve: () =>
+        debrid.resolve({ torrent, ...(stream.filename ? { filename: stream.filename } : {}) }).then(
+          resolved => resolved.url,
+          (error: unknown) => {
+            throw new Error(debridErrorText(error, name));
+          },
+        ),
+    };
+  }
+  return {
+    url: stream.url,
+    ...(stream.userAgent ? { userAgent: stream.userAgent } : {}),
+    startTimeoutMs,
+    from: chosen.addonName,
+    redirects: true,
+  };
+};
 
 /** The stream's own subtitles (if it's an add-on's), then every add-on's, each address once. */
 export const subtitlesFor = (type: "movie" | "series", id: string, chosen?: ChosenStream) => async () => {

@@ -31,6 +31,8 @@ import { createVodLibrary } from "./data/vodLibrary";
 import { createVodLayout } from "./data/vodLayout";
 import { createPlayChoices } from "./data/playChoices";
 import { createLastLinks } from "./data/lastLinks";
+import { createDebridAccounts } from "./data/debridAccounts";
+import { createDebrid } from "./debrid/debrid";
 import { createVodPins } from "./data/vodPins";
 import { createVodSorts } from "./data/vodSorts";
 import { createTitleMatcher, type MatchItem, type MatchStore } from "./data/titleMatches";
@@ -152,6 +154,13 @@ export const vodPins = createVodPins({ storage: profileData, profile: () => prof
 export const playChoices = createPlayChoices({ storage: profileData, profile: () => profiles.currentId() });
 /** The add-on stream each film and episode last played (src/data/lastLinks.ts). */
 export const lastLinks = createLastLinks({ storage: profileData });
+/** The current profile's debrid accounts (src/data/debridAccounts.ts). */
+export const debridAccounts = createDebridAccounts({
+  storage: profileData,
+  profile: () => profiles.currentId(),
+});
+/** Torrents played through the profile's debrid service (src/debrid/debrid.ts). */
+export const debrid = createDebrid({ active: debridAccounts.active });
 
 const CINEMETA_KEY = "velio.cinemeta";
 const keptCinemeta = () => {

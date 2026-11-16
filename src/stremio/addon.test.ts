@@ -175,8 +175,9 @@ describe("an add-on's answers", () => {
         },
       ],
     });
-    expect(read.unplayable).toBe(3);
+    expect(read.unplayable).toBe(2);
     expect(read.needReferer).toBe(1);
+    expect(read.torrents).toBe(1);
     expect(read.streams).toEqual([
       {
         url: "https://cdn.example.invalid/film.mp4",
@@ -188,7 +189,42 @@ describe("an add-on's answers", () => {
         subtitles: [{ id: "1", url: "https://subs.example.invalid/1.srt", language: "eng" }],
       },
       { url: "https://cdn.example.invalid/film.m3u8", name: "", description: "Older add-on", subtitles: [] },
+      {
+        url: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&fileIdx=0",
+        name: "Torrent",
+        description: "",
+        subtitles: [],
+        torrent: { infoHash: "0123456789abcdef0123456789abcdef01234567", fileIdx: 0, sources: [] },
+      },
     ]);
+  });
+
+  it("read a torrent with its trackers, and the episode it's for", () => {
+    const [stream] = readStreams(
+      {
+        streams: [
+          {
+            infoHash: "ABCDEF0123456789ABCDEF0123456789ABCDEF01",
+            fileIdx: 3,
+            name: "Torrentio\n1080p",
+            title: "Show.S01E02.1080p.mkv\n👤 12 💾 1.2 GB",
+            sources: ["tracker:udp://tracker.example.invalid:80", "dht:abcdef"],
+            behaviorHints: { filename: "Show.S01E02.1080p.mkv" },
+          },
+          { infoHash: "not a hash" },
+        ],
+      },
+      "tt123:1:2",
+    ).streams;
+    expect(stream.torrent).toEqual({
+      infoHash: "abcdef0123456789abcdef0123456789abcdef01",
+      fileIdx: 3,
+      sources: ["tracker:udp://tracker.example.invalid:80", "dht:abcdef"],
+      season: 1,
+      episode: 2,
+    });
+    expect(stream.filename).toBe("Show.S01E02.1080p.mkv");
+    expect(stream.height).toBe(1080);
   });
 
   it("read a stream's file name, picture height and size", () => {

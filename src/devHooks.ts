@@ -14,6 +14,8 @@ import {
   backUpTo,
   lastLinks,
   playChoices,
+  debridAccounts,
+  debrid,
   cinemeta,
   cinemetaUrl,
   setCinemetaUrl,
@@ -96,6 +98,9 @@ const hooks: Record<string, unknown> = {
   /** How films and series play, and the links kept (PLAN.md, "Auto-play"). */
   playChoices,
   lastLinks,
+  /** The debrid accounts and torrents played through them, for the `debrid-service` probe. */
+  debridAccounts,
+  debrid,
   /** The modern Movies and Series (PLAN.md, "Movies and Series by title"), for the `modern` probe. */
   cinemeta,
   cinemetaUrl,
