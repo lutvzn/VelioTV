@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cuesAt, decodeSubtitles, nextChange, readSubtitleFile } from "./subtitleFile";
+import { cuesAt, nextChange, readSubtitleFile } from "./subtitleFile";
+import { decodeSubtitles } from "./subtitleText";
 
 const SRT = `﻿1
 00:00:01,000 --> 00:00:02,500

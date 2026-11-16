@@ -46,6 +46,27 @@ export const episodeItem = (show: SeriesEntry, episode: Episode): WatchedItem =>
 /** Every episode, in order. */
 export const allEpisodes = (details: SeriesDetails) => details.seasons.flatMap(season => season.episodes);
 
+/**
+ * Whether an episode has been on: one with no date, or a date that doesn't
+ * read, counts as on (after hasEpisodeAired in NuvioTVSmart's
+ * playerNextEpisodeRules.js, GPL-3.0, changed).
+ */
+export const hasAired = (episode: Episode, now = Date.now()) =>
+  episode.released === undefined || !Number.isFinite(episode.released) || episode.released <= now;
+
+/**
+ * The episode to go on to after `episode`: the next in order, a special
+ * only after a special, and none if it hasn't been on yet.
+ */
+export const nextEpisode = (details: SeriesDetails, episode: Episode, now = Date.now()) => {
+  const list = allEpisodes(details);
+  const at = list.findIndex(one => one.id === episode.id);
+  if (at < 0) return undefined;
+  const special = episode.season === 0;
+  const following = list.slice(at + 1).find(one => (one.season === 0) === special);
+  return following && hasAired(following, now) ? following : undefined;
+};
+
 /** An episode to play, going on to the next when it ends. */
 export const episodePlay = (
   show: SeriesEntry,
@@ -53,14 +74,14 @@ export const episodePlay = (
   episode: Episode,
   startMs?: number,
 ): Omit<VodPlay, "kind"> => {
-  const list = allEpisodes(details);
-  const next = list[list.findIndex(one => one.id === episode.id) + 1];
+  const next = nextEpisode(details, episode);
   return {
     item: episodeItem(show, episode),
     stream: { url: episode.url, userAgent: episode.headers?.userAgent, referer: episode.headers?.referer },
     startMs,
     back: "/series",
     next: next ? () => Promise.resolve({ kind: "vod", ...episodePlay(show, details, next) }) : undefined,
+    ...(next ? { nextTitle: episodeLabel(next) } : {}),
   };
 };
 

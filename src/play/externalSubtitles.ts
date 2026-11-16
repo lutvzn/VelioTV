@@ -5,7 +5,8 @@
 // within half a second.
 
 import { createSignal } from "solid-js";
-import { cuesAt, decodeSubtitles, nextChange, readSubtitleFile, type Cue } from "../stremio/subtitleFile";
+import { cuesAt, nextChange, readSubtitleFile, type Cue } from "../stremio/subtitleFile";
+import { decodeSubtitles, withoutSoundText } from "../stremio/subtitleText";
 import { getBytes } from "../stremio/addon";
 
 /** The longest wait between looks. */
@@ -53,13 +54,20 @@ export const createExternalSubtitles = (options: ExternalSubtitlesOptions) => {
     chosen,
     /** Why the file chosen couldn't be read. */
     problem,
-    /** Shows the file `id` at `url`; resolves once it's read, or failed to be. */
-    show: async (id: string, url: string) => {
+    /**
+     * Shows the file `id` at `url`; resolves once it's read, or failed to be.
+     * Its language helps read its characters; `hideSoundText` takes out
+     * "[music]" and the like.
+     */
+    show: async (id: string, url: string, file: { language?: string; hideSoundText?: boolean } = {}) => {
       off();
       const mine = asked;
       setChosen(id);
       try {
-        const read = readSubtitleFile(decodeSubtitles(await getBytes(url, fetcher)));
+        const all = readSubtitleFile(decodeSubtitles(await getBytes(url, fetcher), file.language));
+        const read = file.hideSoundText
+          ? all.map(cue => ({ ...cue, text: withoutSoundText(cue.text) })).filter(cue => cue.text)
+          : all;
         if (mine !== asked) return;
         if (read.length === 0) throw new Error("It has no subtitles in it");
         cues = read;

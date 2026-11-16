@@ -32,6 +32,7 @@
 // vodColumns.ts; PLAN.md, Phase 6).
 
 import type { MatchRecord } from "./titleMatches";
+import type { SnapshotRecord } from "../stremio/catalogSnapshot";
 import { type ChannelColumns, fromColumns, type StoredChannel, toColumns } from "./channelList";
 import { DAY, decodeBlock, type StoredProgramme } from "./guideCodec";
 import { ensureGetAll, keyCursor } from "../polyfills/indexedDb";
@@ -45,7 +46,7 @@ export { DAY, type StoredChannel, type StoredProgramme };
 ensureGetAll();
 
 export const DB_NAME = "velio";
-const VERSION = 8;
+const VERSION = 9;
 const STORES = [
   "imports",
   "channelLists",
@@ -239,6 +240,10 @@ export const openDb = (name = DB_NAME): Promise<IDBDatabase> => {
     // matcher writes them again as blocks.
     if (!db.objectStoreNames.contains("titleMatchBlocks"))
       db.createObjectStore("titleMatchBlocks", { keyPath: ["source", "block"] });
+    // Version 9 adds the add-on catalogs' first pages, a record per type
+    // (src/stremio/catalogSnapshot.ts).
+    if (!db.objectStoreNames.contains("catalogPages"))
+      db.createObjectStore("catalogPages", { keyPath: "type" });
     if (event.oldVersion < 6) {
       // Version 5 stored the guide in blocks, and version 6 in blocks of two
       // parts, keyed by the guide rather than the source. The guide from
@@ -504,5 +509,15 @@ export const trimTitleMatches = async (db: IDBDatabase, source: string, from: nu
   const transaction = writeTransaction(db, ["titleMatches", "titleMatchBlocks"]);
   transaction.objectStore("titleMatches").delete(source);
   transaction.objectStore("titleMatchBlocks").delete(sourceBlocks(source, from));
+  await finished(transaction);
+};
+
+/** A type's kept add-on catalog pages (src/stremio/catalogSnapshot.ts). */
+export const readCatalogPages = (db: IDBDatabase, type: string) =>
+  request(db.transaction("catalogPages").objectStore("catalogPages").get(type));
+
+export const writeCatalogPages = async (db: IDBDatabase, record: SnapshotRecord) => {
+  const transaction = writeTransaction(db, "catalogPages");
+  transaction.objectStore("catalogPages").put(record);
   await finished(transaction);
 };

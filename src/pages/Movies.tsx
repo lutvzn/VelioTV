@@ -8,6 +8,7 @@ import { vod, vodLayout, watched } from "../library";
 import { watchVod } from "../play/start";
 import { addonFilmPlay } from "../play/addonPlay";
 import { filmPlay } from "../play/vodPlay";
+import { type TitleChoice, withOthers } from "../play/titlePlay";
 import { addonFilm, keptFilm } from "../stremio/vodEntries";
 import { duration } from "../live/format";
 import { $t } from "../translate";
@@ -131,17 +132,21 @@ const Classic = () => {
       </Show>
       <Show when={picking()} keyed>
         {asked => (
-          <StreamPicker
+          <StreamPicker<never>
             title={asked.film.name}
             type="movie"
             id={asked.film.stremio?.id ?? ""}
+            itemKey={asked.film.key}
             onClose={() => setPicking(undefined)}
-            onPick={choice => {
+            onPick={(choice, auto) => {
               if (choice.kind !== "addon") return;
-              const { chosen } = choice;
               setPicking(undefined);
               reopenAddon = asked.film;
-              watchVod(navigate, addonFilmPlay(asked.film, chosen, asked.startMs));
+              const build = (one: TitleChoice<never>) =>
+                one.kind === "addon"
+                  ? addonFilmPlay(asked.film, one.chosen, asked.startMs)
+                  : filmPlay(asked.film);
+              watchVod(navigate, withOthers(build(choice), auto, build));
             }}
           />
         )}

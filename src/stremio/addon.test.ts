@@ -184,10 +184,28 @@ describe("an add-on's answers", () => {
         description: "Film\nMP4",
         userAgent: "Velio-test",
         bingeGroup: "test-1080",
+        height: 1080,
         subtitles: [{ id: "1", url: "https://subs.example.invalid/1.srt", language: "eng" }],
       },
       { url: "https://cdn.example.invalid/film.m3u8", name: "", description: "Older add-on", subtitles: [] },
     ]);
+  });
+
+  it("read a stream's file name, picture height and size", () => {
+    const [stream, other] = readStreams({
+      streams: [
+        {
+          url: "https://cdn.example.invalid/a.mkv",
+          name: "Test\n4K",
+          behaviorHints: { filename: "Film.2160p.WEB.mkv", videoSize: 12_884_901_888 },
+        },
+        { url: "https://cdn.example.invalid/b.mkv", name: "Test", description: "Film 720p 💾 1.4 GB" },
+      ],
+    }).streams;
+    expect(stream).toMatchObject({ filename: "Film.2160p.WEB.mkv", height: 2160, sizeBytes: 12_884_901_888 });
+    expect(other.height).toBe(720);
+    expect(other.sizeBytes).toBeGreaterThan(1.3 * 1024 ** 3);
+    expect(other.sizeBytes).toBeLessThan(1.6 * 1024 ** 3);
   });
 
   it("mark streams whose sound is only DTS or TrueHD, which the TV plays silent", () => {

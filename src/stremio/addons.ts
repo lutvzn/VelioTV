@@ -2,10 +2,24 @@
 // the account's lists of kind "stremio", each a manifest's address. Their
 // manifests are kept in storage, so their catalogs show at once at the next
 // start, and are asked for again once a day old or when the address changes.
-// Catalog pages, details, streams and subtitles are asked for as they're
-// wanted and kept while the app runs.
+// Catalog pages, details and subtitles are asked for as they're wanted and
+// kept while the app runs; each catalog's first page is also kept in the
+// database for 12 hours (catalogSnapshot.ts).
+//
+// Streams are shown as each add-on answers, in the account's order, and
+// kept for 15 minutes, for at most 12 titles, as debrid links stop working
+// after a while (after NuvioTVSmart's streamSearchSessionCache.js and
+// streamOrdering.js, https://github.com/NuvioMedia/NuvioTVSmart, GPL-3.0;
+// changed: rewritten in TypeScript for this app's add-on store).
 
 import { batch, createEffect, createRoot, createSignal, untrack } from "solid-js";
+import {
+  type CatalogSnapshots,
+  isFresh,
+  SNAPSHOT_ITEMS,
+  type SnapshotPage,
+  snapshotRecord,
+} from "./catalogSnapshot";
 import {
   catalogUrl,
   getJson,
@@ -74,6 +88,18 @@ export interface FoundStreams extends StreamsRead {
   problem?: string;
 }
 
+/** A title's streams so far, as the add-ons answer. */
+export interface StreamSearch {
+  /** The answers so far, in the account's order. */
+  found: FoundStreams[];
+  /** Every add-on has answered. */
+  done: boolean;
+  /** The add-ons asked, by list id, in the account's order. */
+  asked: string[];
+  /** Those still to answer. */
+  waiting: string[];
+}
+
 export interface FoundSubtitle extends AddonSubtitle {
   addonName: string;
 }
@@ -87,12 +113,22 @@ export interface AddonsOptions {
   now?: () => number;
   /** How long a page of a catalog can take. */
   timeoutMs?: number;
+  /** Where catalogs' first pages are kept between starts (catalogSnapshot.ts). */
+  snapshots?: CatalogSnapshots;
 }
 
 const STORAGE_KEY = "velio.addons";
 const STALE_MS = 24 * 3_600_000;
 /** A catalog page asked for again after it failed, at the earliest. */
 const RETRY_MS = 60_000;
+/** How long a title's streams are kept once every add-on has answered. */
+export const STREAMS_KEPT_MS = 15 * 60_000;
+/** How long they're kept when an add-on failed, so it's asked again soon. */
+const STREAMS_FAILED_KEPT_MS = RETRY_MS;
+/** How many titles' streams are kept. */
+export const STREAMS_KEPT = 12;
+/** First pages are written this long after the last one came, all at once. */
+const SNAPSHOT_WRITE_MS = 3000;
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -221,7 +257,7 @@ export const createAddons = (options: AddonsOptions) =>
       ordered().filter((state): state is AddonState & { manifest: AddonManifest } => !!state.manifest);
     const findAddon = (id: string) => ready().find(state => state.list.id === id);
 
-    const catalogs = (type: TitleType): CatalogGroup[] =>
+    const catalogs = (type: string): CatalogGroup[] =>
       ready().flatMap(state =>
         hasCatalogs(state.manifest)
           ? state.manifest.catalogs
@@ -237,7 +273,67 @@ export const createAddons = (options: AddonsOptions) =>
 
     const [pages, setPages] = createSignal<Record<string, CatalogPage>>({});
     const failedAt = new Map<string, number>();
+
+    // Each type's kept first pages are read once, at its first catalog asked
+    // for; with them, those catalogs aren't asked until they're 12 hours old.
+    const firstPages = new Map<string, Map<string, SnapshotPage>>();
+    const firstPagesOf = (type: string) => {
+      let found = firstPages.get(type);
+      if (!found) firstPages.set(type, (found = new Map()));
+      return found;
+    };
+    const seeded = new Map<string, Promise<void>>();
+    const writeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const firstUrl = (group: CatalogGroup) =>
+      catalogUrl(findAddon(group.addon)?.list.url ?? "", group.catalog, { skip: 0 });
+    const seed = (type: string) => {
+      const snapshots = options.snapshots;
+      if (!snapshots) return Promise.resolve();
+      let done = seeded.get(type);
+      if (!done) {
+        done = (async () => {
+          const stored = await snapshots.read(type).catch((): SnapshotPage[] => []);
+          const at = now();
+          const groups = new Map(catalogs(type).map(group => [group.key, group]));
+          const shown: Record<string, CatalogPage> = {};
+          for (const page of stored) {
+            if (!isFresh(page, at) || firstPagesOf(type).has(page.key)) continue;
+            firstPagesOf(type).set(page.key, page);
+            const group = groups.get(page.key);
+            if (group && page.url === firstUrl(group) && page.items.length > 0)
+              shown[page.key] = { items: page.items, loading: false, done: page.done };
+          }
+          setPages(all => {
+            const next = { ...all };
+            for (const key of Object.keys(shown)) if (!next[key]) next[key] = shown[key];
+            return next;
+          });
+        })();
+        seeded.set(type, done);
+      }
+      return done;
+    };
+    const writeSoon = (type: string) => {
+      const snapshots = options.snapshots;
+      if (!snapshots) return;
+      clearTimeout(writeTimers.get(type));
+      writeTimers.set(
+        type,
+        setTimeout(() => {
+          writeTimers.delete(type);
+          const order = catalogs(type).map(group => group.key);
+          snapshots
+            .write(snapshotRecord(type, [...firstPagesOf(type).values()], order, now()))
+            .catch(error => console.warn("Couldn't keep the catalogs' first pages:", error));
+        }, SNAPSHOT_WRITE_MS),
+      );
+    };
+
     const loadPage = async (group: CatalogGroup) => {
+      if (options.snapshots && !seeded.has(group.catalog.type)) {
+        await seed(group.catalog.type);
+        if (pages()[group.key]) return;
+      }
       const page = pages()[group.key];
       if (page?.loading || page?.done) return;
       const failed = failedAt.get(group.key);
@@ -259,6 +355,16 @@ export const createAddons = (options: AddonsOptions) =>
         failedAt.delete(group.key);
         const known = new Set(have.map(item => item.id));
         const added = found.filter(item => !known.has(item.id));
+        if (skip === 0) {
+          firstPagesOf(group.catalog.type).set(group.key, {
+            key: group.key,
+            url: catalogUrl(state.list.url, group.catalog, { skip: 0 }),
+            items: found.slice(0, SNAPSHOT_ITEMS),
+            done: !group.catalog.paged || found.length === 0,
+            at: now(),
+          });
+          writeSoon(group.catalog.type);
+        }
         setPages(all => ({
           ...all,
           [group.key]: {
@@ -279,7 +385,106 @@ export const createAddons = (options: AddonsOptions) =>
     };
 
     const metas = new Map<string, Promise<AddonMeta | undefined>>();
-    const streamCache = new Map<string, Promise<FoundStreams[]>>();
+    /** Streams an add-on put in its episodes, by the episode's id, with the add-on. */
+    const videoStreams = new Map<string, FoundStreams>();
+    const keepVideoStreams = (state: AddonState & { manifest: AddonManifest }, meta: AddonMeta) => {
+      for (const video of meta.videos ?? []) {
+        if (!video.streams) continue;
+        videoStreams.set(video.id, {
+          addon: state.list.id,
+          addonName: state.manifest.name,
+          streams: video.streams,
+          unplayable: 0,
+          needReferer: 0,
+        });
+      }
+    };
+
+    interface Search {
+      asked: string[];
+      answers: (FoundStreams | undefined)[];
+      all: Promise<FoundStreams[]>;
+      /** When the last add-on answered. */
+      doneAt?: number;
+      failed: boolean;
+      listeners: Set<(search: StreamSearch) => void>;
+    }
+    /** By "<type>/<id>", the oldest first. */
+    const searches = new Map<string, Search>();
+    const snapshot = (search: Search, type: string, id: string): StreamSearch => {
+      const found = search.answers.filter((one): one is FoundStreams => one !== undefined);
+      const done = search.doneAt !== undefined;
+      const { asked } = search;
+      const waiting = asked.filter((_, at) => search.answers[at] === undefined);
+      // An episode whose streams are in the add-on's meta, when no add-on answered with any.
+      const own = videoStreams.get(id);
+      if (done && own && type === "series" && !found.some(one => one.streams.length > 0))
+        return { found: [...found, own], done, asked, waiting };
+      return { found, done, asked, waiting };
+    };
+    const searchFor = (type: string, id: string) => {
+      const key = `${type}/${id}`;
+      const had = searches.get(key);
+      if (had) {
+        const keptMs = had.failed ? STREAMS_FAILED_KEPT_MS : STREAMS_KEPT_MS;
+        if (had.doneAt === undefined || now() - had.doneAt < keptMs) {
+          // The most recently wanted last, so it's forgotten last.
+          searches.delete(key);
+          searches.set(key, had);
+          return had;
+        }
+        searches.delete(key);
+      }
+      const asked = answering("stream", type, id);
+      const search: Search = {
+        asked: asked.map(state => state.list.id),
+        answers: asked.map(() => undefined),
+        all: Promise.resolve([]),
+        failed: false,
+        listeners: new Set(),
+      };
+      const tell = () => {
+        const shown = snapshot(search, type, id);
+        search.listeners.forEach(listener => listener(shown));
+      };
+      search.all = Promise.all(
+        asked.map((state, at) =>
+          ask(resourceUrl(state.list.url, "stream", type, id))
+            .then((value): FoundStreams => ({
+              addon: state.list.id,
+              addonName: state.manifest.name,
+              ...readStreams(value),
+            }))
+            .catch((error: unknown): FoundStreams => {
+              search.failed = true;
+              return {
+                addon: state.list.id,
+                addonName: state.manifest.name,
+                streams: [],
+                unplayable: 0,
+                needReferer: 0,
+                problem: problemText(error),
+              };
+            })
+            .then(found => {
+              search.answers[at] = found;
+              // The last answer is told once it's all done, below.
+              if (search.answers.some(one => one === undefined)) tell();
+              return found;
+            }),
+        ),
+      ).then(() => {
+        search.doneAt = now();
+        tell();
+        return snapshot(search, type, id).found;
+      });
+      searches.set(key, search);
+      for (const old of searches.keys()) {
+        if (searches.size <= STREAMS_KEPT) break;
+        searches.delete(old);
+      }
+      return search;
+    };
     const subtitleCache = new Map<string, Promise<FoundSubtitle[]>>();
 
     /** The add-ons that answer `resource` for this title, `first` first. */
@@ -300,7 +505,7 @@ export const createAddons = (options: AddonsOptions) =>
       loadPage,
       /** Whether any add-on answers `resource` for this title, such as streams. */
       answers: (resource: AddonResource, type: string, id: string) =>
-        answering(resource, type, id).length > 0,
+        answering(resource, type, id).length > 0 || (resource === "stream" && videoStreams.has(id)),
       /** Asks every add-on for its manifest again. */
       refresh: () => Promise.all(options.lists().map(fetchManifest)).then(() => undefined),
 
@@ -351,7 +556,10 @@ export const createAddons = (options: AddonsOptions) =>
           for (const state of answering("meta", type, id, first)) {
             try {
               const meta = readMetaAnswer(await ask(resourceUrl(state.list.url, "meta", type, id)), type);
-              if (meta) return meta;
+              if (meta) {
+                keepVideoStreams(state, meta);
+                return meta;
+              }
             } catch (error) {
               console.warn(`${state.manifest.name} had no details for ${id}:`, error);
             }
@@ -359,28 +567,22 @@ export const createAddons = (options: AddonsOptions) =>
           return undefined;
         }),
 
-      /** Every add-on's streams for a title or an episode, in the account's order. */
-      streams: (type: string, id: string) =>
-        cached(streamCache, `${type}/${id}`, () =>
-          Promise.all(
-            answering("stream", type, id).map(state =>
-              ask(resourceUrl(state.list.url, "stream", type, id))
-                .then((value): FoundStreams => ({
-                  addon: state.list.id,
-                  addonName: state.manifest.name,
-                  ...readStreams(value),
-                }))
-                .catch((error: unknown): FoundStreams => ({
-                  addon: state.list.id,
-                  addonName: state.manifest.name,
-                  streams: [],
-                  unplayable: 0,
-                  needReferer: 0,
-                  problem: problemText(error),
-                })),
-            ),
-          ),
-        ),
+      /** Every add-on's streams for a title or an episode, in the account's order, once all have answered. */
+      streams: (type: string, id: string) => searchFor(type, id).all,
+
+      /**
+       * Tells `listener` a title's streams as each add-on answers, in the
+       * account's order: at once with those found so far, then at each
+       * answer. Returns what stops it.
+       */
+      watchStreams: (type: string, id: string, listener: (search: StreamSearch) => void) => {
+        const search = searchFor(type, id);
+        search.listeners.add(listener);
+        listener(snapshot(search, type, id));
+        return () => {
+          search.listeners.delete(listener);
+        };
+      },
 
       /** Every add-on's subtitles for a title or an episode. */
       subtitles: (type: string, id: string) =>
@@ -404,8 +606,12 @@ export const createAddons = (options: AddonsOptions) =>
       forget: () =>
         batch(() => {
           setPages({});
+          // What's kept is asked for again too, and kept again as it comes.
+          firstPages.clear();
+          for (const type of ["movie", "series"]) seeded.set(type, Promise.resolve());
           metas.clear();
-          streamCache.clear();
+          searches.clear();
+          videoStreams.clear();
           subtitleCache.clear();
           failedAt.clear();
         }),

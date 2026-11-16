@@ -4,11 +4,13 @@ import { createEffect, createMemo, createSignal, onMount, Show } from "solid-js"
 import { createFilmMerger, mergeFilms, type TitleFilm } from "../../data/titles";
 import type { FilmEntry } from "../../data/vodLibrary";
 import { exposeToProbes } from "../../devHooks";
-import { addons, vod, watched } from "../../library";
+import { addons, moreLikeThis, vod, watched } from "../../library";
+import type { Similar } from "../../data/moreLikeThis";
 import { duration } from "../../live/format";
 import { watchVod } from "../../play/start";
-import { titleFilmPlay, type TitleChoice } from "../../play/titlePlay";
-import { filmKey, keptFilm } from "../../stremio/vodEntries";
+import { titleFilmPlay, withOthers, type AutoPicked, type TitleChoice } from "../../play/titlePlay";
+import { addonFilm, filmKey, keptFilm } from "../../stremio/vodEntries";
+import { imdbOfTitle } from "./similar";
 import { $t, $tn, language } from "../../translate";
 import { FilmPanel } from "./FilmPanel";
 import { orderLinks } from "./linkOrder";
@@ -73,14 +75,29 @@ export const ModernMovies = () => {
     if (back) grid?.setFocus();
   });
 
+  /** A title from "More like this": the library's, or the add-ons' by its IMDb id. */
+  const openSimilar = async (one: Similar) => {
+    const imdb = await moreLikeThis.imdbOf("movie", one.id).catch(() => undefined);
+    if (!imdb || !open()) return;
+    const meta = { id: imdb, type: "movie", name: one.title, poster: one.poster, year: one.year };
+    setOpen(modern.titles().byImdb.get(imdb) ?? { ...asTitle(addonFilm(meta, "")), imdb });
+  };
   const close = () => {
     setOpen(undefined);
     grid?.setFocus();
   };
-  const watch = (title: TitleFilm, choice: TitleChoice<FilmEntry>, startMs?: number) => {
+  const watch = (
+    title: TitleFilm,
+    choice: TitleChoice<FilmEntry>,
+    startMs?: number,
+    auto?: AutoPicked<FilmEntry>,
+  ) => {
     setPicking(undefined);
     reopen = title;
-    watchVod(navigate, titleFilmPlay(title, choice, startMs));
+    watchVod(
+      navigate,
+      withOthers(titleFilmPlay(title, choice, startMs), auto, other => titleFilmPlay(title, other, startMs)),
+    );
   };
   const play = (title: TitleFilm, startMs?: number) => {
     const id = title.stremio?.id;
@@ -134,7 +151,15 @@ export const ModernMovies = () => {
         }
       />
       <Show when={open()}>
-        {title => <FilmPanel film={title()} onClose={close} onPlay={startMs => play(title(), startMs)} />}
+        {title => (
+          <FilmPanel
+            film={title()}
+            onClose={close}
+            onPlay={startMs => play(title(), startMs)}
+            similar={() => moreLikeThis.of("movie", { imdb: imdbOfTitle(title()) })}
+            onSimilar={one => void openSimilar(one)}
+          />
+        )}
       </Show>
       <Show when={picking()} keyed>
         {asked => (
@@ -142,11 +167,13 @@ export const ModernMovies = () => {
             title={asked.title.name}
             type="movie"
             id={asked.id}
-            links={orderLinks(asked.title.links, link => link, language()).map(link =>
-              linkRow(link, link.source, link.name, link.url, link.category),
-            )}
+            links={orderLinks(asked.title.links, link => link, language()).map(link => ({
+              ...linkRow(link, link.source, link.name, link.url, link.category),
+              details: () => vod.filmDetails(link),
+            }))}
+            itemKey={asked.title.key}
             onClose={() => setPicking(undefined)}
-            onPick={choice => watch(asked.title, choice, asked.startMs)}
+            onPick={(choice, auto) => watch(asked.title, choice, asked.startMs, auto)}
           />
         )}
       </Show>

@@ -1,17 +1,20 @@
 import { type ElementNode, Text, View } from "@solidtv/solid";
-import { createMemo, createResource, createSignal, Index, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, Index, on, onMount, Show } from "solid-js";
 import { Artwork } from "../../components/Artwork";
 import { Backdrop } from "../../components/Backdrop";
 import { Glow } from "../../components/Glow";
 import { MENU_WIDTH } from "../../components/SideMenu";
+import type { Similar } from "../../data/moreLikeThis";
 import type { FilmDetails } from "../../data/vod";
 import type { FilmEntry } from "../../data/vodLibrary";
 import { exposeToProbes } from "../../devHooks";
 import { vod, watched } from "../../library";
 import { duration } from "../../live/format";
+import { qualityLabel } from "../../stremio/streamText";
 import { BOLD, colors, motion, radius, raisedShadow, textOn } from "../../theme";
 import { $t } from "../../translate";
 import { OVERLAY_Z } from "../live/ChannelOptions";
+import { SimilarRow } from "./SimilarRow";
 
 const PAGE_WIDTH = 1920 - MENU_WIDTH;
 const LEFT = 80;
@@ -154,6 +157,9 @@ export const FilmPanel = (props: {
   film: FilmEntry;
   onClose: () => void;
   onPlay: (startMs?: number) => void;
+  /** "More like this": TMDB's recommendations, and opening one. */
+  similar?: () => Promise<Similar[]>;
+  onSimilar?: (one: Similar) => void;
 }) => {
   let root: ElementNode | undefined;
   const [focused, setFocused] = createSignal(false);
@@ -162,18 +168,36 @@ export const FilmPanel = (props: {
     film => vod.filmDetails(film).catch((): FilmDetails => ({})),
   );
   const resumeAt = () => watched.resumeAt(props.film.key);
+  // Only offered once TMDB has some.
+  const [similar] = createResource(
+    () => (props.similar ? props.film : undefined),
+    () => (props.similar?.() ?? Promise.resolve([])).catch((): Similar[] => []),
+  );
+  const [similarOpen, setSimilarOpen] = createSignal(false);
   const actions = createMemo((): Action[] => {
     const at = resumeAt();
-    return at === undefined
-      ? [{ id: "play", label: $t("vod.play"), run: () => props.onPlay() }]
-      : [
-          { id: "resume", label: $t("vod.resume", { time: duration(at) }), run: () => props.onPlay(at) },
-          { id: "start", label: $t("vod.fromStart"), run: () => props.onPlay(0) },
-        ];
+    const play: Action[] =
+      at === undefined
+        ? [{ id: "play", label: $t("vod.play"), run: () => props.onPlay() }]
+        : [
+            { id: "resume", label: $t("vod.resume", { time: duration(at) }), run: () => props.onPlay(at) },
+            { id: "start", label: $t("vod.fromStart"), run: () => props.onPlay(0) },
+          ];
+    return similar()?.length
+      ? [...play, { id: "similar", label: $t("vod.moreLikeThis"), run: () => setSimilarOpen(true) }]
+      : play;
   });
   const [cursor, setCursor] = createSignal(0);
+  // Another film opened from "More like this" starts at its first button.
+  createEffect(
+    on(
+      () => props.film,
+      () => setCursor(0),
+      { defer: true },
+    ),
+  );
   onMount(() => root?.setFocus());
-  exposeToProbes("filmPanel", { film: () => props.film, details, actions, cursor });
+  exposeToProbes("filmPanel", { film: () => props.film, details, actions, cursor, similar, similarOpen });
 
   const facts = () => {
     const info = details();
@@ -182,6 +206,7 @@ export const FilmPanel = (props: {
       info?.year ?? film.year,
       info?.genre ?? film.category,
       info?.durationMs ? duration(info.durationMs) : undefined,
+      info && qualityLabel(info, "   ·   "),
     ]
       .filter(Boolean)
       .join("   ·   ");
@@ -258,6 +283,16 @@ export const FilmPanel = (props: {
         </Text>
       </View>
       <ActionList actions={actions()} cursor={cursor()} focused={focused()} x={TEXT_X} y={BUTTONS_Y} />
+      <Show when={similarOpen()}>
+        <SimilarRow
+          load={() => Promise.resolve(similar() ?? [])}
+          onClose={() => setSimilarOpen(false)}
+          onPick={one => {
+            setSimilarOpen(false);
+            props.onSimilar?.(one);
+          }}
+        />
+      </Show>
     </View>
   );
 };

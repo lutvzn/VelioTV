@@ -6,6 +6,7 @@
 // fits and leaving the rest, as add-ons differ.
 
 import { ensureFetch } from "../polyfills/fetch";
+import { heightOf, sizeOf } from "./streamText";
 
 ensureFetch();
 
@@ -65,6 +66,8 @@ export interface AddonVideo {
   plot?: string;
   thumbnail?: string;
   released?: number;
+  /** Streams the add-on lists in the episode itself, used when its stream answer has none. */
+  streams?: AddonStream[];
 }
 
 export interface AddonStream {
@@ -80,6 +83,12 @@ export interface AddonStream {
   subtitles: AddonSubtitle[];
   /** Its name says DTS or TrueHD sound, and no other the TV plays (`silentSound`). */
   silent?: true;
+  /** The file's name, as `behaviorHints.filename` gives it. */
+  filename?: string;
+  /** The picture's height its text names, such as 2160 for 4K (src/stremio/streamText.ts). */
+  height?: number;
+  /** The file's size in bytes, from `behaviorHints.videoSize` or its text. */
+  sizeBytes?: number;
 }
 
 export interface AddonSubtitle {
@@ -268,6 +277,10 @@ const readVideo = (value: unknown): AddonVideo | undefined => {
   if (thumbnail) video.thumbnail = thumbnail;
   const released = timeOf(value.released ?? value.firstAired);
   if (released !== undefined) video.released = released;
+  if (Array.isArray(value.streams)) {
+    const { streams } = readStreams({ streams: value.streams.slice(0, 50) });
+    if (streams.length > 0) video.streams = streams;
+  }
   return video;
 };
 
@@ -390,7 +403,16 @@ export const readStreams = (value: unknown): StreamsRead => {
     if (userAgent) stream.userAgent = userAgent;
     const binge = optional(hints.bingeGroup, 200);
     if (binge) stream.bingeGroup = binge;
-    if (silentSound(`${stream.name}\n${description}\n${text(hints.filename, 500)}`)) stream.silent = true;
+    const filename = text(hints.filename, 500);
+    if (filename) stream.filename = filename;
+    if (silentSound(`${stream.name}\n${description}\n${filename}`)) stream.silent = true;
+    const height = heightOf([stream.name, description, filename]);
+    if (height !== undefined) stream.height = height;
+    const size =
+      typeof hints.videoSize === "number" && hints.videoSize > 0
+        ? Math.floor(hints.videoSize)
+        : sizeOf([description, stream.name]);
+    if (size !== undefined) stream.sizeBytes = size;
     read.streams.push(stream);
   }
   return read;

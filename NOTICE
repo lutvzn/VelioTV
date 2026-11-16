@@ -1,11 +1,22 @@
+VelioTV is licensed under the GNU General Public License, version 3 only
+(LICENSE).
+
 This component contains software that is Copyright (c) 2024 Chris Lorenzo.
 The component is licensed to you under the Apache License, Version 2.0 (the "License").
 You may not use the component except in compliance with the License.
+A copy of that License is in LICENSE.Apache-2.0.
 
 This component contains software that is Copyright (c) 2023 Comcast.
 The component is licensed to you under the Apache License, Version 2.0 (the "License").
 You may not use the component except in compliance with the License.
+A copy of that License is in LICENSE.Apache-2.0.
 
 The text atlases in public/fonts are made from Noto Sans (scripts/fonts),
 Copyright 2015-2021 Google LLC, licensed under the SIL Open Font License,
 Version 1.1 (https://openfontlicense.org).
+
+Parts of the films, series and add-on code are adapted from NuvioTVSmart
+(https://github.com/NuvioMedia/NuvioTVSmart), licensed under the GNU General
+Public License, version 3. Each adapted file says so in its header, with
+what it was adapted from; they were changed (rewritten in TypeScript for
+this app).

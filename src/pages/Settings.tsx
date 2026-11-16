@@ -31,6 +31,7 @@ import { type SettingsCategory, setSettingsCategory, settingsCategory } from "./
 import { GeneralPage, VodPage } from "./settings/GeneralPage";
 import { LivePage } from "./settings/LivePage";
 import { PinPage } from "./settings/PinPage";
+import { PlayingPage } from "./settings/PlayingPage";
 import { ScrollingPage } from "./settings/ScrollingPage";
 import { SourceForm } from "./settings/SourceForm";
 import { SettingsPane, SubPage } from "./settings/SubPage";
@@ -48,7 +49,7 @@ import { progressFraction, statusLines } from "./settings/status";
 // current profile's: the TV's own, then its account's lists, read-only),
 // the Velio account (SYNC-PLAN.md) and its Stremio add-ons, the app's own
 // settings, Live's hidden channels and reminders (PLAN.md, Phases 5 and 6),
-// Movies and Series, scrolling, the parental PIN, backup and restore, and
+// Movies and Series, how they play, scrolling, the parental PIN, backup and restore, and
 // About.
 
 const CATEGORIES: { id: SettingsCategory; label: TextKey }[] = [
@@ -58,6 +59,7 @@ const CATEGORIES: { id: SettingsCategory; label: TextKey }[] = [
   { id: "general", label: "settings.general" },
   { id: "live", label: "menu.live" },
   { id: "vod", label: "settings.vod" },
+  { id: "playing", label: "settings.playing" },
   { id: "scrolling", label: "settings.scrolling" },
   { id: "pin", label: "settings.pin" },
   { id: "backup", label: "settings.backup" },
@@ -368,6 +370,9 @@ export default () => {
             </Match>
             <Match when={settingsCategory() === "vod"}>
               <VodPage onClose={toColumn} />
+            </Match>
+            <Match when={settingsCategory() === "playing"}>
+              <PlayingPage onClose={toColumn} />
             </Match>
             <Match when={settingsCategory() === "scrolling"}>
               <ScrollingPage onClose={toColumn} />

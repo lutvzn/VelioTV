@@ -5,7 +5,15 @@ import { filmTmdb, seriesTmdb, vodLibrary, vodLines } from "../../scripts/test-s
 import { playerApi } from "../../scripts/test-streams/xtream.mjs";
 import { deleteDb, openDb, prepareDb, readChannels, readImport, readVod, request } from "./db";
 import { runImport } from "./importer";
-import { episodeTitle, nameYear, parseEpisodeName, vodKind, xtreamFilmInfo, xtreamSeriesInfo } from "./vod";
+import {
+  episodeTitle,
+  nameYear,
+  parseEpisodeName,
+  pictureHeight,
+  vodKind,
+  xtreamFilmInfo,
+  xtreamSeriesInfo,
+} from "./vod";
 import type { XtreamLogin } from "./xtream";
 
 const BASE = "http://vod.test:8080";
@@ -53,6 +61,19 @@ const mockServer = (count: number): typeof fetch => {
 
 afterEach(async () => {
   await deleteDb(DB);
+});
+
+describe("a picture's height class", () => {
+  it("counts a film cropped wider than 16:9, or a few lines short, as the usual height", () => {
+    expect(pictureHeight(3840, 1608)).toBe(2160);
+    expect(pictureHeight(1920, 800)).toBe(1080);
+    expect(pictureHeight(1916, 1036)).toBe(1080);
+    expect(pictureHeight(1440, 1080)).toBe(1080);
+    expect(pictureHeight(1280, 720)).toBe(720);
+    expect(pictureHeight(720, 576)).toBe(576);
+    expect(pictureHeight(undefined, undefined)).toBeUndefined();
+    expect(pictureHeight(0, 0)).toBeUndefined();
+  });
 });
 
 describe("a film's year from its name", () => {
@@ -151,6 +172,15 @@ describe("films and series", () => {
       backdrop: `${BASE}${film.poster?.replace("/poster/", "/backdrop/")}`,
       tmdb: filmTmdb(film.id),
     });
+    // The server's look at the file: 3840×1608 at 18,000 kbps for 6 minutes,
+    // and nothing for a film it hasn't looked at.
+    const byPicture = (at: number) => library.films.find(one => one.id % 4 === at) ?? film;
+    expect(await xtreamFilmInfo(LOGIN, String(byPicture(0).id), fetcher)).toMatchObject({
+      height: 2160,
+      estimatedBytes: 18_000 * 125 * 360,
+    });
+    const unknown = await xtreamFilmInfo(LOGIN, String(byPicture(3).id), fetcher);
+    expect([unknown.height, unknown.estimatedBytes]).toEqual([undefined, undefined]);
     // The list gives a series' TMDB id, and it's kept.
     expect(vod.series[1].tmdb).toBe(seriesTmdb(library.series[1].id));
     const show = library.series[1];
@@ -165,6 +195,8 @@ describe("films and series", () => {
       episode: 1,
       durationMs: 360_000,
     });
+    const first = show.seasons[0][0];
+    expect(details.seasons[0].episodes[0].height).toBe([2160, 1080, 720, undefined][first.id % 4]);
   });
 
   it("keep a version 3 database's data when the store for them is added", async () => {

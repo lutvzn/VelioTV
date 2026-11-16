@@ -6,7 +6,7 @@ import { archiveStart, archiveUrl } from "../data/catchup";
 import { DAY, type StoredProgramme } from "../data/guideCodec";
 import type { Channel } from "../data/lineup";
 import { exposeToProbes } from "../devHooks";
-import { guide, library, watched } from "../library";
+import { guide, lastLinks, library, playChoices, watched } from "../library";
 import { clockTime, duration, timeRange } from "../live/format";
 import { handOff, holdPlayer, statusText } from "../live/handoff";
 import { firstChoice, nextChoice, trackRows } from "../live/trackRows";
@@ -18,6 +18,7 @@ import {
   type PlayRequest,
   type VodPlay,
 } from "../play/session";
+import { finishedNaturally, isShortClip, nextCardShown } from "../play/playEnd";
 import { createSeeker } from "../play/seeker";
 import { player } from "../player";
 import { languageName, sameLanguage } from "../player/language";
@@ -27,6 +28,7 @@ import { BottomScrim } from "../components/BottomScrim";
 import { BOLD, colors, radius } from "../theme";
 import { $t } from "../translate";
 import { FULL_SCREEN } from "../videoWindow";
+import { say } from "../voiceGuide";
 import { TrackPanel } from "./live/TrackPanel";
 
 // Full screen for a recording from a channel's catch-up, a film or an
@@ -45,7 +47,13 @@ import { TrackPanel } from "./live/TrackPanel";
 //
 // A film or episode seeks within the stream. Its place is saved every few
 // seconds and on leaving (src/data/watched.ts); at the end an episode goes
-// on to the next.
+// on to the next, unless the end was a short clip or it never showed a
+// picture (src/play/playEnd.ts). Near the end a card offers the next
+// episode: OK plays it now, Back hides the card.
+//
+// One auto-play picked (PLAN.md, "Auto-play") has others to try: if it
+// fails before showing a picture, or shows none in the profile's time, the
+// next one plays.
 //
 // A film or episode from an add-on can also have subtitle files, which are
 // offered after the stream's own and drawn by the app (PLAN.md, "Stremio
@@ -88,7 +96,14 @@ const archiveStream = (channel: Channel, programme: StoredProgramme, from: numbe
 const fileId = (file: ExternalSubtitle) => `${file.from}/${file.id}`;
 
 const playFilm = (film: VodPlay) => {
-  void player.play({ ...film.stream, live: false, startMs: film.startMs });
+  // With others to try, one that is slow to start gives way sooner.
+  const startTimeoutMs = film.fallbacks ? playChoices.choices().fallbackStartMs : film.stream.startTimeoutMs;
+  void player.play({
+    ...film.stream,
+    live: false,
+    startMs: film.startMs,
+    ...(startTimeoutMs ? { startTimeoutMs } : {}),
+  });
 };
 
 /** The programme after `programme` on its channel, if the guide has it. */
@@ -96,6 +111,24 @@ const programmeAfter = async (channel: Channel, programme: StoredProgramme) => {
   if (!channel.guideId) return undefined;
   const day = await guide.day(channel.source, channel.guideId, Math.floor(programme.stop / DAY));
   return day.find(next => next.start >= programme.stop);
+};
+
+/** The add-on link that played, to play again next time (src/data/lastLinks.ts). */
+const keepLink = (current: VodPlay) => {
+  const from = current.fromAddon;
+  if (from && playChoices.choices().reuseLast)
+    lastLinks.keep({
+      key: current.item.key,
+      addon: from.addon,
+      addonName: from.addonName,
+      stream: from.stream,
+    });
+};
+/** A link that didn't play isn't played again. */
+const forgetLink = (current: VodPlay) => {
+  const from = current.fromAddon;
+  if (from && lastLinks.find(current.item.key)?.stream.url === from.stream.url)
+    lastLinks.forget(current.item.key);
 };
 
 export default () => {
@@ -169,6 +202,7 @@ export default () => {
       setPaused(false);
       setFiles([]);
     });
+    showedPicture = undefined;
     external.off();
     if (next.kind === "vod" && next.subtitles) {
       next
@@ -191,7 +225,8 @@ export default () => {
     const { state } = player.status();
     if (!film || !["playing", "paused", "buffering"].includes(state)) return;
     const at = player.position();
-    if (at > 0) watched.progress(film.item, at, player.duration());
+    // A placeholder clip would count as finished.
+    if (at > 0 && !isShortClip(player.duration())) watched.progress(film.item, at, player.duration());
   };
   const saver = setInterval(saveFilm, SAVE_MS);
 
@@ -292,6 +327,8 @@ export default () => {
           setBasePosition(player.position());
         }
         if (state === "playing") catchupRetries = 0;
+        if (current.kind === "vod" && state === "failed" && showedPicture !== current)
+          void failedToStart(current);
         // A recording that drops is asked for again from where it was; the
         // player would open the same URL there, which a recording can't seek.
         if (current.kind === "catchup" && (state === "reconnecting" || state === "suspended")) {
@@ -323,19 +360,70 @@ export default () => {
     ),
   );
 
+  // The film or episode that has shown a picture: its clock has moved, as
+  // "playing" alone can come before a file the TV can't play fails.
+  let showedPicture: VodPlay | undefined;
+  createEffect(
+    on(
+      () => player.status().state === "playing" && player.moved(),
+      picture => {
+        const current = request();
+        if (!picture || current?.kind !== "vod" || showedPicture === current) return;
+        showedPicture = current;
+        setSwitched(undefined);
+        keepLink(current);
+      },
+    ),
+  );
+  // Trying another stream: which, of how many.
+  const [switched, setSwitched] = createSignal<{ at: number; count: number }>();
+  let tried = 0;
+  let triedOf = 0;
+  /** It failed before a picture: the next of the others, if it has any. */
+  const failedToStart = async (current: VodPlay) => {
+    forgetLink(current);
+    if (!current.fallbacks) return;
+    const others = await current.fallbacks().catch(() => []);
+    if (request() !== current) return;
+    const [other, ...rest] = others;
+    if (!other) return;
+    if (!switched()) {
+      tried = 0;
+      triedOf = others.length;
+    }
+    tried++;
+    setSwitched({ at: tried, count: triedOf });
+    start(rest.length > 0 ? { ...other, fallbacks: () => Promise.resolve(rest) } : other);
+  };
+
   // What's being moved on from, so the ticker and the player don't both do it.
   let ending: PlayRequest | undefined;
-  const ended = async (current: PlayRequest) => {
+  /** The next episode, now: at the end, or from its card. */
+  const playNext = async (current: VodPlay) => {
     if (ending === current) return;
     ending = current;
+    watched.finish(current.item);
+    const next = await current.next?.();
+    if (request() !== current) return;
+    if (next) start(next);
+    else leave();
+  };
+  const ended = async (current: PlayRequest) => {
+    if (ending === current) return;
     if (current.kind === "vod") {
-      watched.finish(current.item);
-      const next = await current.next?.();
-      if (request() !== current) return;
-      if (next) start(next);
-      else leave();
+      const durationMs = player.duration();
+      // A clip in place of the file, or one that never played: not watched,
+      // and its link isn't played again.
+      if (!finishedNaturally({ showedPicture: showedPicture === current, failed: false, durationMs })) {
+        forgetLink(current);
+        ending = current;
+        leave();
+        return;
+      }
+      await playNext(current);
       return;
     }
+    ending = current;
     const after = await programmeAfter(current.channel, current.programme).catch(() => undefined);
     if (request() !== current) return;
     if (after && after.start < Date.now() - LIVE_MARGIN_MS) {
@@ -376,7 +464,10 @@ export default () => {
   const external = createExternalSubtitles({ position: () => player.position() });
   const showFile = (file: ExternalSubtitle) => {
     player.selectTrack("text", undefined);
-    void external.show(fileId(file), file.url);
+    void external.show(fileId(file), file.url, {
+      language: file.language,
+      hideSoundText: playChoices.choices().hideSoundText,
+    });
     storedPreferences.save({ ...storedPreferences.load(), text: file.language });
   };
   // Once it plays and the files are known: one in the language last chosen,
@@ -420,6 +511,23 @@ export default () => {
   };
   const hideTracks = () => setTracksOpen(false);
 
+  // The next episode's card: shown near the end, until Back hides it.
+  const [cardHidden, setCardHidden] = createSignal<VodPlay>();
+  const nextCard = createMemo(() => {
+    const film = vod();
+    if (!film?.next || !film.nextTitle || cardHidden() === film || tracksOpen()) return undefined;
+    tick();
+    if (!["playing", "paused", "buffering"].includes(player.status().state)) return undefined;
+    return nextCardShown(playChoices.choices().nextCard, player.position(), player.duration())
+      ? film.nextTitle
+      : undefined;
+  });
+  createEffect(
+    on(nextCard, title => {
+      if (title) say([$t("play.nextCard", { title }), $t("play.nextCardKeys")]);
+    }),
+  );
+
   onMount(() => {
     if (first) start(first);
     else navigate("/", { replace: true });
@@ -449,6 +557,8 @@ export default () => {
     files,
     externalText: external.text,
     externalChosen: external.chosen,
+    nextCard,
+    switched,
     rows,
     trackCursor,
   });
@@ -495,8 +605,13 @@ export default () => {
     const { start: from, stop } = recording.programme;
     return Math.max(0, Math.min(1, (tick() - from) / (stop - from)));
   };
-  const status = () =>
-    paused() ? undefined : (statusText() ?? (noSound() ? $t("play.noSound") : undefined));
+  const status = () => {
+    if (paused()) return undefined;
+    const trying = switched();
+    if (trying && player.status().state === "starting")
+      return $t("play.tryingOther", { at: trying.at, count: trying.count });
+    return statusText() ?? (noSound() ? $t("play.noSound") : undefined);
+  };
 
   return (
     <View
@@ -505,6 +620,11 @@ export default () => {
       width={1920}
       height={1080}
       onEnter={() => {
+        const film = vod();
+        if (film && nextCard() && seeker.target() === undefined && !tracksOpen()) {
+          void playNext(film);
+          return true;
+        }
         if (tracksOpen()) {
           const row = rows()[trackCursor()];
           if (row?.type === "choice") {
@@ -569,7 +689,8 @@ export default () => {
         return true;
       }}
       onBack={() => {
-        if (tracksOpen()) hideTracks();
+        if (nextCard()) setCardHidden(vod());
+        else if (tracksOpen()) hideTracks();
         else if (seeker.target() !== undefined) {
           seeker.cancel();
           showBar();
@@ -681,6 +802,26 @@ export default () => {
             {rightText()}
           </Text>
         </View>
+      </Show>
+      <Show when={nextCard()}>
+        {next => (
+          <View
+            x={1840}
+            y={60}
+            mountX={1}
+            width={620}
+            height={150}
+            borderRadius={radius.xlarge}
+            color={colors.dialog}
+          >
+            <Text x={32} y={26} width={556} maxLines={1} contain="width" fontSize={34} fontFamily={BOLD}>
+              {$t("play.nextCard", { title: next() })}
+            </Text>
+            <Text x={32} y={84} width={556} maxLines={1} contain="width" fontSize={26} color={colors.textDim}>
+              {$t("play.nextCardKeys")}
+            </Text>
+          </View>
+        )}
       </Show>
       <Show when={tracksOpen()}>
         <TrackPanel rows={rows()} cursor={trackCursor()} />

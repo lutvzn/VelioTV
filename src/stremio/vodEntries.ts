@@ -97,6 +97,7 @@ export const seriesDetailsOf = (meta: AddonMeta | undefined): SeriesDetails => {
     title: video.title,
     url: "",
     ...(video.plot ? { plot: video.plot } : {}),
+    ...(video.released !== undefined ? { released: video.released } : {}),
   }));
   const seasons = seasonsOf(episodes);
   // Season 0 is specials, after the rest.

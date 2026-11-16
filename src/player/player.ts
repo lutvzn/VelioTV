@@ -260,6 +260,10 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
   const [status, setStatus] = createSignal<PlayerStatus>({ state: "idle" });
   const [tracks, setTracks] = createSignal<Track[]>([]);
   const [subtitle, setSubtitle] = createSignal<string>();
+  // Whether the clock has moved since play(). AVPlay says it's playing once
+  // it has buffered, before a frame is decoded: a file it can't play (such as
+  // Torrentio's "downloading" clip on the Samsung 2024) can then still fail.
+  const [clockMoved, setClockMoved] = createSignal(false);
   let subtitleTimer: number | undefined;
   const clearSubtitle = () => {
     clearTimeout(subtitleTimer);
@@ -375,7 +379,10 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
         return;
       }
       if (current !== position) {
-        if (position >= 0) moved = everMoved = true;
+        if (position >= 0) {
+          moved = everMoved = true;
+          setClockMoved(true);
+        }
         position = current;
         progressAt = at;
       }
@@ -506,6 +513,7 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
   };
 
   const play = async (stream: Stream) => {
+    setClockMoved(false);
     setStatus({ state: "starting", stream });
     await open({ stream, requested: now(), failures: 0, reconnects: 0 });
   };
@@ -548,6 +556,7 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
     engine?.stop();
     setTracks([]);
     clearSubtitle();
+    setClockMoved(false);
     setStatus({ state: "idle" });
     showVideo(null);
   };
@@ -568,6 +577,8 @@ export const createPlayer = (getEngine: () => Promise<PlaybackEngine>, options: 
     resume,
     setOnline,
     setWindow,
+    /** Whether the clock has moved since play(): a picture has really shown. */
+    moved: clockMoved,
     /** How far the stream has played, in milliseconds. */
     position: () => engine?.position() ?? 0,
     /** How long the stream is, in milliseconds, if it has a length the engine knows. */

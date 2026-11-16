@@ -36,7 +36,18 @@ export interface Film {
   providerId?: string;
 }
 
-export interface Episode {
+/**
+ * What an Xtream server says of a film's or episode's file, when it has
+ * looked into it (`info.video` and `info.bitrate`); many leave them out.
+ */
+export interface FileQuality {
+  /** The picture's height class, such as 1080 for a 1920×800 film. */
+  height?: number;
+  /** About how big the file is, from its bitrate and length: Xtream gives no size. */
+  estimatedBytes?: number;
+}
+
+export interface Episode extends FileQuality {
   /** "e:<id>" */
   id: string;
   /** From a Stremio add-on: its video id, to ask the add-ons for streams (src/stremio/). */
@@ -48,6 +59,8 @@ export interface Episode {
   headers?: StreamHeaders;
   plot?: string;
   durationMs?: number;
+  /** When it was first on, in ms, if known; one still to come isn't played as the next. */
+  released?: number;
   /**
    * In the modern layout, every source's copy of this episode (PLAN.md,
    * "Movies and Series by title"): each source's series and its episode.
@@ -88,7 +101,7 @@ export interface StoredVod {
 }
 
 /** A film's details, from the server when it's opened. */
-export interface FilmDetails {
+export interface FilmDetails extends FileQuality {
   plot?: string;
   cast?: string;
   director?: string;
@@ -421,6 +434,32 @@ const durationOf = (info: Json) => {
   return match ? (Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) * 1000 : undefined;
 };
 
+const HEIGHT_CLASSES = [2160, 1440, 1080, 720, 576, 480, 360, 240];
+
+/**
+ * A picture's height class from its size: films are often cropped wider
+ * than 16:9 (1920×800 is 1080p), and encoders shave a few lines (1916×1036).
+ */
+export const pictureHeight = (width: number | undefined, height: number | undefined) => {
+  const tall = Math.max(height ?? 0, width ? (width * 9) / 16 : 0);
+  if (!(tall > 0)) return undefined;
+  return HEIGHT_CLASSES.find(one => tall >= one * 0.85) ?? Math.round(tall);
+};
+
+/** The height and estimated size from an Xtream film's or episode's `info`. */
+const qualityOf = (info: Json): FileQuality => {
+  const quality: FileQuality = {};
+  const video = isObject(info.video) ? info.video : {};
+  const height = pictureHeight(number(video.width), number(video.height));
+  if (height) quality.height = height;
+  // In kbps; a few panels give bits per second.
+  let kbps = number(info.bitrate) ?? 0;
+  if (kbps > 500_000) kbps /= 1000;
+  const ms = durationOf(info) ?? 0;
+  if (kbps > 0 && ms > 0) quality.estimatedBytes = Math.round(kbps * 125 * (ms / 1000));
+  return quality;
+};
+
 /** A film's details from an Xtream account. */
 export const xtreamFilmInfo = async (
   login: XtreamLogin,
@@ -432,7 +471,7 @@ export const xtreamFilmInfo = async (
     `${playerApiUrl(login, "get_vod_info")}&vod_id=${encodeURIComponent(providerId)}`,
   );
   const info = isObject(reply) && isObject(reply.info) ? reply.info : {};
-  const details: FilmDetails = {};
+  const details: FilmDetails = qualityOf(info);
   for (const [key, from] of [
     ["plot", "plot"],
     ["cast", "cast"],
@@ -496,6 +535,7 @@ export const xtreamSeriesInfo = async (
       if (plot) episode.plot = plot;
       const durationMs = durationOf(episodeInfo);
       if (durationMs) episode.durationMs = durationMs;
+      Object.assign(episode, qualityOf(episodeInfo));
       let list = bySeason.get(season);
       if (!list) bySeason.set(season, (list = []));
       list.push(episode);

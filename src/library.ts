@@ -29,10 +29,19 @@ import { openInWorker } from "./data/syncOpen";
 import type { DeviceView } from "./sync-core/device";
 import { createVodLibrary } from "./data/vodLibrary";
 import { createVodLayout } from "./data/vodLayout";
+import { createPlayChoices } from "./data/playChoices";
+import { createLastLinks } from "./data/lastLinks";
 import { createVodPins } from "./data/vodPins";
 import { createVodSorts } from "./data/vodSorts";
 import { createTitleMatcher, type MatchItem, type MatchStore } from "./data/titleMatches";
-import { openDb, readTitleMatches, trimTitleMatches, writeTitleMatches } from "./data/db";
+import {
+  openDb,
+  readCatalogPages,
+  readTitleMatches,
+  trimTitleMatches,
+  writeCatalogPages,
+  writeTitleMatches,
+} from "./data/db";
 import { createWatched } from "./data/watched";
 import { matchLanguage, tvLanguages } from "./lang/languages";
 import { setTwelveHour } from "./live/format";
@@ -43,10 +52,12 @@ import { createSourceManager } from "./data/sourceManager";
 import { appStorage, settingsCopy } from "./data/settingsCopy";
 import { setLanguage } from "./translate";
 import { createAddons, type AddonList } from "./stremio/addons";
+import { createDbSnapshots } from "./stremio/catalogSnapshot";
 import { addonDetails } from "./stremio/vodEntries";
 import { CINEMETA_URL } from "./stremio/cinemeta";
 import { createWikidata, WIKIDATA_URL } from "./stremio/wikidata";
 import { createTmdb, TMDB_URL } from "./stremio/tmdb";
+import { createMoreLikeThis } from "./data/moreLikeThis";
 import { createMoreMatches, MORE_AT_ONCE } from "./data/moreMatches";
 
 /** The account's lists as sources, each with the profiles on this TV that use it; add-ons aren't. */
@@ -121,7 +132,15 @@ const addonLists = (): AddonList[] => {
 };
 
 /** The add-ons the current profile has (src/stremio/addons.ts). */
-export const addons = createAddons({ lists: addonLists, storage: appStorage });
+let catalogDb: Promise<IDBDatabase> | undefined;
+export const addons = createAddons({
+  lists: addonLists,
+  storage: appStorage,
+  snapshots: createDbSnapshots({
+    read: async type => readCatalogPages(await (catalogDb ??= openDb()), type),
+    write: async record => writeCatalogPages(await (catalogDb ??= openDb()), record),
+  }),
+});
 
 /** The current profile's Movies and Series layout (src/data/vodLayout.ts). */
 export const vodLayout = createVodLayout({ storage: profileData, profile: () => profiles.currentId() });
@@ -129,6 +148,10 @@ export const vodLayout = createVodLayout({ storage: profileData, profile: () => 
 export const vodSorts = createVodSorts({ storage: profileData, profile: () => profiles.currentId() });
 /** The Movies and Series groups the current profile pinned (src/data/vodPins.ts). */
 export const vodPins = createVodPins({ storage: profileData, profile: () => profiles.currentId() });
+/** How the current profile's films and series play (src/data/playChoices.ts). */
+export const playChoices = createPlayChoices({ storage: profileData, profile: () => profiles.currentId() });
+/** The add-on stream each film and episode last played (src/data/lastLinks.ts). */
+export const lastLinks = createLastLinks({ storage: profileData });
 
 const CINEMETA_KEY = "velio.cinemeta";
 const keptCinemeta = () => {
@@ -234,6 +257,7 @@ export const tmdbOn = () => TMDB_KEY !== "" || tmdbUrl() !== TMDB_URL;
  */
 export const tmdbRequest = (path: string) =>
   fetch(`${TMDB_URL}${path}${path.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(TMDB_KEY)}`);
+export const moreLikeThis = createMoreLikeThis({ tmdb: () => (untrack(tmdbOn) ? tmdbClient : undefined) });
 const moreMatches = createMoreMatches({
   tmdb: () => (untrack(tmdbOn) ? tmdbClient : undefined),
   imdbOfTmdb: (type, tmdb) => wikidata.imdbOf(type, tmdb),

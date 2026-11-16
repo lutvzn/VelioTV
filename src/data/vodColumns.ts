@@ -16,8 +16,11 @@ export interface Table<T> {
 
 /** A series' episodes are stored apart, in one table: this is how many are its. */
 type StoredSeries = Omit<Series, "episodes"> & { episodes?: number };
-/** Only an add-on's episodes have a Stremio id, and they aren't stored. */
-type StoredEpisode = Omit<Episode, "stremio" | "links">;
+/**
+ * Only an add-on's episodes have a Stremio id, and only an Xtream series'
+ * the server's look at the file (FileQuality); neither is stored.
+ */
+type StoredEpisode = Omit<Episode, "stremio" | "links" | "released" | "height" | "estimatedBytes">;
 
 export interface VodColumns {
   films: Table<Film>;

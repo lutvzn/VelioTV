@@ -258,6 +258,26 @@ describe("the player", () => {
     expect(fake.opened.map(one => one.stream.url)).toEqual(["a", "debrid/file.mkv", "b"]);
   });
 
+  it("says once the clock has moved, not only once it's playing", async () => {
+    vi.useFakeTimers();
+    const fake = fakeEngine();
+    const player = createPlayer(() => Promise.resolve(fake.engine), { now, afterPaint });
+    fake.setPosition(0);
+    await player.play({ url: "film" });
+    fake.last()?.send({ type: "playing" });
+    await seconds(2);
+    expect(player.status().state).toBe("playing");
+    expect(player.moved()).toBe(false);
+    fake.setPosition(1000);
+    await seconds(1);
+    expect(player.moved()).toBe(true);
+    // Each play() starts again.
+    await player.play({ url: "other" });
+    expect(player.moved()).toBe(false);
+    player.stop();
+    expect(player.moved()).toBe(false);
+  });
+
   it("fails a film whose picture never moves, without trying it again", async () => {
     vi.useFakeTimers();
     const fake = fakeEngine();

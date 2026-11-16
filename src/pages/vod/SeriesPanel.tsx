@@ -12,17 +12,21 @@ import {
 } from "solid-js";
 import { Backdrop } from "../../components/Backdrop";
 import { MENU_WIDTH } from "../../components/SideMenu";
+import type { Similar } from "../../data/moreLikeThis";
 import type { Episode, SeriesDetails } from "../../data/vod";
 import type { SeriesEntry } from "../../data/vodLibrary";
 import { exposeToProbes } from "../../devHooks";
 import { vod, watched } from "../../library";
 import { duration } from "../../live/format";
+import { heightLabel } from "../../stremio/streamText";
 import { scrollTop } from "../../live/listWindow";
 import { episodeKey, episodeLabel, episodeToContinue } from "../../play/vodPlay";
 import { $t, $tn } from "../../translate";
 import { BOLD, colors, motion, radius, textOn } from "../../theme";
+import { say } from "../../voiceGuide";
 import { OVERLAY_Z } from "../live/ChannelOptions";
 import { Facts, PagePoster } from "./FilmPanel";
+import { SimilarRow } from "./SimilarRow";
 
 const PAGE_WIDTH = 1920 - MENU_WIDTH;
 const LEFT = 80;
@@ -50,6 +54,9 @@ export const SeriesPanel = (props: {
   onPlay: (details: SeriesDetails, episode: Episode, startMs?: number) => void;
   /** Its details and episodes, if not the library's, as every copy's joined (src/data/titles.ts). */
   load?: (show: SeriesEntry) => Promise<SeriesDetails>;
+  /** "More like this": TMDB's recommendations, and opening one. */
+  similar?: () => Promise<Similar[]>;
+  onSimilar?: (one: Similar) => void;
 }) => {
   let root: ElementNode | undefined;
   const [focused, setFocused] = createSignal(false);
@@ -58,6 +65,13 @@ export const SeriesPanel = (props: {
     show => (props.load ?? vod.seriesDetails)(show).catch((): SeriesDetails => ({ seasons: [] })),
   );
   const seasons = () => details()?.seasons ?? [];
+  // "More like this", beside the season, once TMDB has some: Up from the first episode.
+  const [similar] = createResource(
+    () => (props.similar ? props.show : undefined),
+    () => (props.similar?.() ?? Promise.resolve([])).catch((): Similar[] => []),
+  );
+  const [onSimilar, setOnSimilar] = createSignal(false);
+  const [similarOpen, setSimilarOpen] = createSignal(false);
   const [seasonAt, setSeasonAt] = createSignal(0);
   const episodes = () => seasons()[seasonAt()]?.episodes ?? [];
   const [cursor, setCursor] = createSignal(0);
@@ -95,7 +109,16 @@ export const SeriesPanel = (props: {
   };
 
   onMount(() => root?.setFocus());
-  exposeToProbes("seriesPanel", { show: () => props.show, details, seasonAt, cursor, episodes });
+  exposeToProbes("seriesPanel", {
+    show: () => props.show,
+    details,
+    seasonAt,
+    cursor,
+    episodes,
+    similar,
+    onSimilar,
+    similarOpen,
+  });
 
   const entryOf = (episode: Episode) => watched.get(episodeKey(props.show, episode));
   const progressOf = (episode: Episode) => {
@@ -128,11 +151,15 @@ export const SeriesPanel = (props: {
       // app's background shows, in the same colour.
       onFocusChanged={setFocused}
       onUp={() => {
-        place(cursor() - 1);
+        if (cursor() === 0 && similar()?.length) {
+          setOnSimilar(true);
+          say($t("vod.moreLikeThis"));
+        } else place(cursor() - 1);
         return true;
       }}
       onDown={() => {
-        place(cursor() + 1);
+        if (onSimilar()) setOnSimilar(false);
+        else place(cursor() + 1);
         return true;
       }}
       onChannelUp={() => {
@@ -144,15 +171,16 @@ export const SeriesPanel = (props: {
         return true;
       }}
       onLeft={() => {
-        changeSeason(-1);
+        if (!onSimilar()) changeSeason(-1);
         return true;
       }}
       onRight={() => {
-        changeSeason(1);
+        if (!onSimilar()) changeSeason(1);
         return true;
       }}
       onEnter={() => {
-        play();
+        if (onSimilar()) setSimilarOpen(true);
+        else play();
         return true;
       }}
       onBack={() => {
@@ -220,7 +248,7 @@ export const SeriesPanel = (props: {
           {slot => (
             <Show when={episodes()[top() + slot]}>
               {episode => {
-                const selected = () => focused() && top() + slot === cursor();
+                const selected = () => focused() && !onSimilar() && top() + slot === cursor();
                 const entry = () => entryOf(episode());
                 return (
                   <View
@@ -257,9 +285,12 @@ export const SeriesPanel = (props: {
                     >
                       {entry()?.finished
                         ? $t("vod.watched")
-                        : episode().durationMs
-                          ? duration(episode().durationMs ?? 0)
-                          : ""}
+                        : [
+                            heightLabel(episode().height),
+                            episode().durationMs ? duration(episode().durationMs ?? 0) : "",
+                          ]
+                            .filter(Boolean)
+                            .join("   ")}
                     </Text>
                     <Show when={progressOf(episode()) > 0}>
                       <View
@@ -285,6 +316,39 @@ export const SeriesPanel = (props: {
             </Show>
           )}
         </For>
+      </Show>
+      <Show when={similar()?.length}>
+        <View
+          x={TEXT_X + 364}
+          y={SEASON_Y}
+          width={340}
+          height={SEASON_HEIGHT}
+          borderRadius={SEASON_HEIGHT / 2}
+          color={focused() && onSimilar() ? colors.focus : colors.surfaceRaised}
+        >
+          <Text
+            width={340}
+            height={SEASON_HEIGHT}
+            lineHeight={SEASON_HEIGHT}
+            contain="width"
+            textAlign="center"
+            fontSize={26}
+            fontFamily={BOLD}
+            color={textOn(focused() && onSimilar())}
+          >
+            {$t("vod.moreLikeThis")}
+          </Text>
+        </View>
+      </Show>
+      <Show when={similarOpen()}>
+        <SimilarRow
+          load={() => Promise.resolve(similar() ?? [])}
+          onClose={() => setSimilarOpen(false)}
+          onPick={one => {
+            setSimilarOpen(false);
+            props.onSimilar?.(one);
+          }}
+        />
       </Show>
     </View>
   );

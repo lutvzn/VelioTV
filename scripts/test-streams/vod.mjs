@@ -150,6 +150,25 @@ export const filmSubtitles = format => {
 };
 
 // The Xtream API's answers (player_api.php actions).
+// What the server found when it looked into a file: panels give `video` and
+// `bitrate` (kbps) once they have, and `[]` and 0 when not. Made up: the files
+// are the test streams.
+const PICTURES = [
+  { width: 3840, height: 1608, bitrate: 18_000 },
+  { width: 1920, height: 1080, bitrate: 6000 },
+  { width: 1280, height: 720, bitrate: 2800 },
+  undefined,
+];
+export const probed = id => {
+  const picture = PICTURES[id % PICTURES.length];
+  return picture
+    ? {
+        video: { codec_name: "h264", width: picture.width, height: picture.height },
+        bitrate: picture.bitrate,
+      }
+    : { video: [], bitrate: 0 };
+};
+
 export const xtreamVod = {
   categories: library =>
     library.genres.map((name, id) => ({ category_id: String(id + 1), category_name: name, parent_id: 0 })),
@@ -190,6 +209,7 @@ export const xtreamVod = {
         duration_secs: FILM_SECONDS,
         duration: duration(),
         rating: String(film.rating),
+        ...probed(film.id),
       },
       movie_data: {
         stream_id: film.id,
@@ -251,7 +271,12 @@ export const xtreamVod = {
             title: `${show.name} - ${episodeCode(episode)} - ${episode.title}`,
             container_extension: episode.container,
             season: episode.season,
-            info: { plot: episode.plot, duration_secs: FILM_SECONDS, duration: duration() },
+            info: {
+              plot: episode.plot,
+              duration_secs: FILM_SECONDS,
+              duration: duration(),
+              ...probed(episode.id),
+            },
           })),
         ]),
       ),

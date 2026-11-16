@@ -2,7 +2,7 @@
   "name": "velio",
   "version": "3.0.0",
   "description": "A media center for TVs: your own live channels, films and series, from the sources you add.",
-  "license": "ISC",
+  "license": "GPL-3.0-only",
   "author": "",
   "type": "module",
   "main": "index.js",

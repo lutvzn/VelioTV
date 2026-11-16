@@ -11,6 +11,7 @@ export type SettingsCategory =
   | "general"
   | "live"
   | "vod"
+  | "playing"
   | "scrolling"
   | "pin"
   | "backup"

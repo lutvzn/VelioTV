@@ -1,7 +1,8 @@
 import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import { memoryStorage } from "../data/memoryStorage";
-import { createAddons, type AddonList, type Addons } from "./addons";
+import { createAddons, type AddonList, type Addons, type AddonsOptions, STREAMS_KEPT_MS } from "./addons";
+import { SNAPSHOT_MS, type SnapshotPage, type SnapshotRecord } from "./catalogSnapshot";
 
 const BASE = "https://addon.example.invalid";
 const OTHER = "https://other.example.invalid";
@@ -34,12 +35,17 @@ const web = (answers: Record<string, unknown>) =>
 
 const flush = (addons: Addons) => vi.waitUntil(() => addons.states().every(state => !state.loading));
 
-const setup = (answers: Record<string, unknown>, lists: AddonList[], storage = memoryStorage()) => {
+const setup = (
+  answers: Record<string, unknown>,
+  lists: AddonList[],
+  storage = memoryStorage(),
+  extra: Partial<AddonsOptions> = {},
+) => {
   const fetch = web(answers);
   const [shown, setShown] = createSignal(lists);
   let time = 1_000_000;
   const addons = createRoot(() =>
-    createAddons({ lists: shown, storage, fetch, now: () => time, timeoutMs: 1000 }),
+    createAddons({ lists: shown, storage, fetch, now: () => time, timeoutMs: 1000, ...extra }),
   );
   return {
     addons,
@@ -168,5 +174,93 @@ describe("the add-ons", () => {
     setLists([SECOND]);
     expect(addons.states().map(state => state.manifest?.name)).toEqual(["Beta"]);
     expect(addons.catalogs("movie").map(group => group.addon)).toEqual(["list-b"]);
+  });
+
+  it("keep a title's streams for 15 minutes", async () => {
+    const answers = {
+      [ADDON.url]: manifest("Alpha"),
+      [`${BASE}/stream/movie/tt1.json`]: { streams: [{ url: `${BASE}/film.mp4`, name: "Alpha" }] },
+    };
+    const { addons, fetch, later } = setup(answers, [ADDON]);
+    await flush(addons);
+    const asked = () => fetch.mock.calls.filter(call => urlOf(call[0]).includes("/stream/")).length;
+    await addons.streams("movie", "tt1");
+    later(STREAMS_KEPT_MS - 1);
+    await addons.streams("movie", "tt1");
+    expect(asked()).toBe(1);
+    later(2);
+    await addons.streams("movie", "tt1");
+    expect(asked()).toBe(2);
+  });
+
+  it("tell each add-on's streams as it answers, in the account's order", async () => {
+    const answers: Record<string, unknown> = {
+      [ADDON.url]: manifest("Alpha", { resources: ["stream"] }),
+      [SECOND.url]: manifest("Beta", { resources: ["stream"] }),
+    };
+    const { addons, fetch } = setup(answers, [ADDON, SECOND]);
+    await flush(addons);
+    const later: Record<string, (value: unknown) => void> = {};
+    fetch.mockImplementation(input => {
+      const url = urlOf(input);
+      return new Promise(resolve => {
+        later[url] = value => resolve(new Response(JSON.stringify(value)));
+      });
+    });
+    const told: { found: string[]; waiting: string[]; done: boolean }[] = [];
+    addons.watchStreams("movie", "tt1", search =>
+      told.push({ found: search.found.map(one => one.addon), waiting: search.waiting, done: search.done }),
+    );
+    await vi.waitUntil(() => Object.keys(later).length === 2);
+    later[`${OTHER}/stream/movie/tt1.json`]({ streams: [{ url: `${OTHER}/b.mp4` }] });
+    await vi.waitUntil(() => told.length === 2);
+    later[`${BASE}/stream/movie/tt1.json`]({ streams: [{ url: `${BASE}/a.mp4` }] });
+    await vi.waitUntil(() => told.some(one => one.done));
+    expect(told[0]).toEqual({ found: [], waiting: ["list-a", "list-b"], done: false });
+    expect(told[1]).toEqual({ found: ["list-b"], waiting: ["list-a"], done: false });
+    expect(told[told.length - 1]).toEqual({ found: ["list-a", "list-b"], waiting: [], done: true });
+  });
+
+  it("show a catalog's kept first page at once, and keep the pages it asks for", async () => {
+    const kept: Record<string, SnapshotRecord> = {};
+    const snapshots = {
+      read: vi.fn<(type: string) => Promise<SnapshotPage[]>>(async type => kept[type]?.pages ?? []),
+      write: vi.fn<(record: SnapshotRecord) => Promise<void>>(async record => {
+        kept[record.type] = record;
+      }),
+    };
+    const answers = {
+      [ADDON.url]: manifest("Alpha"),
+      [`${BASE}/catalog/movie/top.json`]: { metas: [film(1), film(2)] },
+    };
+    const first = setup(answers, [ADDON], memoryStorage(), { snapshots });
+    await flush(first.addons);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const [group] = first.addons.catalogs("movie");
+      await first.addons.loadPage(group);
+      expect(snapshots.write).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(3000);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(kept.movie.pages.map(page => [page.key, page.items.length])).toEqual([["list-a/movie/top", 2]]);
+    expect(JSON.stringify(kept.movie).length).toBeGreaterThan(64 * 1024);
+
+    const second = setup(answers, [ADDON], first.storage, { snapshots });
+    await flush(second.addons);
+    const [group] = second.addons.catalogs("movie");
+    await second.addons.loadPage(group);
+    expect(second.addons.pages()[group.key].items.map(item => item.id)).toEqual(["tt1", "tt2"]);
+    expect(second.fetch.mock.calls.map(call => urlOf(call[0]))).not.toContain(
+      `${BASE}/catalog/movie/top.json`,
+    );
+
+    // Twelve hours on, it's asked for again.
+    const third = setup(answers, [ADDON], first.storage, { snapshots });
+    third.later(SNAPSHOT_MS);
+    await flush(third.addons);
+    await third.addons.loadPage(third.addons.catalogs("movie")[0]);
+    expect(third.fetch.mock.calls.map(call => urlOf(call[0]))).toContain(`${BASE}/catalog/movie/top.json`);
   });
 });

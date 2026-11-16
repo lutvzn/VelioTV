@@ -89,14 +89,3 @@ export const nextChange = (cues: readonly Cue[], ms: number) => {
     if (cues[i].endMs > ms) next = Math.min(next, cues[i].endMs);
   return next;
 };
-
-/** A file's text: UTF-8, or else Windows-1252, which older subtitle files often are. */
-export const decodeSubtitles = (bytes: ArrayBuffer) => {
-  const utf8 = new TextDecoder("utf-8").decode(bytes);
-  if (!utf8.includes("�")) return utf8;
-  try {
-    return new TextDecoder("windows-1252").decode(bytes);
-  } catch {
-    return utf8;
-  }
-};

@@ -28,6 +28,8 @@ export const PER_PROFILE_KEYS: readonly string[] = [
   "velio.vodCategories",
   "velio.vodSorts",
   "velio.vodPins",
+  "velio.playChoices",
+  "velio.lastLinks",
 ];
 
 /** The key a profile keeps `key` under; the key itself with no profile or for a key every profile shares. */

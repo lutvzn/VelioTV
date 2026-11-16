@@ -18,6 +18,8 @@ export interface TmdbFound {
   /** In the title's own language. */
   originalTitle: string;
   year?: number;
+  /** In TMDB's small size. */
+  poster?: string;
 }
 
 /** A title's details, in English. */
@@ -72,6 +74,8 @@ export const readTmdbResults = (value: unknown, type: TmdbType): TmdbFound[] => 
     };
     const year = yearOf(type === "movie" ? one.release_date : one.first_air_date);
     if (year) result.year = year;
+    const poster = text(one.poster_path);
+    if (poster.startsWith("/")) result.poster = `${POSTERS}${poster}`;
     found.push(result);
   }
   return found;
@@ -212,6 +216,28 @@ export const createTmdb = (options: TmdbOptions) => {
           ? await get("/search/movie", { query, year, language })
           : await get("/search/tv", { query, first_air_date_year: year, language });
       return readTmdbResults(answer, type);
+    },
+    /**
+     * Titles like this one, by TMDB's users ("More like this"; after
+     * NuvioTVSmart's TMDB recommendations, https://github.com/NuvioMedia/NuvioTVSmart,
+     * GPL-3.0).
+     */
+    recommendations: async (type: TmdbType, id: number) => {
+      const answer = await get(`/${type === "movie" ? "movie" : "tv"}/${id}/recommendations`, {
+        language: "en-US",
+      });
+      return readTmdbResults(answer, type);
+    },
+    /** A title's TMDB id, by its IMDb id. */
+    byImdb: async (type: TmdbType, imdb: string): Promise<number | undefined> => {
+      const answer = await get(`/find/${imdb}`, { external_source: "imdb_id" });
+      const [found] = readTmdbResults(
+        isObject(answer)
+          ? { results: type === "movie" ? answer.movie_results : answer.tv_results }
+          : undefined,
+        type,
+      );
+      return found?.id;
     },
     /** A title's details and IMDb id, by its TMDB id. */
     title: async (type: TmdbType, id: number) => {

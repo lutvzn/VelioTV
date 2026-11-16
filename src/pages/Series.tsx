@@ -7,7 +7,8 @@ import { exposeToProbes } from "../devHooks";
 import { vod, vodLayout, watched } from "../library";
 import { watchVod } from "../play/start";
 import { addonEpisodePlay } from "../play/addonPlay";
-import { episodeLabel, episodePlay } from "../play/vodPlay";
+import { episodeItem, episodeLabel, episodePlay } from "../play/vodPlay";
+import { type TitleChoice, withOthers } from "../play/titlePlay";
 import type { Episode, SeriesDetails } from "../data/vod";
 import { addonSeries, keptSeries } from "../stremio/vodEntries";
 import { $t, $tn } from "../translate";
@@ -127,20 +128,21 @@ const Classic = () => {
       </Show>
       <Show when={picking()} keyed>
         {asked => (
-          <StreamPicker
+          <StreamPicker<never>
             title={`${asked.show.name}  ${episodeLabel(asked.episode)}`}
             type="series"
             id={asked.episode.stremio ?? ""}
+            itemKey={episodeItem(asked.show, asked.episode).key}
             onClose={() => setPicking(undefined)}
-            onPick={choice => {
+            onPick={(choice, auto) => {
               if (choice.kind !== "addon") return;
-              const { chosen } = choice;
               setPicking(undefined);
               reopenAddon = asked.show;
-              watchVod(
-                navigate,
-                addonEpisodePlay(asked.show, asked.details, asked.episode, chosen, asked.startMs),
-              );
+              const build = (one: TitleChoice<never>) =>
+                one.kind === "addon"
+                  ? addonEpisodePlay(asked.show, asked.details, asked.episode, one.chosen, asked.startMs)
+                  : episodePlay(asked.show, asked.details, asked.episode, asked.startMs);
+              watchVod(navigate, withOthers(build(choice), auto, build));
             }}
           />
         )}

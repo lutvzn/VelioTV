@@ -6,6 +6,7 @@ import type { StoredProgramme } from "../data/guideCodec";
 import type { Channel } from "../data/lineup";
 import type { WatchedItem } from "../data/watched";
 import type { Stream } from "../player/player";
+import type { AddonStream } from "../stremio/addon";
 
 export interface CatchupPlay {
   kind: "catchup";
@@ -41,6 +42,15 @@ export interface VodPlay {
   startMs?: number;
   /** For an episode: the next one, to play when it ends. */
   next?: () => Promise<VodPlay | undefined>;
+  /** The next episode's name, for the card shown near the end ("S01 E03  Title"). */
+  nextTitle?: string;
+  /**
+   * Other streams to try, in order, if this one doesn't start (an add-on's
+   * film or episode played without the picker, PLAN.md, "Auto-play").
+   */
+  fallbacks?: () => Promise<VodPlay[]>;
+  /** The add-on's stream it plays, to play again next time ("Play the last link again"). */
+  fromAddon?: { addon: string; addonName: string; stream: AddonStream };
   /** The page Back returns to. */
   back: "/movies" | "/series";
   /** Subtitle files from add-ons, asked for as it starts. */

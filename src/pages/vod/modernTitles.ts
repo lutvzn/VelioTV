@@ -20,7 +20,9 @@ import {
 } from "../../data/titles";
 import type { FilmEntry, SeriesEntry } from "../../data/vodLibrary";
 import { addons, cinemeta, library, titleMatcher, vod, vodLayout } from "../../library";
+import type { FileQuality } from "../../data/vod";
 import type { TitleType } from "../../stremio/addons";
+import { heightOf } from "../../stremio/streamText";
 import { $t, warmFormats } from "../../translate";
 import { useAddonGroups } from "./addonGroups";
 import type { PickerLink } from "./StreamPicker";
@@ -165,19 +167,26 @@ export const fileKind = (url: string) => {
   return ext ? (KINDS[ext] ?? ext.toUpperCase()) : "";
 };
 
-/** A title's copy from a source, as the picker's row: the source, the provider's name, the kind of file. */
+/**
+ * A title's copy from a source, as the picker's row: the source, the
+ * provider's name, the kind of file, and its picture's height from what
+ * `known` gives or else the name and group ("Film 4K", "VOD | FHD").
+ */
 export const linkRow = <L>(
   link: L,
   source: string,
   name: string,
   url: string,
   category?: string,
+  known: FileQuality = {},
 ): PickerLink<L> => {
   const from = library.sources().find(one => one.id === source)?.name ?? source;
+  const height = known.height ?? heightOf([name, category ?? ""]);
   return {
     link,
     text: `${from} · ${name}`,
     detail: [fileKind(url), category].filter(Boolean).join("   ·   "),
+    quality: { height, estimatedBytes: known.estimatedBytes },
   };
 };
 

@@ -12,6 +12,8 @@ import { importSource } from "./data/importClient";
 import {
   addons,
   backUpTo,
+  lastLinks,
+  playChoices,
   cinemeta,
   cinemetaUrl,
   setCinemetaUrl,
@@ -91,6 +93,9 @@ const hooks: Record<string, unknown> = {
   shownSources,
   /** The current profile's Stremio add-ons, for the `stremio` probe. */
   addons,
+  /** How films and series play, and the links kept (PLAN.md, "Auto-play"). */
+  playChoices,
+  lastLinks,
   /** The modern Movies and Series (PLAN.md, "Movies and Series by title"), for the `modern` probe. */
   cinemeta,
   cinemetaUrl,

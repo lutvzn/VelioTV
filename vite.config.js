@@ -108,6 +108,8 @@ export default defineConfig(({ mode }) => {
     test: {
       // Each file uses browser storage; run files serially in the shared browser.
       fileParallelism: false,
+      // reference/ holds other apps' code to read (git-ignored), with tests of their own.
+      exclude: ["**/node_modules/**", "**/.git/**", "reference/**"],
       browser: {
         enabled: true,
         // Shows the browser locally; CI sets CI=true and runs headless.

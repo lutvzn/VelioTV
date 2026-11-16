@@ -5,11 +5,13 @@ import { createSeriesMerger, mergeEpisodes, mergeSeries, type TitleSeries } from
 import type { Episode, EpisodeLink, SeriesDetails } from "../../data/vod";
 import type { SeriesEntry } from "../../data/vodLibrary";
 import { exposeToProbes } from "../../devHooks";
-import { addons, vod, watched } from "../../library";
+import { addons, moreLikeThis, vod, watched } from "../../library";
+import type { Similar } from "../../data/moreLikeThis";
 import { watchVod } from "../../play/start";
-import { titleEpisodePlay, type TitleChoice } from "../../play/titlePlay";
-import { episodeLabel } from "../../play/vodPlay";
-import { keptSeries, seriesKey } from "../../stremio/vodEntries";
+import { titleEpisodePlay, withOthers, type AutoPicked, type TitleChoice } from "../../play/titlePlay";
+import { episodeItem, episodeLabel } from "../../play/vodPlay";
+import { addonSeries, keptSeries, seriesKey } from "../../stremio/vodEntries";
+import { imdbOfTitle } from "./similar";
 import { $t, $tn, language } from "../../translate";
 import { orderLinks } from "./linkOrder";
 import { linkRow, useModernTitles } from "./modernTitles";
@@ -98,14 +100,23 @@ export const ModernSeries = () => {
     if (back) grid?.setFocus();
   });
 
+  /** A title from "More like this": the library's, or the add-ons' by its IMDb id. */
+  const openSimilar = async (one: Similar) => {
+    const imdb = await moreLikeThis.imdbOf("series", one.id).catch(() => undefined);
+    if (!imdb || !open()) return;
+    const meta = { id: imdb, type: "series", name: one.title, poster: one.poster, year: one.year };
+    setOpen(modern.titles().byImdb.get(imdb) ?? { ...asTitle(addonSeries(meta, "")), imdb });
+  };
   const close = () => {
     setOpen(undefined);
     grid?.setFocus();
   };
-  const watch = (asked: Picking, choice: TitleChoice<EpisodeLink>) => {
+  const watch = (asked: Picking, choice: TitleChoice<EpisodeLink>, auto?: AutoPicked<EpisodeLink>) => {
     setPicking(undefined);
     reopen = asked.title;
-    watchVod(navigate, titleEpisodePlay(asked.title, asked.details, asked.episode, choice, asked.startMs));
+    const build = (one: TitleChoice<EpisodeLink>) =>
+      titleEpisodePlay(asked.title, asked.details, asked.episode, one, asked.startMs);
+    watchVod(navigate, withOthers(build(choice), auto, build));
   };
   const play = (title: TitleSeries, details: SeriesDetails, episode: Episode, startMs?: number) => {
     const id = episode.stremio;
@@ -173,6 +184,13 @@ export const ModernSeries = () => {
             load={load}
             onClose={close}
             onPlay={(details, episode, startMs) => play(title(), details, episode, startMs)}
+            similar={() =>
+              moreLikeThis.of("series", {
+                imdb: imdbOfTitle(title()),
+                tmdb: title().tmdb ?? title().links.find(link => link.tmdb)?.tmdb,
+              })
+            }
+            onSimilar={one => void openSimilar(one)}
           />
         )}
       </Show>
@@ -183,10 +201,11 @@ export const ModernSeries = () => {
             type="series"
             id={asked.id}
             links={orderLinks(asked.episode.links ?? [], link => link.show, language()).map(link =>
-              linkRow(link, link.show.source, link.show.name, link.episode.url),
+              linkRow(link, link.show.source, link.show.name, link.episode.url, undefined, link.episode),
             )}
+            itemKey={episodeItem(asked.title, asked.episode).key}
             onClose={() => setPicking(undefined)}
-            onPick={choice => watch(asked, choice)}
+            onPick={(choice, auto) => watch(asked, choice, auto)}
           />
         )}
       </Show>
