@@ -27,6 +27,8 @@
     "tizen": "bash scripts/tizen.sh",
     "package:tizen": "bash scripts/package-tizen.sh",
     "deploy:tizen": "./scripts/deploy-tizen.sh",
+    "package:lg": "bash scripts/package-lg.sh",
+    "deploy:lg": "./scripts/deploy-lg.sh",
     "test-streams": "node scripts/test-streams/server.mjs",
     "tv-probe": "./scripts/tv-probe/run.sh",
     "perf:nav": "node scripts/tv-probe/nav-perf.mjs"
@@ -58,6 +60,7 @@
     "@vitejs/plugin-legacy": "^8.2.3",
     "@vitest/browser": "^5.0.5",
     "@vitest/browser-playwright": "^5.0.5",
+    "@webos-tools/cli": "^3.2.6",
     "acorn": "^8.16.0",
     "core-js": "^3.50.0",
     "husky": "^9.1.7",

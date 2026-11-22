@@ -20,6 +20,8 @@ const OPEN_WIDTH = MENU_OPEN_WIDTH;
 // the guide's groups. There's one menu.
 const [open, setOpen] = createSignal(false);
 export const menuOpen = open;
+/** How far the open menu reaches past the closed one: what's beside it moves right by this. */
+export const menuShift = () => (open() ? MENU_OPEN_WIDTH - MENU_WIDTH : 0);
 const ITEM_X = 16;
 const ITEM_SIZE = 64;
 const OPEN_ITEM_WIDTH = OPEN_WIDTH - 2 * ITEM_X;

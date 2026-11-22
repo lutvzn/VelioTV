@@ -45,11 +45,11 @@ All are fixed and tested on the Samsung TV.
 
 - **Device builds:** fixed. `vite.config.js` points the `#device` import at `devices/<TARGET_DEVICE>`, and `src/device.ts` loads it and starts the device setup.
 - **Asset paths:** fixed. `devices/deviceConfigPlugin.ts` now uses `./` instead of an absolute base such as `/tizen/`.
-- **Packaging:** Tizen is done: `devices/tizen/config.xml` and `scripts/deploy-tizen.sh <tv-ip>`, which builds, signs, installs and starts the app. It worked on the Samsung TV on 2026-11-02. The webOS `appinfo.json` comes in the LG phase.
-- **Number keys:** fixed on Tizen, which maps them to 48–57 and registers the media and number keys at startup. Back leaves the app from the home page. LG still has `-1`, to fix in Phase 9.
+- **Packaging:** Tizen is done: `devices/tizen/config.xml` and `scripts/deploy-tizen.sh <tv-ip>`, which builds, signs, installs and starts the app. It worked on the Samsung TV on 2026-11-02. webOS has a first version (2026-11-22): `devices/lg/appinfo.json` (`tv.velio.app`) and `scripts/deploy-lg.sh <device-name>`, built on LG's `ares-*` CLI; not yet tried on a TV.
+- **Number keys:** fixed on Tizen, which maps them to 48–57 and registers the media and number keys at startup. Back leaves the app from the home page. LG maps them to 48–57 too (2026-11-22), with channel up and down as 33 and 34 and Info as 457; to check on the TV, with which of Guide, ChannelList and Tools LG remotes send.
 - **Player:** fixed in `devices/common/player.ts`. The `<video>` element sits behind the UI's canvas, `seek()` jumps to a position and a new `skip()` moves relative to it, and `stop()` reuses the Shaka player instead of leaking it.
 - **Repo setup:** done. The repo is on Forgejo (branch `master`), and the npm lockfile is gone, so pnpm is the only package manager.
-- **Tooling:** done. Oxc does formatting (`oxfmt`, replacing Prettier) and linting (`oxlint` with type-aware rules). `pnpm check` runs format, lint, type check and tests, and `.forgejo/workflows/ci.yml` runs it plus a Samsung build on Forgejo.
+- **Tooling:** done. Oxc does formatting (`oxfmt`, replacing Prettier) and linting (`oxlint` with type-aware rules). `pnpm check` runs format, lint, type check and tests, and `.github/workflows/ci.yml` runs it plus a Samsung build on GitHub Actions.
 - **App shell:** done. A side menu (`src/components/SideMenu.tsx`) opens placeholder pages for Live TV, TV Guide, Movies, Series and Settings.
 
 ## Phases
@@ -502,6 +502,40 @@ Storage first, as it's the one place users can lose data today; then older TVs, 
    - **Holding Up or Down on the groups speeds up** (asked by the user, 2026-11-09; `src/heldKey.ts`): after 400 ms held the cursor moves by itself, 8 groups a second at first, doubling every 2 s up to 20 a second (first doubling every second up to 60; the user asked for 30, then for a slower ramp, then for 20), so 7 groups are passed in a second, 19 in two, 35 in three, 75 in five and 175 in ten; the last of 417 in about 22 s. A timer makes the moves, not the remote's repeats, which are dropped until the key is up (`suppressKeyUntilRelease`): a Samsung remote sends no repeats for a held OK (Phase 5, step 1). The release ends the hold, and the next press starts slow again (at first, a press within 200 ms of a release carried the hold on, for remotes that send a release before each repeat; the user asked for the speed to end at the release, and on such a remote a held key now moves at the remote's own pace, as before). Nothing opens while the key is held. It also stops at the end of the list, or once the column loses the keys. On the TV (the user's source, 417 groups in the guide), with a held key sent as one press and one release, and as repeats while held, the cursor was at 6 after 1 s, 18 after 2 s, 34 after 3 s and 58 after 4 s (with the top at 30), stopped at release, and the group opened once it rested; 59.3 fps while moving, the longest frame 66 ms. Sent as a release and press every 100 ms, it moved 10 a second, the remote's pace. Not yet tried on webOS, whose remotes can swallow a key's release (a hold there would go on to the end of the list).
    - **Holding Up or Down in the guide's channels and in the posters** (asked by the user, 2026-11-09) speeds up the same way, and each list's top speed is set in Settings → "Scrolling speed" (`src/pages/settings/ScrollingPage.tsx`): groups, TV guide channels, rows of posters, each 5, 10, 15, 20, 30, 40 or 60 a second, 20 to start. Under 8, the speed is the top from the start. They're kept with the app's settings (`holdSpeeds`) and in backups.
      - **On the TV** (the user's source: 14,267 channels, 36,813 films): held 4 s, the guide's channels moved 55 rows at 59.3–60.1 fps, the longest frame 51 ms; set to 5 a second, 14 in 3 s. The posters moved 54 rows, but at 48–49 fps with frames up to 120 ms: each row passed made 8 posters, with their pictures, titles and focus rings. Now rows that appear while the held key moves the cursor by itself show the bare card, and their pictures and titles once it stops (`Artwork`'s `wait`, `heldRacing`): 55 rows at 56–57 fps, the longest frame 35–39 ms. Making the focus ring for the focused poster only made no clear difference, so it stays as it was.
+
+## Phase 9 plan: LG webOS
+
+Started 2026-11-22, when an LG TV became available for a day of testing.
+
+1. **Packaging and keys:** `devices/lg/appinfo.json` (id `tv.velio.app`, 1920x1080, `disableBackHistoryAPI` so Back reaches the app), `pnpm package:lg` (build, ES5 check, `ares-package`) and `pnpm deploy:lg <device-name>` (also `ares-install` and `ares-launch`). The number, channel and Info keys are mapped. Playback is the `<video>` engine (Shaka) for now; `mpegts.js` for raw TS comes later. The probe runner is still Samsung-only; on LG, `ares-inspect` opens the app's Web Inspector. Image workers are on, as on Tizen (they were 0).
+
+### LG results so far
+
+Tested on 2026-11-22 on a 43UN731C0SC (2020, webOS 5, SDK 5.6.2, firmware 04.64.00; Chromium 68.0.3440.106).
+
+- **Setup:** `ares-novacom --getkey` saves the key but adds it to the device entry only after the passphrase prompt, which a non-interactive shell can't answer; `ares-setup-device -m <name> -i "privatekey=<name>_webos" -i "passphrase=<passphrase>"` does both. Until then every command fails with "All configured authentication methods failed".
+- **Packaging and start:** `pnpm deploy:lg` builds, packages, installs and starts the app. It loads the legacy (ES5) build, as Chromium 68 lacks what the modern one needs, in a 1920x1080 window (`devicePixelRatio` 2). No errors at start apart from the ones Vite expects when it falls back to the legacy build. The debug port (9998) answers the DevTools protocol directly once `ares-inspect` has run, so the app's state and console can be read from this computer.
+- **UI and remote:** the user checked the app on the TV: it works, and the remote works too.
+
+## Getting started on an empty section (asked 2026-11-22)
+
+The user asked for Live, Movies and Series, when there's nothing to play, to offer signing in to the account or adding an IPTV playlist on the TV, rather than only saying so.
+
+- **What shows:** the page's title and "No channels yet" (or films, or series) as before, then a hint and two buttons: **Sign in with a phone** (left out while the TV is signed in, when the hint says the account has nothing for this profile) and **Add an IPTV playlist**. Nothing is offered while the section loads.
+- **How:** `markEmpty()` (`src/emptySection.ts`) takes where the page wants the buttons; the app draws them (`src/components/GetStarted.tsx`) beside the page in its frame, so the page's own key handlers don't get in their way and Left at the first button, or Back, goes to the menu. Right from the menu goes into them; before, an empty section kept the keys on the menu.
+- **Where they go:** `openSettingsFor()` (`src/pages/settings/category.ts`) opens Settings with the keys in the panel: on the account, where the sign-in code shows at once, or on Sources with the add form open, from which Back comes to the list's Add a source.
+- **On the LG TV (2026-11-22)**, keys sent through the debugger, the TV in Portuguese with no sources: on Live, Right went to Sign in, Right again to Add an IPTV playlist, Left back, Left again to the menu; Back from the buttons to the menu; OK on Add opened Settings → Sources on the form's first field (Kind), and Back came to Add a source. Movies and Series did the same. Sign in wasn't pressed, as it starts a sign-in at velio.tv. `window.velio.focusText()` is new, for probes: the text in the node that has the keys.
+- **The open menu covered them** (reported 2026-11-22): the empty page's text and buttons now move right as the menu opens, as the guide's groups do (`menuShift()`, `src/components/SideMenu.tsx`). Measured on the LG TV: Live's start at 380 px with the menu open (340 px) and 136 px with it closed (96 px); Movies' at 404 and 160.
+- **For the user to look at on the TV:** the layout of the hint and buttons on each page, and the Sign in button.
+
+## Nuvio by default (asked 2026-11-22)
+
+The user asked for signing in to Nuvio to be the default, with an option for a self-hosted Velio server at an address typed on the TV.
+
+- **The choice** (Settings → Account, signed out): Server, Nuvio or Self-hosted Velio (OK switches); for self-hosted, Server address (OK to type) and a note. Signing in to self-hosted with no address says to type it first. The category and page are now called Account, as the account is Nuvio's by default.
+- **Nuvio's own server** (`NUVIO_SITE`, https://nuvio.tv, `src/data/nuvio.ts`): nuvio.tv has no `/.well-known/nuvio` (404 on 2026-11-22), so the build carries its backend address and publishable key, `NUVIO_BACKEND_URL` and `NUVIO_PUBLISHABLE_KEY` from the environment or the git-ignored `.env`, as the TMDB key is (`vite.config.js`). Without them, signing in to Nuvio says "This build doesn't have Nuvio's server address" and makes no request. Nuvio's server has neither the typed code nor Velio's IPTV lists, so the TV shows only the QR code (to nuvio.tv/tv-login) and brings add-ons, library and profiles. A TV already pointed at velio.tv or another server keeps it.
+- **On the LG TV (2026-11-22)**, keys sent through the debugger: the server was Nuvio by default; OK on Server switched to Self-hosted Velio and the address field showed under it; Sign in then said to type the address first; back to Nuvio, Sign in said the build has no Nuvio address (none set yet). Typing an address wasn't tried (the on-screen keyboard).
+- **Left:** Nuvio's backend address and key in `.env`, then a sign-in on the TV with a Nuvio account.
 
 ## Stremio add-ons (looked into, 2026-11-09)
 

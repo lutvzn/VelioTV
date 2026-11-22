@@ -11,24 +11,27 @@ import { lowerChunks, workerPolyfills } from "./scripts/build/oldTvs.mjs";
 const envDir = "./environments";
 
 /**
- * The TMDB key for matching titles (src/stremio/tmdb.ts), from TMDB_API_KEY
- * in the environment or the git-ignored .env, read on its own: Vite's env
- * files are in environments/, and nothing else in .env goes in the build.
- * Without it, the app matches without TMDB.
+ * A value from the environment or the git-ignored .env, read on its own:
+ * Vite's env files are in environments/, and nothing else in .env goes in
+ * the build. Empty when it's in neither.
  */
-const tmdbKey = () => {
-  if (process.env.TMDB_API_KEY) return process.env.TMDB_API_KEY;
+const envValue = name => {
+  if (process.env[name]) return process.env[name];
   if (!existsSync(".env")) return "";
   const line = readFileSync(".env", "utf8")
     .split(/\r?\n/)
-    .find(one => one.startsWith("TMDB_API_KEY="));
+    .find(one => one.startsWith(`${name}=`));
   return line
     ? line
-        .slice("TMDB_API_KEY=".length)
+        .slice(name.length + 1)
         .trim()
         .replace(/^["']|["']$/g, "")
     : "";
 };
+// The TMDB key for matching titles (src/stremio/tmdb.ts), TMDB_API_KEY.
+// Without it, the app matches without TMDB.
+const tmdbKey = () => envValue("TMDB_API_KEY");
+
 // webOS 3's Chromium; Tizen 3 has 47.
 const OLDEST_CHROME = "chrome >= 38";
 
@@ -50,6 +53,11 @@ export default defineConfig(({ mode }) => {
       __DEV__: mode !== "production",
       __VERSION__: JSON.stringify(process.env.npm_package_version ?? "dev"),
       __TMDB_KEY__: JSON.stringify(mode === "test" ? "" : tmdbKey()),
+      // Nuvio's own server (src/data/nuvio.ts), which has no discovery
+      // document: its backend address and publishable key, NUVIO_BACKEND_URL
+      // and NUVIO_PUBLISHABLE_KEY. Without them, signing in to Nuvio says so.
+      __NUVIO_BACKEND__: JSON.stringify(mode === "test" ? "" : envValue("NUVIO_BACKEND_URL")),
+      __NUVIO_KEY__: JSON.stringify(mode === "test" ? "" : envValue("NUVIO_PUBLISHABLE_KEY")),
     },
     plugins: [
       deviceConfigPlugin(targetDevice),

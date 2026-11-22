@@ -1,16 +1,17 @@
 import { Text, View } from "@solidtv/solid";
 import { Row } from "@solidtv/solid/primitives";
 import { createMemo, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
-import { BUTTON_HEIGHT, FIELD_WIDTH, FormButton, TextField } from "../../components/Form";
+import { BUTTON_HEIGHT, ChoiceField, FIELD_WIDTH, FormButton, TextField } from "../../components/Form";
 import { ProfileBadge } from "../../components/ProfileBadge";
 import { startPairing, tvName, waitForOwner, type Pairing, type PairingRun } from "../../data/pairing";
 import { exposeToProbes } from "../../devHooks";
-import { DEFAULT_SITE } from "../../data/sync";
+import { NUVIO_SITE } from "../../data/nuvio";
 import { profiles, sync } from "../../library";
 import { qrImage } from "../../qrCode";
 import { BOLD, colors, radius } from "../../theme";
 import { $t, $tn } from "../../translate";
 import { sayWhileFocused } from "../../voiceGuide";
+import { takeSettingsAction } from "./category";
 import { SubPage } from "./SubPage";
 import { timeAgo } from "./status";
 
@@ -19,6 +20,9 @@ const QR_FRAME = 520;
 
 /** "velio.tv", from the site's address. */
 const siteName = (site: string) => site.replace(/^https?:\/\//i, "");
+
+/** The self-hosted server's address, once typed. */
+const ownAddress = () => (sync.site() === NUVIO_SITE ? "" : sync.site());
 
 /** A code read out a character at a time, three at a time: "K 7 Q, M 2 X". */
 const spokenCode = (code: string) =>
@@ -56,8 +60,24 @@ export const AccountPage = (props: { onClose: () => void }) => {
     stop();
   });
 
+  // Nuvio's own server, or a Velio server you host, at an address typed
+  // here. Self-hosted is chosen before its address is typed, so it's kept
+  // apart from the site, which stays Nuvio's until then.
+  const [selfHosted, setSelfHosted] = createSignal(sync.site() !== NUVIO_SITE);
+  const chooseServer = (own: boolean) => {
+    setSelfHosted(own);
+    if (!own && sync.site() !== NUVIO_SITE) {
+      sync.setSite(NUVIO_SITE);
+      say($t("account.serverSet", { page: siteName(NUVIO_SITE) }));
+    } else say("");
+  };
+
   const signIn = async () => {
     if (starting()) return;
+    if (selfHosted() && !ownAddress()) {
+      say($t("account.needAddress"), true);
+      return;
+    }
     stop();
     setExpired(false);
     setStarting(true);
@@ -93,6 +113,9 @@ export const AccountPage = (props: { onClose: () => void }) => {
     }
   };
 
+  // Opened to sign in (from an empty Live, Movies or Series): the code shows at once.
+  if (takeSettingsAction("account") === "signIn" && !sync.signedIn()) void signIn();
+
   const pullNow = async () => {
     say($t("account.pulling"));
     const outcome = await sync.pull();
@@ -115,11 +138,12 @@ export const AccountPage = (props: { onClose: () => void }) => {
 
   const changeServer = (typed: string) => {
     const before = sync.site();
-    if (!sync.setSite(typed)) {
+    // Emptied, it waits for an address again rather than going back to Nuvio.
+    if (!sync.setSite(typed.trim() === "" ? NUVIO_SITE : typed)) {
       say($t("account.serverInvalid", { address: typed }), true);
       return;
     }
-    if (sync.site() !== before) say($t("account.serverSet", { page: siteName(sync.site()) }));
+    if (sync.site() !== before && ownAddress()) say($t("account.serverSet", { page: siteName(sync.site()) }));
   };
 
   const qr = createMemo(() => {
@@ -270,16 +294,28 @@ export const AccountPage = (props: { onClose: () => void }) => {
                 width={460}
                 onEnter={() => void signIn()}
               />
-              <TextField
+              <ChoiceField
                 label={$t("account.server")}
-                value={sync.site()}
-                hint={$t("account.server.hint")}
-                inputMode="url"
-                onChange={changeServer}
+                value={selfHosted()}
+                choices={[
+                  { value: false, label: $t("account.server.nuvio") },
+                  { value: true, label: $t("account.server.velio") },
+                ]}
+                hint={$t("source.change")}
+                onChange={chooseServer}
               />
-              <Text width={FIELD_WIDTH} contain="width" fontSize={22} color={colors.textFaint} skipFocus>
-                {$t("account.serverNote", { page: siteName(DEFAULT_SITE) })}
-              </Text>
+              <Show when={selfHosted()}>
+                <TextField
+                  label={$t("account.address")}
+                  value={ownAddress()}
+                  hint={$t("account.server.hint")}
+                  inputMode="url"
+                  onChange={changeServer}
+                />
+                <Text width={FIELD_WIDTH} contain="width" fontSize={22} color={colors.textFaint} skipFocus>
+                  {$t("account.serverNote")}
+                </Text>
+              </Show>
             </Match>
           </Switch>
         </SubPage>

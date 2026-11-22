@@ -34,6 +34,7 @@ import {
   errorText,
   isRecord,
   isText,
+  NUVIO_SITE,
   problemOf,
   randomHex,
   readTokens,
@@ -44,13 +45,14 @@ import {
 
 export { fetchWithin } from "./nuvio";
 
-export const DEFAULT_SITE = "https://velio.tv";
+/** Where a TV signs in unless pointed at a self-hosted Velio server: Nuvio. */
+export const DEFAULT_SITE = NUVIO_SITE;
 
 /**
  * A server address as typed, made into the form kept: https:// when it has
  * no scheme, no slash at the end, and nothing after a ? or #. A path stays,
  * for a server behind a proxy (https://example.com/velio). Empty means
- * velio.tv; undefined means it isn't an address.
+ * Nuvio's; undefined means it isn't an address.
  */
 export const cleanSite = (typed: string): string | undefined => {
   let site = typed.trim();
@@ -74,7 +76,7 @@ declare const __VERSION__: string | undefined;
 const CLIENT_VERSION = typeof __VERSION__ === "string" ? __VERSION__ : "dev";
 
 export interface SyncSaved {
-  /** The server: https://velio.tv, or a self-hosted one or a test server. */
+  /** The server: Nuvio's (https://nuvio.tv), a self-hosted Velio one, or a test server. */
   site: string;
   /** Where its API is, from signing in. */
   server?: Server;
@@ -540,7 +542,7 @@ export const createSync = (options: SyncOptions) =>
 
       /**
        * Points a signed-out TV at another server: a self-hosted one, or a
-       * test one. Takes the address as typed (cleanSite); empty is velio.tv.
+       * test one. Takes the address as typed (cleanSite); empty is Nuvio's.
        * False when signed in, as the session belongs to the server, or when
        * it isn't an address.
        */

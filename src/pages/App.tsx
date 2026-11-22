@@ -3,13 +3,14 @@ import type { RendererMain } from "@solidtv/renderer";
 import { activeElement, View, ElementNode, renderer } from "@solidtv/solid";
 import { useMouse } from "@solidtv/solid/primitives";
 import { createEffect, on, onCleanup, Show, type JSX } from "solid-js";
+import { GetStarted } from "../components/GetStarted";
 import { PinPrompt } from "../components/PinPrompt";
 import { ReminderNotice } from "../components/ReminderNotice";
 import { SignedOutNotice } from "../components/SignedOutNotice";
 import { warmSection } from "../preload";
 import { MENU_WIDTH, PROFILES_PATH, SideMenu } from "../components/SideMenu";
 import { device } from "../device";
-import { sectionEmpty } from "../emptySection";
+import { sectionEmpty, startPlace } from "../emptySection";
 import { menuAway, wholeScreen } from "../wholeScreen";
 import { library, profiles, sync, titleMatcher, vod } from "../library";
 import { SECTIONS } from "../sections";
@@ -154,15 +155,18 @@ const App = (props: { children?: JSX.Element }) => {
     return true;
   };
   // A section with nothing in it (no channels, no films) leaves the keys
-  // on the menu.
+  // on the menu, or gives them to its ways to get started, if it offers them.
+  let start: ElementNode | undefined;
+  const inStart = (node: ElementNode) => !!start && !!startPlace() && isInside(node, start);
   const focusContent = () => {
     if (!sectionEmpty()) content?.setFocus();
+    else if (startPlace()) start?.setFocus();
     return true;
   };
   createEffect(() => {
     if (!sectionEmpty()) return;
     const active = activeElement();
-    if (active && content && isInside(active, content)) focusMenu();
+    if (active && content && isInside(active, content) && !inStart(active)) focusMenu();
   });
 
   // A page that goes while it has the keys, such as when another page
@@ -236,6 +240,10 @@ const App = (props: { children?: JSX.Element }) => {
           onBack={focusMenu}
         >
           {props.children}
+          {/* Over the page, which draws what it says beside them. */}
+          <Show when={startPlace()}>
+            {place => <GetStarted place={place()} ref={element => (start = element)} />}
+          </Show>
         </View>
         <SideMenu
           ref={element => (menu = element)}

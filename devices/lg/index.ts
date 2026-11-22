@@ -13,7 +13,9 @@ export const config: DeviceConfig = merge({}, common, {
   },
   lightning: {
     rendererOptions: {
-      numImageWorkers: 0,
+      // As on Tizen; the renderer goes without them where the browser
+      // lacks what they need (createImageBitmap, Chromium 50).
+      numImageWorkers: 2,
     },
   },
   keys: {
@@ -31,16 +33,22 @@ export const config: DeviceConfig = merge({}, common, {
     Rewind: 412,
     Rewind10: -1,
     Stop: 413,
-    Key0: -1,
-    Key1: -1,
-    Key2: -1,
-    Key3: -1,
-    Key4: -1,
-    Key5: -1,
-    Key6: -1,
-    Key7: -1,
-    Key8: -1,
-    Key9: -1,
+    // LG remotes send channel up and down as Page Up and Page Down.
+    ChannelUp: 33,
+    ChannelDown: 34,
+    Info: 457,
+    // webOS sends every remote key without registering; to be checked on
+    // the TV which of Guide, ChannelList and Tools LG remotes have.
+    Key0: 48,
+    Key1: 49,
+    Key2: 50,
+    Key3: 51,
+    Key4: 52,
+    Key5: 53,
+    Key6: 54,
+    Key7: 55,
+    Key8: 56,
+    Key9: 57,
   },
   initialize: async function () {
     return await LgDevice.initialize();

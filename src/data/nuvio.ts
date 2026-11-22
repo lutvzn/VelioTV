@@ -78,8 +78,36 @@ export class ServerProblem extends Error {
   }
 }
 
-/** Reads the discovery document; throws an Error with text to show if the site has none. */
-export const discover = async (site: string, fetcher: typeof fetch): Promise<Server> => {
+/** Nuvio's own site: the default, and where its sign-in page is (/tv-login). */
+export const NUVIO_SITE = "https://nuvio.tv";
+
+declare const __NUVIO_BACKEND__: string | undefined;
+declare const __NUVIO_KEY__: string | undefined;
+
+/**
+ * Nuvio's own server, which has no discovery document, so the build carries
+ * where it is (NUVIO_BACKEND_URL and NUVIO_PUBLISHABLE_KEY, vite.config.js);
+ * undefined in a build without them.
+ */
+export const builtInNuvio = (): Server | undefined => {
+  const backend = typeof __NUVIO_BACKEND__ === "string" ? __NUVIO_BACKEND__.replace(/\/+$/, "") : "";
+  const key = typeof __NUVIO_KEY__ === "string" ? __NUVIO_KEY__ : "";
+  return backend && key ? { site: NUVIO_SITE, backend, key } : undefined;
+};
+
+/**
+ * Where the site's API is: Nuvio's own from the build, any other site's from
+ * its discovery document. Throws an Error with text to show if there's none.
+ */
+export const discover = async (
+  site: string,
+  fetcher: typeof fetch,
+  nuvio: Server | undefined = builtInNuvio(),
+): Promise<Server> => {
+  if (site === NUVIO_SITE) {
+    if (!nuvio) throw new Error("This build doesn't have Nuvio's server address");
+    return nuvio;
+  }
   const response = await fetchWithin(
     fetcher,
     `${site}/.well-known/nuvio`,

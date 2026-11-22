@@ -1,4 +1,4 @@
-import { type ElementNode, Text, View } from "@solidtv/solid";
+import { activeElement, type ElementNode, Text, View } from "@solidtv/solid";
 import {
   batch,
   createEffect,
@@ -8,6 +8,7 @@ import {
   Match,
   on,
   onCleanup,
+  onMount,
   Show,
   Switch,
 } from "solid-js";
@@ -27,7 +28,13 @@ import { AboutPage } from "./settings/AboutPage";
 import { AccountPage } from "./settings/AccountPage";
 import { AddonsPage } from "./settings/AddonsPage";
 import { BackupPage } from "./settings/BackupPage";
-import { type SettingsCategory, setSettingsCategory, settingsCategory } from "./settings/category";
+import {
+  type SettingsCategory,
+  setSettingsCategory,
+  settingsActionPending,
+  settingsCategory,
+  takeSettingsAction,
+} from "./settings/category";
 import { GeneralPage, VodPage } from "./settings/GeneralPage";
 import { LivePage } from "./settings/LivePage";
 import { PinPage } from "./settings/PinPage";
@@ -217,9 +224,12 @@ const shownList = () => sourcesFor(library.sources(), profiles.currentId());
  * list's place, and Back comes back to its card.
  */
 const SourcesPage = (props: { onClose: () => void }) => {
+  // Opened to add a playlist (from an empty Live, Movies or Series), it
+  // starts on the form, and Back comes back to Add a source.
+  const adding = takeSettingsAction("sources") === "addSource";
   // undefined for the list, null to add a source, or the id of the one open.
-  const [editing, setEditing] = createSignal<string | null | undefined>();
-  const [selected, setSelected] = createSignal(0);
+  const [editing, setEditing] = createSignal<string | null | undefined>(adding ? null : undefined);
+  const [selected, setSelected] = createSignal(adding ? shownList().length : 0);
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), 30_000);
   onCleanup(() => clearInterval(clock));
@@ -275,8 +285,10 @@ export default () => {
   let root: ElementNode | undefined;
   let pane: ElementNode | undefined;
   const [focused, setFocused] = createSignal(false);
-  // Whether the panel has the keys, rather than the column.
-  const [inPane, setInPane] = createSignal(false);
+  // Whether the panel has the keys, rather than the column. Opened by
+  // another page to do something there, it starts with them.
+  const opening = settingsActionPending();
+  const [inPane, setInPane] = createSignal(opening);
   // The column's cursor: the panel shows the category it's on once it rests
   // there, or at once on Right or OK.
   const cursor = createRestingCursor(settingsCategory, id => {
@@ -320,6 +332,18 @@ export default () => {
       { defer: true },
     ),
   );
+  // After the app's own focus move on opening a section, which goes to the
+  // menu when nothing on the page has taken the keys.
+  onMount(() => {
+    if (!opening) return;
+    const timer = setTimeout(() => {
+      const active = activeElement();
+      let at: ElementNode | undefined = active;
+      while (at && at !== pane) at = at.parent;
+      if (!at) pane?.setFocus();
+    });
+    onCleanup(() => clearTimeout(timer));
+  });
   useWholeScreen(() => false);
   const paneX = () => groupsX() + GROUPS_WIDTH;
   exposeToProbes("settingsPage", { category: settingsCategory, cursor: cursor.at, inPane });

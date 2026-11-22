@@ -3,12 +3,12 @@ import { useHold } from "@solidtv/solid/primitives";
 import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { Artwork } from "../../components/Artwork";
 import { Backdrop } from "../../components/Backdrop";
-import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen } from "../../components/SideMenu";
+import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen, menuShift } from "../../components/SideMenu";
 import { exposeToProbes } from "../../devHooks";
 import { markEmpty } from "../../emptySection";
 import { heldRacing, moveWhileHeld, stopHold } from "../../heldKey";
 import { TITLE_SORTS, type TitleSort } from "../../data/vodSorts";
-import { settings, vodPins, vodSorts } from "../../library";
+import { settings, sync, vodPins, vodSorts } from "../../library";
 import { createRestingCursor } from "../../restingCursor";
 import { scrollTop } from "../../live/listWindow";
 import { editText } from "../../textEntry";
@@ -48,6 +48,10 @@ const PAGE_WIDTH = 1920;
 const LEFT = 64;
 const HERO_HEIGHT = 760;
 const TEXT_WIDTH = 1000;
+/** Where the ways to get started go on an empty page, under the two lines of the hint. */
+const START_Y = 456;
+/** The empty page's text, right of the menu, which moves it aside as it opens. */
+const emptyX = () => LEFT + menuShift();
 
 /** Where the group's name is, over the row of posters with the cursor. */
 const LABEL_Y = 560;
@@ -371,8 +375,9 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
   onCleanup(stopHold);
 
   const empty = () => props.items.length === 0 && props.continueItems.length === 0 && extras().length === 0;
-  // With no titles at all (or while they load) the menu keeps the keys.
-  markEmpty(empty);
+  // With no titles at all the menu keeps the keys, but for the ways to get
+  // started shown once they've loaded.
+  markEmpty(empty, () => (props.loading ? undefined : { x: emptyX(), y: START_Y }));
   // The menu and the column show unless you're moving through the posters;
   // with nothing to show, or a page over it, it lays out as other pages do.
   const inGrid = () => focused() && area() === "grid";
@@ -678,11 +683,22 @@ export const VodHub = <T extends HubItem>(props: VodHubProps<T>) => {
         when={!empty()}
         fallback={
           <>
-            <Text x={LEFT} y={186} fontSize={56} fontFamily={BOLD}>
+            <Text x={emptyX()} y={186} fontSize={56} fontFamily={BOLD}>
               {props.loading ? $t("vod.loading") : props.title}
             </Text>
-            <Text x={LEFT} y={276} width={TEXT_WIDTH} contain="width" fontSize={30} color={colors.textDim}>
+            <Text x={emptyX()} y={276} width={TEXT_WIDTH} maxLines={1} contain="width" fontSize={44}>
               {props.loading ? "" : props.emptyText}
+            </Text>
+            <Text
+              x={emptyX()}
+              y={346}
+              width={TEXT_WIDTH}
+              maxLines={2}
+              contain="width"
+              fontSize={30}
+              color={colors.textDim}
+            >
+              {props.loading ? "" : sync.signedIn() ? $t("start.hintSignedIn") : $t("start.hint")}
             </Text>
           </>
         }

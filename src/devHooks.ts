@@ -132,6 +132,17 @@ const hooks: Record<string, unknown> = {
     }
     return path;
   },
+  /** The text in the node that has the keys, such as a button's label. */
+  focusText: () => {
+    const texts: string[] = [];
+    const walk = (node: { text?: unknown; children?: unknown[] }) => {
+      if (typeof node.text === "string" && node.text) texts.push(node.text);
+      for (const child of node.children ?? []) if (child && typeof child === "object") walk(child);
+    };
+    const active = activeElement();
+    if (active) walk(active);
+    return texts.join(" | ");
+  },
 };
 
 export const installDevHooks = () => Object.assign(globalThis, { velio: hooks });

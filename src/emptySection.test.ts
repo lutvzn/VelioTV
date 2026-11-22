@@ -1,11 +1,11 @@
 import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
-import { markEmpty, sectionEmpty } from "./emptySection";
+import { markEmpty, sectionEmpty, startPlace, type StartPlace } from "./emptySection";
 
 /** Opens a page that marks itself empty while `empty` is true; returns its close. */
-const page = (empty: () => boolean) =>
+const page = (empty: () => boolean, start?: () => StartPlace | undefined) =>
   createRoot(dispose => {
-    markEmpty(empty);
+    markEmpty(empty, start);
     return dispose;
   });
 
@@ -29,5 +29,23 @@ describe("markEmpty", () => {
     expect(sectionEmpty()).toBe(true);
     closeNew();
     expect(sectionEmpty()).toBe(false);
+  });
+
+  it("offers ways to get started only while empty, and where the page says", () => {
+    const [empty, setEmpty] = createSignal(true);
+    const [loading, setLoading] = createSignal(true);
+    const close = page(empty, () => (loading() ? undefined : { x: 10, y: 20 }));
+    // Empty while it loads, with nothing offered yet.
+    expect(sectionEmpty()).toBe(true);
+    expect(startPlace()).toBeUndefined();
+    setLoading(false);
+    expect(startPlace()).toEqual({ x: 10, y: 20 });
+    setEmpty(false);
+    expect(sectionEmpty()).toBe(false);
+    expect(startPlace()).toBeUndefined();
+    setEmpty(true);
+    expect(startPlace()).toEqual({ x: 10, y: 20 });
+    close();
+    expect(startPlace()).toBeUndefined();
   });
 });

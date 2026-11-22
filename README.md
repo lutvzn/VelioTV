@@ -33,6 +33,15 @@ Debian/Ubuntu's `apt`. Some codecs require additional multimedia repositories.
 Chromium 38/47 compatibility runs still need their legacy runtime; the native
 Playwright browser is not a replacement for testing those old engines.
 
+## Build settings
+
+The git-ignored `.env` at the project root can hold values the build puts in
+the app (and nothing else from it):
+
+- `TMDB_API_KEY`: matches titles through TMDB. Without it, the app uses Cinemeta only.
+- `NUVIO_BACKEND_URL` and `NUVIO_PUBLISHABLE_KEY`: Nuvio's own server, where
+  TVs sign in by default. Without them, only self-hosted Velio servers work.
+
 ## Samsung TV build, signing, and deployment
 
 ```sh
@@ -75,3 +84,33 @@ path; the profile's `.pwd` paths are keyring identifiers, not missing files.
 Re-register after moving the checkout or switching machines. Password
 arguments can briefly be visible to local process inspection. Samsung
 distributor certificates must authorize the target TV.
+
+## LG webOS TV build and deployment
+
+The LG port is in progress (PLAN.md, Phase 9). It needs LG's CLI, as a dev
+dependency of the project (or installed globally with `-g`):
+
+```sh
+pnpm add -D @webos-tools/cli
+```
+
+The `pnpm package:lg` and `pnpm deploy:lg` scripts find the project's copy
+themselves; run the other `ares-*` commands below through `pnpm exec`.
+
+On the TV, sign in with an LG developer account, install the **Developer
+Mode** app from the LG Content Store, turn Dev Mode on (the TV restarts) and
+turn on Key Server. Dev Mode lasts a limited time; extend it in that app. Then
+set up the TV once, from this computer:
+
+```sh
+pnpm exec ares-setup-device -a <name> -i "host=<tv-ip>" -i "port=9922" -i "username=prisoner"
+pnpm exec ares-novacom --device <name> --getkey   # passphrase shown in the Developer Mode app
+```
+
+```sh
+pnpm package:lg
+pnpm deploy:lg <name>
+pnpm exec ares-inspect -d <name> --app tv.velio.app --open   # Web Inspector for the running app
+```
+
+No signing certificate is needed for Developer Mode installs.

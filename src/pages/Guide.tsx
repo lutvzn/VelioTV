@@ -13,7 +13,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen } from "../components/SideMenu";
+import { MENU_OPEN_WIDTH, MENU_WIDTH, menuOpen, menuShift } from "../components/SideMenu";
 import { catchupDays, inArchive } from "../data/catchup";
 import { DAY, type ProgrammeDetails, type StoredProgramme } from "../data/guideCodec";
 import type { Channel, ChannelGroup } from "../data/lineup";
@@ -50,6 +50,7 @@ import {
   profileData,
   reminders,
   settings,
+  sync,
 } from "../library";
 import { askPin } from "../pin";
 import { FAVOURITES } from "../live/groups";
@@ -124,6 +125,10 @@ const PAGE_WIDTH = 1920;
 const LEFT = 25;
 /** Where the words for no channels go, right of the menu, which stays then. */
 const EMPTY_X = MENU_WIDTH + 40;
+/** Where the ways to get started go, under the two lines of the hint. */
+const START_Y = 350;
+/** The empty page's text, right of the menu, which moves it aside as it opens. */
+const emptyX = () => EMPTY_X + menuShift();
 const PREVIEW: Rect = { x: LEFT, y: 25, width: 576, height: 324 };
 const DETAILS_X = LEFT + PREVIEW.width + 40;
 // The rows reach the bottom of the screen, and the grid its right edge.
@@ -625,8 +630,12 @@ export default () => {
       { defer: true },
     ),
   );
-  // With no channels (or while they load) the menu keeps the keys.
-  markEmpty(() => liveView().channels.length === 0);
+  // With no channels the menu keeps the keys, but for the ways to get
+  // started shown once they've loaded.
+  markEmpty(
+    () => liveView().channels.length === 0,
+    () => (lineup.loading() ? undefined : { x: emptyX(), y: START_Y }),
+  );
   // The menu and the groups show unless you're moving through the guide.
   const inGuide = () => focused() && area() === "grid";
   useWholeScreen(inGuide);
@@ -795,14 +804,22 @@ export default () => {
         when={liveView().channels.length > 0}
         fallback={
           <>
-            <Text x={EMPTY_X} y={50} fontSize={52} fontFamily={BOLD}>
+            <Text x={emptyX()} y={50} fontSize={52} fontFamily={BOLD}>
               {$t("menu.live")}
             </Text>
-            <Text x={EMPTY_X} y={170} fontSize={44}>
+            <Text x={emptyX()} y={170} fontSize={44}>
               {lineup.loading() ? $t("live.loading") : $t("live.empty")}
             </Text>
-            <Text x={EMPTY_X} y={240} width={1300} contain="width" fontSize={30} color={colors.textDim}>
-              {lineup.loading() ? "" : $t("live.emptyHint")}
+            <Text
+              x={emptyX()}
+              y={240}
+              width={1300}
+              maxLines={2}
+              contain="width"
+              fontSize={30}
+              color={colors.textDim}
+            >
+              {lineup.loading() ? "" : sync.signedIn() ? $t("start.hintSignedIn") : $t("start.hint")}
             </Text>
           </>
         }

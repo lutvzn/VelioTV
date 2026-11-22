@@ -29,6 +29,6 @@ VelioTV is a media center for TVs built with SolidTV (live TV from M3U and Xtrea
 
 ## Git and CI
 
-- The repo is on the user's own Forgejo, branch `master`. CI is `.forgejo/workflows/ci.yml`.
-- Don't query the Forgejo server; the user reports CI results.
+- The repo is on GitHub (`github.com/lutvzn/VelioTV`), branch `master`. CI is `.github/workflows/ci.yml` (GitHub Actions).
+- Don't query GitHub (no `gh` or API calls); the user reports CI results.
 - The user commits and pushes themselves. Don't commit unless asked. When asked for a commit name, suggest a short, plain title, such as "Add Samsung Phase 0 test tools and video-behind-UI support".
